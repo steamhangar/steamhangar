@@ -10,6 +10,7 @@ import dev.steamvault.app.net.model.JobSummary
 import dev.steamvault.app.net.model.ScheduleOut
 import dev.steamvault.app.net.model.SettingsOut
 import dev.steamvault.app.polling.PollingIntervals
+import dev.steamvault.app.repo.CacheRepository
 import dev.steamvault.app.repo.GamesRepository
 import dev.steamvault.app.repo.JobsRepository
 import dev.steamvault.app.repo.ScheduleRepository
@@ -67,7 +68,14 @@ class DownloadsController(
     /** WP RATE-TILE: `GET /v1/settings` for the upstream rate cap line on
      * "Current speed"; `null` = no line. */
     private val settingsRepository: SettingsRepository? = null,
+    /** WP ANDROID-DL-2: `POST /v1/cache/{appid}/repair` for the
+     * "Incomplete" rows' "Repair"; `null` = no Repair button. */
+    cacheRepository: CacheRepository? = null,
 ) {
+    /** WP ANDROID-DL-2: the Repair flow of the "Incomplete" rows
+     * (`RepairFlow.kt`), `null` without a cache repository. */
+    val repair: RepairFlow? = cacheRepository?.let { RepairFlow(it) }
+
     var jobs by mutableStateOf<List<JobSummary>>(emptyList())
         private set
     var games by mutableStateOf<List<GameSummary>>(emptyList())
@@ -337,6 +345,32 @@ class DownloadsController(
                 incompleteInFlight = null
             }
         }
+    }
+
+    /**
+     * WP ANDROID-DL-2 (web `startRowRepair`): "Repair" on a row short only of
+     * wrong-size chunks. The row's button reads "Checking…" while the dry run
+     * is in flight ([incompleteInFlight] = the appid; a row offers either
+     * "Verify" or "Repair", never both); the dialog takes over from there.
+     */
+    fun startRepair(scope: CoroutineScope, appid: Int, title: String) {
+        val flow = repair ?: return
+        if (incompleteInFlight != null) return
+        incompleteInFlight = appid
+        scope.launch {
+            try {
+                flow.start(appid, title, onToast = { showToast(it) }, onRefresh = ::refreshAfterRepair)
+            } finally {
+                incompleteInFlight = null
+            }
+        }
+    }
+
+    /** After a repair answer: the figure and the queue changed (web
+     * `store.refreshNow()`). */
+    suspend fun refreshAfterRepair() {
+        refreshGamesOnce()
+        refreshJobsOnce()
     }
 
     // ---- Pause all / Resume all (WP WEB-FEAT-5, web downloads.js runBulk) --

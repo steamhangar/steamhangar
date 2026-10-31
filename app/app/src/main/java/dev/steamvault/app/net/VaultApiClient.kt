@@ -25,6 +25,8 @@ import dev.steamvault.app.net.model.OwnedGamesRelayOut
 import dev.steamvault.app.net.model.PlayerSummariesRelayOut
 import dev.steamvault.app.net.model.PrefillJobRef
 import dev.steamvault.app.net.model.PrefillRequest
+import dev.steamvault.app.net.model.RepairOut
+import dev.steamvault.app.net.model.RepairRequest
 import dev.steamvault.app.net.model.ScheduleOut
 import dev.steamvault.app.net.model.SeriesOut
 import dev.steamvault.app.net.model.SettingsOut
@@ -257,6 +259,12 @@ class VaultApiClient(
 
     suspend fun gc(appid: Int, execute: Boolean = false): GcJobRef =
         post("/v1/cache/$appid/gc", GcRequest(execute))
+
+    /** WP ANDROID-DL-2: `POST /v1/cache/{appid}/repair` (WP CACHE-REPAIR-1).
+     * The dry run sends NO body (the server's default); only [execute] =
+     * true sends `{"execute": true}` -- the web's `api.repairCache` shape. */
+    suspend fun repairCache(appid: Int, execute: Boolean = false): RepairOut =
+        if (execute) post("/v1/cache/$appid/repair", RepairRequest(true)) else postEmpty("/v1/cache/$appid/repair")
 
     // ---- mapping ------------------------------------------------------
 

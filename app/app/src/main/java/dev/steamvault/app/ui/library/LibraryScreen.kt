@@ -152,6 +152,9 @@ fun LibraryScreen(
     onJobsSnapshot: (List<JobSummary>) -> Unit = {},
     onOpenSettings: () -> Unit = {},
     demoMode: Boolean,
+    /** WP ANDROID-DL-2: the detail sheet's "Show job" after a repair (the
+     * caller switches to Downloads and scrolls to the job). */
+    onShowJob: (Int) -> Unit = {},
 ) {
     val scope = rememberCoroutineScope()
     val resources = LocalContext.current.resources
@@ -374,6 +377,7 @@ fun LibraryScreen(
                 scope.launch { controller.refreshJobsOnce() }
             },
             demoMode = demoMode,
+            onShowJob = onShowJob,
         )
     }
 }

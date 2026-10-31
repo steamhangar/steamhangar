@@ -50,7 +50,6 @@ object CompletenessWording {
     const val VERIFY_LABEL = "Verify"
     const val VERIFY_HINT =
         "Re-checks every chunk of the current build against the cache and downloads what is missing."
-    const val DAMAGED_NOTE = "Damaged chunks — SteamHangar can't repair these yet."
     const val UNKNOWN_LINE = "Completeness unknown — not measured for the current build."
     const val COMPLETE_SUFFIX = "% complete — "
     const val ON_DISK = " on disk"
@@ -59,6 +58,8 @@ object CompletenessWording {
     const val ZERO_GB = "0.0 GB"
     const val GROUP_LINE_PREFIX = "With content packages: "
     const val GROUP_LINE_SUFFIX = "% complete"
+    const val UNMEASURED_PREFIX = " · not measured: "
+    const val UNMEASURED_PACKAGE = " package "
     const val DASH = " — "
 }
 
@@ -154,12 +155,27 @@ fun completenessLine(row: GameSummary): String {
     return "$pct${CompletenessWording.COMPLETE_SUFFIX}$amount$checked"
 }
 
+/**
+ * WP ANDROID-DL-2 (twin of GROUP-VERIFIED-1's web `unmeasuredNote`): the
+ * honesty suffix for a known group figure when the server reports
+ * `group_cache_unmeasured_depots` > 0 -- content-package depots with no
+ * usable measurement (typically an unowned package), left OUT of the group
+ * percentage and never counted as complete. Their bytes stay visible:
+ * " · not measured: 8 package depots (2.1 GB)". "" for 0 or negative.
+ */
+fun unmeasuredNote(row: GameSummary): String {
+    val n = row.group_cache_unmeasured_depots
+    if (n <= 0) return ""
+    val size = formatBytesGB(row.group_cache_unmeasured_bytes)?.let { " ($it)" }.orEmpty()
+    return "${CompletenessWording.UNMEASURED_PREFIX}$n${CompletenessWording.UNMEASURED_PACKAGE}${if (n == 1) "depot" else "depots"}$size"
+}
+
 /** The group line under it for a group row with a known group figure, else
- * null: "With content packages: 75% complete". */
+ * null: "With content packages: 75% complete", plus [unmeasuredNote]. */
 fun groupCompletenessLine(row: GameSummary?, isGroup: Boolean): String? {
     if (row == null || !isGroup) return null
     val pct = knownPct(row.group_cache_complete_pct) ?: return null
-    return "${CompletenessWording.GROUP_LINE_PREFIX}$pct${CompletenessWording.GROUP_LINE_SUFFIX}"
+    return "${CompletenessWording.GROUP_LINE_PREFIX}$pct${CompletenessWording.GROUP_LINE_SUFFIX}" + unmeasuredNote(row)
 }
 
 /** Whether the sheet shows the completeness block at all: a non-tool game

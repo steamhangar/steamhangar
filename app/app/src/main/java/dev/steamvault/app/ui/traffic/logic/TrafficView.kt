@@ -504,13 +504,15 @@ private fun LiveCurrentOut.asCurrent(): CurrentOut = CurrentOut(
  * 1 h [summary] with "Current speed" and "Loading now" taken from the live
  * tier when the live feed is `ok` (WP LIVE-DELAY-1: the persisted count lags
  * a sweep). An answer without `active_clients` (an older server) keeps the
- * summary's count.
+ * summary's count. WP NOW-LOADING-1: the "Loading now" rows
+ * ([ThroughputOut.loading_sources]) come from the live answer only.
  */
 fun mergeLive(summary: ThroughputOut, live: LiveOut): ThroughputOut {
     val current = live.current
-    val merged = summary.copy(range = LIVE_RANGE, live = false)
+    // WP NOW-LOADING-1: "what is loading now" only from the live answer.
+    val merged = summary.copy(range = LIVE_RANGE, live = false, loading_sources = null)
     if (current == null || feedState(live.event_feed) != FeedState.OK) return merged
-    val withCurrent = merged.copy(live = true, current = current.asCurrent())
+    val withCurrent = merged.copy(live = true, current = current.asCurrent(), loading_sources = live.loading_sources)
     val clients = live.active_clients ?: return withCurrent
     return withCurrent.copy(
         active_clients_now = clients,
@@ -537,6 +539,8 @@ fun mergeNow(throughput: ThroughputOut): ThroughputOut {
         merged = merged.copy(active_clients_now = clients, active_window_seconds = now.window_seconds)
     }
     now.runner_active?.let { merged = merged.copy(runner_active_now = it) }
+    // WP NOW-LOADING-1: the "Loading now" rows of the same window.
+    now.loading_sources?.let { merged = merged.copy(loading_sources = it) }
     return merged
 }
 

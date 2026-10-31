@@ -13,7 +13,9 @@ import dev.steamvault.app.net.model.LiveCurrentOut
 import dev.steamvault.app.net.model.LiveOut
 import dev.steamvault.app.net.model.LivePointOut
 import dev.steamvault.app.net.model.LoadingAppOut
+import dev.steamvault.app.net.model.LoadingJobOut
 import dev.steamvault.app.net.model.LoadingNowOut
+import dev.steamvault.app.net.model.LoadingSourceOut
 import dev.steamvault.app.net.model.RecentAppOut
 import dev.steamvault.app.net.model.RunnerTrafficOut
 import dev.steamvault.app.net.model.SeriesOut
@@ -53,6 +55,11 @@ import kotlin.math.sin
  * answer carries `active_clients` over its current-speed window, and
  * `GET /v1/throughput` carries the `now` block (GRAPH-RECENT-1), so the
  * pill reads "Downloading" while the demo job runs, as on the web.
+ *
+ * WP ANDROID-DL-2 (web demo, NOW-LOADING-1): `now.loading_sources` and the
+ * live answer's `loading_sources` name what loads ([demoLoadingSources]):
+ * the runner with the running demo job, the online demo PC loading the same
+ * game, and the loading agentless address -- the web demo's rows.
  *
  * WP D15-NAMES: client rows carry the server's name fields (`name`,
  * `name_addr`, `display_name`). Names are stored per address
@@ -142,6 +149,72 @@ private fun feed(nowMs: Long) = EventFeedOut(
     traffic_1m_since = iso(nowMs - 36 * 3_600_000L),
 )
 
+/**
+ * WP ANDROID-DL-2 (web `demoLoadingSources`): the "Loading now" rows for a
+ * total speed [totalBps] of which [runnerBps] is the runner's: the runner
+ * (with the running job, all MISS), the online agent loading that game
+ * (81 % from the cache) and the loading agentless address (92 %, no game),
+ * devices fastest first. Empty while nothing loads or without [snapshot].
+ */
+fun demoLoadingSources(totalBps: Double, runnerBps: Double, snapshot: DemoTrafficSnapshot?): List<LoadingSourceOut> {
+    if (snapshot == null || totalBps <= 0.0) return emptyList()
+    val rows = ArrayList<LoadingSourceOut>()
+    val job = snapshot.runningJobs.firstOrNull()
+    val jobName = job?.let { nameOf(it.appid, snapshot.games) }
+    fun game(bps: Double) = if (job != null) listOf(LoadingAppOut(job.appid, jobName, bps)) else emptyList()
+    if (runnerBps > 0.0) {
+        rows.add(
+            LoadingSourceOut(
+                kind = "runner",
+                key = "runner",
+                name = "Prefill runner",
+                addresses = listOf(DEMO_RUNNER_ADDRESS),
+                known = true,
+                bytes_per_second = runnerBps,
+                hit_bytes_per_second = 0.0,
+                miss_bytes_per_second = runnerBps,
+                apps = game(runnerBps),
+                unattributed_bytes_per_second = if (job != null) 0.0 else runnerBps,
+                phase = "download",
+                job = job?.let { LoadingJobOut(job_id = it.id, appid = it.appid, name = jobName, stop_request = null) },
+            ),
+        )
+    }
+    val clientBps = max(0.0, totalBps - runnerBps)
+    val addrBps = minOf(4.5 * MIB, clientBps * 0.25)
+    val agentBps = clientBps - addrBps
+    fun client(key: String, name: String, addr: String, bps: Double, hitShare: Double, apps: List<LoadingAppOut>) = LoadingSourceOut(
+        kind = "client",
+        key = key,
+        name = name,
+        addresses = listOf(addr),
+        known = true,
+        bytes_per_second = bps,
+        hit_bytes_per_second = bps * hitShare,
+        miss_bytes_per_second = bps * (1 - hitShare),
+        apps = apps,
+        unattributed_bytes_per_second = if (apps.isNotEmpty()) 0.0 else bps,
+        phase = null,
+        job = null,
+    )
+    val devices = ArrayList<LoadingSourceOut>()
+    val agent = snapshot.agents.firstOrNull { it.presence == "online" }
+    val agentAddr = agent?.source_addrs?.firstOrNull()
+    if (agent != null && agentAddr != null && agentBps > 0.0) {
+        val names = demoName(agentAddr, agent.client_id, snapshot.names)
+        devices.add(client("agent:${agent.client_id}", names.displayName, agentAddr, agentBps, 0.81, game(agentBps)))
+    }
+    if (addrBps > 0.0) {
+        val names = demoName(DEMO_LOADING_ADDRESS, DEMO_LOADING_ADDRESS, snapshot.names)
+        devices.add(client("addr:$DEMO_LOADING_ADDRESS", names.displayName, DEMO_LOADING_ADDRESS, addrBps, 0.92, emptyList()))
+    }
+    devices.sortByDescending { it.bytes_per_second ?: 0.0 }
+    return rows + devices
+}
+
+/** The agentless demo address that is loading right now (its Clients card). */
+internal const val DEMO_LOADING_ADDRESS = "10.0.0.61"
+
 /** `GET /v1/throughput/series` (demo). */
 fun demoSeries(range: String, nowMs: Long): SeriesOut {
     val t = tierFor(range)
@@ -183,7 +256,7 @@ fun demoSeries(range: String, nowMs: Long): SeriesOut {
  * the last minute, 15 s up to 5 minutes, then 1-minute points up to an
  * hour), with a deterministic wavy rate so the demo graph moves.
  */
-fun demoLive(nowMs: Long): LiveOut {
+fun demoLive(nowMs: Long, snapshot: DemoTrafficSnapshot? = null): LiveOut {
     val fineStart = floorTo(nowMs, 15) - 45_000L
     val mediumStart = floorTo(fineStart, 60) - 180_000L
     val coarseStart = mediumStart - 3_240_000L
@@ -242,6 +315,8 @@ fun demoLive(nowMs: Long): LiveOut {
         active_window_seconds = windowSeconds,
         active_window_minutes = 1,
         points = points,
+        // WP ANDROID-DL-2 (NOW-LOADING-1): the same figures as `current`, one row per source.
+        loading_sources = demoLoadingSources(bps, bps * 0.1, snapshot),
     )
 }
 
@@ -354,6 +429,8 @@ fun demoThroughput(range: String, snapshot: DemoTrafficSnapshot, nowMs: Long): T
             runner_active = jobs.isNotEmpty(),
             window_seconds = nowSeconds,
             live_since = iso(nowMs - 15 * 60_000L),
+            // WP ANDROID-DL-2 (NOW-LOADING-1): the same figures as `now.current`, one row per source.
+            loading_sources = demoLoadingSources(currentBps, runnerBps, snapshot),
         ),
     )
 }
@@ -448,7 +525,7 @@ fun demoClientsOverview(range: String, snapshot: DemoTrafficSnapshot, nowMs: Lon
             display_name = names.displayName,
         )
     }.toMutableList()
-    val loading = demoName("10.0.0.61", "10.0.0.61", snapshot.names)
+    val loading = demoName(DEMO_LOADING_ADDRESS, DEMO_LOADING_ADDRESS, snapshot.names)
     val old = demoName("10.0.0.63", "10.0.0.63", snapshot.names)
     // Two agentless addresses: a machine loading right now, and one last
     // active days ago (still listed: seen within 30 days).

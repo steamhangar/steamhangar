@@ -15,6 +15,7 @@ import dev.steamvault.app.net.model.JobMoveOut
 import dev.steamvault.app.net.model.JobSummary
 import dev.steamvault.app.net.model.LiveOut
 import dev.steamvault.app.net.model.MappingEntry
+import dev.steamvault.app.net.model.RepairOut
 import dev.steamvault.app.net.model.OwnedGamesRelayOut
 import dev.steamvault.app.net.model.PlayerSummariesRelayOut
 import dev.steamvault.app.net.model.PrefillJobRef
@@ -82,6 +83,7 @@ class DemoCacheRepository(private val state: DemoState) : CacheRepository {
     override suspend fun deletePlan(appid: Int): DeletePlanOut = state.deletePlan(appid)
     override suspend fun deleteWithPackages(appid: Int, members: List<Int>): CacheDeletionOut =
         state.deleteCacheWithPackages(appid, members)
+    override suspend fun repair(appid: Int, execute: Boolean): RepairOut = state.repair(appid, execute)
 }
 
 class DemoClientsRepository(private val state: DemoState) : ClientsRepository {
@@ -159,7 +161,7 @@ class DemoTrafficRepository(private val state: DemoState) : TrafficRepository {
 
     override suspend fun series(range: String): SeriesOut = demoSeries(range, Instant.now().toEpochMilli())
 
-    override suspend fun throughputLive(): LiveOut = demoLive(Instant.now().toEpochMilli())
+    override suspend fun throughputLive(): LiveOut = demoLive(Instant.now().toEpochMilli(), state.trafficSnapshot())
 
     override suspend fun clientsOverview(range: String): ClientsOverviewOut =
         demoClientsOverview(range, state.trafficSnapshot(), Instant.now().toEpochMilli())

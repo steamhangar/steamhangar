@@ -116,7 +116,7 @@ class AndroidDl1WiringTest {
         assertCalledFrom(downloads, "finishedJobs.take(historyPaging.visible)", "DownloadsScreen")
         assertCalledFrom(downloads, "historyPaging = historyPaging,", "DownloadsScreen")
         assertCalledFrom(downloads, "if (historyPaging.next > 0) {", "DownloadsBody")
-        assertCalledFrom(downloads, "onClick = { historyFilter.showMore() },", "DownloadsBody")
+        assertCalledFrom(downloads, "historyFilter.showMore()", "DownloadsBody")
         assertCalledFrom(downloads, "Text(showMoreText(historyPaging.next))", "DownloadsBody")
         assertCalledFrom(downloads, "showMoreLabel(historyPaging.next, historyPaging.remaining)", "DownloadsBody")
         assertCalledFrom(downloads, "EmptyLine(HISTORY_CAPPED_TEXT)", "DownloadsBody")

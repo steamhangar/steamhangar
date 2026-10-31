@@ -25,6 +25,8 @@ import dev.steamvault.app.net.model.JobMoveOut
 import dev.steamvault.app.net.model.JobSummary
 import dev.steamvault.app.net.model.MappingEntry
 import dev.steamvault.app.net.model.PrefillJobRef
+import dev.steamvault.app.net.model.RepairDepotOut
+import dev.steamvault.app.net.model.RepairOut
 import dev.steamvault.app.net.model.ScheduleOut
 import dev.steamvault.app.net.model.SettingInfoOut
 import dev.steamvault.app.net.model.SettingsOut
@@ -113,8 +115,7 @@ class DemoState private constructor(
                 cache_present_bytes = own?.presentBytes,
                 cache_complete_checked_at = own?.checkedAt,
                 cache_missing_chunks = own?.missingChunks,
-                group_cache_complete_pct = groupPct(game),
-            )
+            ).withGroupFields(groupFields(game))
         }
 
     @Synchronized
@@ -129,9 +130,21 @@ class DemoState private constructor(
             cache_present_bytes = own?.presentBytes,
             cache_complete_checked_at = own?.checkedAt,
             cache_missing_chunks = own?.missingChunks,
-            group_cache_complete_pct = groupPct(game),
-        )
+        ).let { detail ->
+            val g = groupFields(game)
+            detail.copy(
+                group_cache_complete_pct = g.pct,
+                group_cache_unmeasured_depots = g.unmeasuredDepots,
+                group_cache_unmeasured_bytes = g.unmeasuredBytes,
+            )
+        }
     }
+
+    private fun GameSummary.withGroupFields(g: DemoGroupFields): GameSummary = copy(
+        group_cache_complete_pct = g.pct,
+        group_cache_unmeasured_depots = g.unmeasuredDepots,
+        group_cache_unmeasured_bytes = g.unmeasuredBytes,
+    )
 
     /** WP CACHE-COMPLETE-1c: one row's `cache_complete_*` figure. */
     private data class DemoFigure(
@@ -163,23 +176,44 @@ class DemoState private constructor(
         )
     }
 
-    /** `group_cache_complete_pct` (D9): over the members with bytes on disk,
-     * unknown when any of them is; null on a grouped row and with nothing
-     * on disk. Demo approximation (as on the web): a depot shared inside the
-     * group is counted per member. */
-    private fun groupPct(game: DemoGame): Int? {
-        if (game.parentAppid != null) return null
+    /** The group figure and its unmeasured part (WP GROUP-VERIFIED-1). */
+    private data class DemoGroupFields(val pct: Int?, val unmeasuredDepots: Int, val unmeasuredBytes: Long)
+
+    /**
+     * `group_cache_complete_pct` (D9) and `group_cache_unmeasured_*` (WP
+     * GROUP-VERIFIED-1), twin of the web demo's `demoGroupFields` (WP
+     * ANDROID-DL-2): over the members with bytes on disk; the game itself is
+     * strict (unknown -> group unknown), a package with no figure is left
+     * out and reported as unmeasured (its depots and bytes); null on a
+     * grouped row and with nothing on disk. Demo approximation (as on the
+     * web): a depot shared inside the group is counted per member.
+     */
+    private fun groupFields(game: DemoGame): DemoGroupFields {
+        val none = DemoGroupFields(null, 0, 0L)
+        if (game.parentAppid != null) return none
         val members = (listOf(game) + games.filter { it.parentAppid == game.appid })
             .filter { m -> m.depots.sumOf { it.sizeBytes } > 0L }
-        if (members.isEmpty()) return null
+        if (members.isEmpty()) return none
         var expected = 0L
         var present = 0L
+        var measured = 0
+        var unmeasuredDepots = 0
+        var unmeasuredBytes = 0L
         for (m in members) {
-            val f = ownFigure(m) ?: return null
+            val f = ownFigure(m)
+            if (f == null) {
+                if (m === game) return none
+                unmeasuredDepots += m.depots.size
+                unmeasuredBytes += m.depots.sumOf { it.sizeBytes }
+                continue
+            }
+            measured += 1
             expected += f.expectedBytes
             present += f.presentBytes
         }
-        return ((100L * present) / expected).toInt()
+        if (measured == 0) return none
+        val pct = if (expected == 0L) 100 else ((100L * present) / expected).toInt()
+        return DemoGroupFields(pct, unmeasuredDepots, unmeasuredBytes)
     }
 
     /** WP TOOL-APPS-2d: the server's `group_size_bytes` rule
@@ -596,6 +630,75 @@ class DemoState private constructor(
         )
     }
 
+    /**
+     * WP ANDROID-DL-2: `POST /v1/cache/{appid}/repair` in demo mode (twin of
+     * the web demo route, WP CACHE-REPAIR-UI-1). Demo approximation: the
+     * damaged-only game's missing bytes stand for its wrong-size files, one
+     * file per started MiB, all in its first depot. Execute "deletes" them
+     * (present drops, missing grows), flags needs_force and queues the
+     * forced run, which completes the figure like any run with missing
+     * chunks ([finishPrefillJob]). Same 404 / 409 / 422 as the real route.
+     */
+    @Synchronized
+    fun repair(appid: Int, execute: Boolean): RepairOut {
+        val game = games.find { it.appid == appid }
+            ?: throw VaultApiError.NotFound("no such app in the demo library", 404, "Unknown appid $appid -- vault-api tracks no such app.")
+        if (game.depots.isEmpty()) {
+            throw VaultApiError.NotFound("nothing to repair", 404, "App $appid has no depot mappings, so there is nothing to repair.")
+        }
+        val c = game.completeness
+        val damagedBytes = if (c != null && c.damagedOnly) c.expectedBytes - c.presentBytes else 0L
+        val damagedChunks = ((damagedBytes + REPAIR_CHUNK_BYTES - 1) / REPAIR_CHUNK_BYTES).toInt()
+        val depotid = game.depots.first().depotid
+        val out = RepairOut(
+            appid = appid,
+            mode = if (execute) "execute" else "dry-run",
+            execute = execute,
+            damaged_chunks = damagedChunks,
+            damaged_bytes = damagedBytes,
+            depots = if (damagedChunks > 0) {
+                listOf(RepairDepotOut(depotid, "7340032000000000000", damagedChunks, damagedBytes))
+            } else {
+                emptyList()
+            },
+            unreadable_depots = emptyList(),
+            exceeds_cap = damagedChunks > REPAIR_MAX_FILES,
+            max_files = REPAIR_MAX_FILES,
+        )
+        if (damagedChunks == 0 || c == null) return out
+        val active = jobs.find { it.appid == appid && it.status in ACTIVE_JOB_STATUSES }
+        if (active != null) {
+            // The real client's path for a 409 (VaultApiError.forHttpStatus).
+            throw VaultApiError.forHttpStatus(
+                409,
+                "POST",
+                "/v1/cache/$appid/repair",
+                "Job ${active.id} for app $appid is ${active.status}; repairing chunk files under an active job would race it. " +
+                    "Retry once it has finished (poll GET /v1/jobs/{id}).",
+            )
+        }
+        if (!execute) return out
+        if (out.exceeds_cap) {
+            throw VaultApiError.Validation(
+                "too many damaged files",
+                422,
+                "$damagedChunks damaged chunk files exceed the repair cap of $REPAIR_MAX_FILES; nothing was deleted.",
+            )
+        }
+        // Re-measured like the real route: the deleted files are now missing,
+        // so the forced run fetches them.
+        game.completeness = DemoCompleteness(c.expectedBytes, maxOf(0L, c.presentBytes - damagedBytes), damagedChunks)
+        game.needsForce = true
+        val ref = enqueueOnePrefill(appid)
+        return out.copy(
+            removed_chunks = damagedChunks,
+            removed_bytes = damagedBytes,
+            job_id = ref.job_id,
+            job_status = ref.status,
+            job_deduplicated = ref.deduplicated,
+        )
+    }
+
     // ---- clients ------------------------------------------------------------
 
     @Synchronized
@@ -871,6 +974,11 @@ class DemoState private constructor(
         /** The server's package types (api/README.md "Grouped delete"). */
         private val DEMO_PACKAGE_TYPES = setOf("dlc", "config", "music", "video", "demo")
         private const val PREFILL_TICKS = 2
+
+        /** WP ANDROID-DL-2: the demo's repair rules (web demo route): one
+         * damaged file per started MiB, the server's cap of 2000 files. */
+        private const val REPAIR_CHUNK_BYTES = 1_048_576L
+        private const val REPAIR_MAX_FILES = 2000
         private const val GC_TICKS = 1
 
         /** WP AG-3 `GET /v1/schedule` fixture — a plausible, static
