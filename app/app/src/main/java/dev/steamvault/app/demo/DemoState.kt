@@ -668,9 +668,11 @@ class DemoState private constructor(
         if (damagedChunks == 0 || c == null) return out
         val active = jobs.find { it.appid == appid && it.status in ACTIVE_JOB_STATUSES }
         if (active != null) {
-            throw VaultApiError.Validation(
-                "job is active",
+            // The real client's path for a 409 (VaultApiError.forHttpStatus).
+            throw VaultApiError.forHttpStatus(
                 409,
+                "POST",
+                "/v1/cache/$appid/repair",
                 "Job ${active.id} for app $appid is ${active.status}; repairing chunk files under an active job would race it. " +
                     "Retry once it has finished (poll GET /v1/jobs/{id}).",
             )

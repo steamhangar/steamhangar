@@ -215,7 +215,7 @@ class LoadingNowTest {
     fun `the wire shape decodes, incl the runner's job and a pending stop`() {
         val json = """{"current":{"bytes_per_second":31457280.0,"runner_bytes_per_second":31457280.0},"active_clients":1,
             "runner_active":true,"window_seconds":17,"live_since":null,"loading_sources":[
-            {"kind":"runner","key":"runner","name":"Prefill runner","addresses":["172.20.0.5"],"known":true,
+            {"kind":"runner","key":"runner","name":"Prefill runner","addresses":["172.18.0.1"],"known":true,
              "bytes_per_second":31457280.0,"hit_bytes_per_second":0.0,"miss_bytes_per_second":31457280.0,
              "apps":[{"appid":275850,"name":"No Man's Sky","bytes_per_second":31457280.0}],
              "unattributed_bytes_per_second":0.0,"phase":"download",
