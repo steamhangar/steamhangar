@@ -3932,6 +3932,30 @@ below carry their own later dates, item 12 is the current one).
         keeps loading after cancel (the latter is a bug of its own). Build
         on GRAPH-RECENT-1 and RUNNER-SPLIT-1 (same data path, one window
         for "loading" and speed); Android parity with the Android packages.
+      - Android package cut (orchestrator, 2026-10-31, operator's yes to run
+        rc21 incl. Android): each package builds and tests only in GitHub CI
+        (push `wp/*`, app goldens via a `wp/<name>-goldens` branch).
+        - [ ] **ANDROID-DL-1** Downloads data path: default range live and
+          `active_clients` from the live answer (LIVE-DELAY-1 follow-up), the
+          `now` block for header/pill/"Loading now" on every range
+          (GRAPH-RECENT-1, LOADING-NOW-1), runner split with the "Verifying"
+          pill and runner HITs as cache in the graph (RUNNER-SPLIT-1), demo
+          watcher window 60 s, the subline/History count and first-10 +
+          "Show more" paging (DOWNLOADS-3 twin). Closes the two Android
+          Downloads boxes below.
+        - [ ] **ANDROID-DL-2** (after NOW-LOADING-1 is on main) the
+          "Loading now" source rows (twin of `loadingNowModel`), the Repair
+          flow (CACHE-REPAIR-UI-1 twin) and the GROUP-VERIFIED-1 S2 group
+          note incl. the demo `groupPct` alignment.
+        - [ ] **ANDROID-GAPS-1** (box below) Remove PC, SteamID in
+          onboarding, client rename, Delete history.
+        - [ ] **ANDROID-REDESIGN-1a** rc20 redesign follow-up, part 1:
+          Clients cards and Add a device tabs.
+        - [ ] **ANDROID-REDESIGN-1b** part 2: Library toolbar and detail
+          tabs, Settings section nav, Downloads layout, sheet motion where it
+          fits Material.
+        - [ ] **APP-NIGHT-GOLDEN-1** (box below) plus the MOBILE-1a nit
+          (test sample IPs to 192.168.1.x in Kotlin).
       - [ ] Android Downloads subline counts the plain job poll
         (`DownloadsScreen.kt` ~422-435, `partitionJobs(controller.jobs)`),
         not the ranged History list it shows; same "N in history" bug the
