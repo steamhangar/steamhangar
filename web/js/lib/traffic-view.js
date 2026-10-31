@@ -696,17 +696,21 @@ export function liveSeries(live) {
 
 /**
  * The header's figures for the live view: the persisted 1 h summary with
- * "Current speed" and "Loading now" taken from the live tier. `null` until the summary is in.
+ * "Current speed" and "Loading now" taken from the live tier, and (WP
+ * NOW-LOADING-1) `loading_sources`, what is loading, from the live answer
+ * only (`null` without it). `null` until the summary is in.
  * @param {object | null | undefined} summary `GET /v1/throughput?range=1h`
  * @param {object | null | undefined} live
  * @returns {object | null}
  */
 export function mergeLive(summary, live) {
   if (!summary) return null;
-  const merged = { ...summary, range: "live", live: false };
+  // WP NOW-LOADING-1: "what is loading now" only from the live answer.
+  const merged = { ...summary, range: "live", live: false, loading_sources: null };
   if (live && live.current && feedState(live) === "ok") {
     merged.current = live.current;
     merged.live = true;
+    if (Array.isArray(live.loading_sources)) merged.loading_sources = live.loading_sources;
     // "Loading now" from the ring too: the persisted count lags a sweep.
     if (Number.isInteger(live.active_clients)) {
       merged.active_clients_now = live.active_clients;
@@ -738,5 +742,7 @@ export function mergeNow(throughput) {
     merged.active_window_seconds = Number.isInteger(now.window_seconds) ? now.window_seconds : null;
   }
   if (typeof now.runner_active === "boolean") merged.runner_active_now = now.runner_active;
+  // WP NOW-LOADING-1: one row per source, from the same read as the figures.
+  if (Array.isArray(now.loading_sources)) merged.loading_sources = now.loading_sources;
   return merged;
 }
