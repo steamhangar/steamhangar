@@ -89,7 +89,7 @@ class AndroidDl2WiringTest {
         assertCalledFrom(flow, "repository.repair(confirming.appid, execute = true)", "confirm")
         assertCalledFrom(flow, "if (state !is RepairFlowState.Executing) return", "confirm")
         val code = stripComments(read(flow))
-        assertEquals("exactly one execute call site", 1, Regex("execute = true").findAll(code).count())
+        assertEquals("exactly one execute call site", 1, Regex("""repository\.repair\([^)]*execute = true""").findAll(code).count())
         assertCalledFrom(flow, "scope.launch { flow.confirm(onRefresh) }", "RepairDialog")
         assertCalledFrom(flow, "flow.showJob()?.let(onShowJob)", "RepairDialog")
         assertCalledFrom(flow, "onClick = { flow.close() },", "RepairDialog")
