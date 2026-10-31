@@ -3984,8 +3984,18 @@ below carry their own later dates, item 12 is the current one).
         - [ ] **ANDROID-REDESIGN-1a** rc20 redesign follow-up, part 1:
           Clients cards and Add a device tabs.
         - [ ] **ANDROID-REDESIGN-1b** part 2: Library toolbar and detail
-          tabs, Settings section nav, Downloads layout, sheet motion where it
-          fits Material.
+          tabs (Overview / Depots / Maintenance, Repair in the header and the
+          Maintenance tab), sheet motion where it fits Material, distinct
+          Downloads graph fills. (Split 2026-10-31: Settings nav and the
+          Downloads layout moved to 1c.)
+        - [ ] **ANDROID-REDESIGN-1c** part 3: Settings section nav (one
+          panel at a time behind a scrolling section strip, expert switch at
+          the end of About, nav labels from web `SECTIONS.nav` as a separate
+          Kotlin map, rewrite of `SettingsD16WiringTest`, drop the "PCs and
+          devices / Open Clients" row per the rc20 visual check) and the
+          Downloads layout (web hero: big number + pill + limit, graph, four
+          totals 2x2 via a twin model; then Active / Queue / History order
+          and spacing).
         - [x] **APP-NIGHT-GOLDEN-1** closed as works-as-designed (2026-10-31,
           reviewer-confirmed): the app is single-dark-theme on purpose
           (`Theme.kt`, no `values-night/`, mockup NOTES.md:117, app README);
