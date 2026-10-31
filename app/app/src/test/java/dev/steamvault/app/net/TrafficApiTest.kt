@@ -312,4 +312,78 @@ class TrafficApiTest {
             assertEquals(404, e.status)
         }
     }
+
+    @Test
+    fun `ANDROID-DL-1 -- throughput decodes the now block and the runner split, series points their runner HITs`() = runTest {
+        server.enqueue(
+            MockResponse().setBody(
+                """{"event_feed":$okFeed,"range":"1h","tier":"1m","bucket_seconds":60,"range_start":"2026-10-14T11:01:00Z",
+                "active_window_minutes":15,
+                "current":{"bytes_per_second":9437184.0,"window_start":"2026-10-14T11:50:00Z","window_end":"2026-10-14T11:59:00Z","window_seconds":487,
+                  "runner_bytes_per_second":9437184.0,"runner_hit_bytes_per_second":0.0,"runner_miss_bytes_per_second":9437184.0},
+                "active_clients_now":0,"runner_active_now":true,
+                "summary":null,"jobs":[],
+                "now":{"current":{"bytes_per_second":71303168.0,"runner_bytes_per_second":71303168.0,"runner_hit_bytes_per_second":71303168.0,
+                  "runner_miss_bytes_per_second":0.0,"window_start":"2026-10-14T11:59:43Z","window_end":"2026-10-14T12:00:00Z","window_seconds":17},
+                  "active_clients":1,"runner_active":true,"window_seconds":17,"live_since":"2026-10-14T11:45:00Z"}}""",
+            ),
+        )
+        val t = client.throughput("1h")
+        assertEquals("/v1/throughput?range=1h", server.takeRequest().path)
+        assertEquals(0.0, t.current!!.runner_hit_bytes_per_second!!, 0.0)
+        assertEquals(9437184.0, t.current!!.runner_miss_bytes_per_second!!, 0.0)
+        val now = t.now!!
+        assertEquals(71303168.0, now.current!!.runner_hit_bytes_per_second!!, 0.0)
+        assertEquals(1, now.active_clients)
+        assertEquals(true, now.runner_active)
+        assertEquals(17, now.window_seconds)
+        assertEquals("2026-10-14T11:45:00Z", now.live_since)
+        // Never on the wire: the app sets them in mergeLive / mergeNow.
+        assertFalse(t.live)
+        assertNull(t.active_window_seconds)
+
+        server.enqueue(
+            MockResponse().setBody(
+                """{"event_feed":$okFeed,"range":"1h","tier":"1m","bucket_seconds":60,"range_start":"2026-10-14T11:01:00Z",
+                "points":[{"t":"2026-10-14T11:01:00Z","bytes_served":1000,"hit_bytes":200,"miss_bytes":100,"requests":3,"runner_bytes":700,
+                  "bytes_per_second":16.7,"peak_bytes_per_second":16.7,"source":"live","runner_hit_bytes":400,"runner_miss_bytes":300},
+                  {"t":"2026-10-14T11:02:00Z","bytes_served":0,"hit_bytes":0,"miss_bytes":0,"requests":0,"runner_bytes":0,
+                  "bytes_per_second":0.0,"peak_bytes_per_second":0.0}]}""",
+            ),
+        )
+        val s = client.throughputSeries("1h")
+        assertEquals(400L, s.points.first().runner_hit_bytes)
+        assertEquals(300L, s.points.first().runner_miss_bytes)
+        // A server before rc21: the split is absent, not zero.
+        assertNull(s.points.last().runner_hit_bytes)
+        assertNull(s.points.last().runner_miss_bytes)
+    }
+
+    @Test
+    fun `ANDROID-DL-1 -- an rc20 throughput answer has no now block, the live answer its active_clients`() = runTest {
+        server.enqueue(
+            MockResponse().setBody(
+                """{"event_feed":$okFeed,"range":"6h","tier":"1m","bucket_seconds":60,"range_start":null,"active_window_minutes":15,
+                "current":{"bytes_per_second":1.0,"window_start":"a","window_end":"b","window_seconds":300,"runner_bytes_per_second":0.0},
+                "active_clients_now":2,"runner_active_now":false,"summary":null,"jobs":[]}""",
+            ),
+        )
+        val old = client.throughput("6h")
+        assertNull(old.now)
+        assertNull(old.current!!.runner_hit_bytes_per_second)
+        server.enqueue(
+            MockResponse().setBody(
+                """{"event_feed":$okFeed,"range":"live","tier":"live","watcher_window_seconds":60,"live_since":null,"range_start":null,
+                "current":{"bytes_per_second":1048576.0,"runner_bytes_per_second":0.0,"runner_hit_bytes_per_second":0.0,"runner_miss_bytes_per_second":0.0,
+                  "window_start":"a","window_end":"b","window_seconds":18},
+                "active_clients":3,"active_window_seconds":18,"active_window_minutes":1,"points":[]}""",
+            ),
+        )
+        val live = client.throughputLive()
+        assertEquals(60, live.watcher_window_seconds)
+        assertEquals(3, live.active_clients)
+        assertEquals(18, live.active_window_seconds)
+        assertEquals(1, live.active_window_minutes)
+        assertEquals(0.0, live.current!!.runner_hit_bytes_per_second!!, 0.0)
+    }
 }

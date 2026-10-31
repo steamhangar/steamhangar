@@ -37,6 +37,12 @@ data class CurrentOut(
     /** WP METRIC-AUDIT: the prefill runner's part of [bytes_per_second]
      * (which is ALL traffic); `null` from an older server. */
     val runner_bytes_per_second: Double? = null,
+    /** WP RUNNER-SPLIT-1: what the runner read from the cache (a verify);
+     * `null` from a server before rc21 (no split: the runner downloads). */
+    val runner_hit_bytes_per_second: Double? = null,
+    /** WP RUNNER-SPLIT-1: what the runner loaded from the internet; `null`
+     * from a server before rc21. */
+    val runner_miss_bytes_per_second: Double? = null,
 )
 
 @Serializable
@@ -110,9 +116,35 @@ data class ThroughputOut(
     val runner_active_now: Boolean? = null,
     val summary: SummaryOut? = null,
     val jobs: List<JobThroughputOut> = emptyList(),
+    /** WP GRAPH-RECENT-1 + LOADING-NOW-1: the "now" figures from the live
+     * tier (one window); `null` with the feed not `ok` or from a server
+     * before rc21. Read through `mergeNow`. */
+    val now: ThroughputNowOut? = null,
     /** WP GRAPH-LIVE: set by the app (never on the wire) when [current] was
-     * taken from the live tier (`mergeLive`); the header words follow it. */
+     * taken from the live tier (`mergeLive` / `mergeNow`); the header words
+     * follow it. */
     val live: Boolean = false,
+    /** WP LOADING-NOW-1: set by the app (never on the wire) when
+     * [active_clients_now] was read from the live tier; its window in
+     * seconds (the current-speed window). `null` = the swept count, whose
+     * window is [active_window_minutes]. */
+    val active_window_seconds: Int? = null,
+)
+
+/**
+ * WP GRAPH-RECENT-1 + LOADING-NOW-1: the `now` block of `GET /v1/throughput`
+ * (`ThroughputNowOut`): "Current speed", the runner flag and "Loading now"
+ * from the live tier, all over one window ([window_seconds]), on every range.
+ */
+@Serializable
+data class ThroughputNowOut(
+    val current: LiveCurrentOut? = null,
+    /** Client addresses served bytes in the window, the runner excluded. */
+    val active_clients: Int? = null,
+    /** The prefill runner was served bytes in the window. */
+    val runner_active: Boolean? = null,
+    val window_seconds: Int? = null,
+    val live_since: String? = null,
 )
 
 @Serializable
@@ -128,6 +160,12 @@ data class SeriesPointOut(
     val runner_bytes: Long = 0,
     val bytes_per_second: Double = 0.0,
     val peak_bytes_per_second: Double = 0.0,
+    /** WP RUNNER-SPLIT-1: the runner's cache reads (HIT) in [runner_bytes];
+     * `null` from a server before rc21 (all runner bytes count as from the
+     * internet then). */
+    val runner_hit_bytes: Long? = null,
+    /** WP RUNNER-SPLIT-1: the runner's MISS bytes; `null` from an older server. */
+    val runner_miss_bytes: Long? = null,
 )
 
 @Serializable
@@ -155,6 +193,9 @@ data class LivePointOut(
     val runner_bytes: Long = 0,
     val bytes_per_second: Double = 0.0,
     val peak_bytes_per_second: Double = 0.0,
+    /** WP RUNNER-SPLIT-1: as on [SeriesPointOut]; `null` from an older server. */
+    val runner_hit_bytes: Long? = null,
+    val runner_miss_bytes: Long? = null,
 )
 
 /** WP GRAPH-LIVE: the live "Current speed" (a window of 15-20 seconds). */
@@ -165,6 +206,9 @@ data class LiveCurrentOut(
     val window_start: String? = null,
     val window_end: String? = null,
     val window_seconds: Int? = null,
+    /** WP RUNNER-SPLIT-1: as on [CurrentOut]; `null` from an older server. */
+    val runner_hit_bytes_per_second: Double? = null,
+    val runner_miss_bytes_per_second: Double? = null,
 )
 
 /**
@@ -182,6 +226,15 @@ data class LiveOut(
     val live_since: String? = null,
     val range_start: String? = null,
     val current: LiveCurrentOut? = null,
+    /** WP LIVE-DELAY-1 / LOADING-NOW-1: client addresses served bytes in the
+     * [current] window, counted from the ring (the runner excluded); `null`
+     * with the feed disabled or from an older server. */
+    val active_clients: Int? = null,
+    /** WP LOADING-NOW-1: the window of [active_clients] in seconds. */
+    val active_window_seconds: Int? = null,
+    /** Deprecated since rc21 (the window in whole minutes); kept for an
+     * rc20 server, which sends only this one. */
+    val active_window_minutes: Int? = null,
     val points: List<LivePointOut> = emptyList(),
 )
 

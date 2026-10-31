@@ -511,10 +511,6 @@
         <item quantity="one">%1$d queued</item>
         <item quantity="other">%1$d queued</item>
     </plurals>
-    <plurals name="downloads_idle_history">
-        <item quantity="one">Idle · %1$d in history</item>
-        <item quantity="other">Idle · %1$d in history</item>
-    </plurals>
 
     <!-- Game detail sheet (WP 4b.6). Job-control button labels/notes are
          deliberately NOT duplicated here - the sheet reuses
