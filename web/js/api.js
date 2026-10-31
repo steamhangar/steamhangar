@@ -233,6 +233,11 @@ export const api = {
   deleteCacheWithPackages: (appid, members) =>
     request("DELETE", `/v1/cache/${appid}`, { params: { with_packages: "true", members: members.join(",") } }),
   gc: (appid, execute = false) => request("POST", `/v1/cache/${appid}/gc`, { body: { execute } }),
+  // WP CACHE-REPAIR-UI-1 (api/README.md, WP CACHE-REPAIR-1): no body is the
+  // server's dry run; only an explicit `execute: true` sends the literal
+  // boolean that deletes.
+  repairCache: (appid, execute = false) =>
+    request("POST", `/v1/cache/${appid}/repair`, execute === true ? { body: { execute: true } } : {}),
   cacheSummary: () => request("GET", "/v1/cache/summary"),
   clients: () => request("GET", "/v1/clients"),
   // WP D15c: the Clients page and the Downloads header (WP D15b endpoints).

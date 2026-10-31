@@ -444,6 +444,8 @@ body.selecting .view-root{ padding-bottom:var(--bulk-room); }
   max-height:196px; overflow-y:auto; scrollbar-width:none;
 }
 .cflist::-webkit-scrollbar{ display:none; }
+/* WP CACHE-REPAIR-UI-1: the repair confirm hides an empty depot list. */
+.cflist[hidden]{ display:none; }
 .cflist li{
   display:flex; flex-wrap:wrap; align-items:baseline; gap:2px 8px;
   padding:7px 9px; border-radius:var(--r-s);

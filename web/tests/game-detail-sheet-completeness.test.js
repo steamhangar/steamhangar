@@ -89,7 +89,8 @@ test("MUTATION TARGET -- block: damaged-only shows the note and no Verify (empty
   withFakeDom(({ buildCompletenessSection }) => {
     const damaged = row({ cache_complete_pct: 99, cache_missing_chunks: 0 });
     const el = buildCompletenessSection(damaged, null, [], async () => {});
-    assert.equal(role(el, "damaged-note").textContent, "Damaged chunks — SteamHangar can't repair these yet.");
+    // WP CACHE-REPAIR-UI-1: the note now points at Repair.
+    assert.equal(role(el, "damaged-note").textContent, "Damaged chunks — Verify can't fix these, Repair can.");
     assert.equal(role(el, "verify"), null);
   }));
 
@@ -142,7 +143,8 @@ test("MUTATION TARGET -- wiring: render() builds the block after the facts with 
   const r = body("function buildMaintenancePanel(gameLike, group) {");
   assert.match(
     r,
-    /const verifyIds = currentVerifyAppids\(\);\s*const completeness = buildCompletenessSection\(\s*gameLike,\s*group,\s*verifyIds,\s*\(\) => startSheetVerify\(verifyIds\),\s*sheetTitle\(gameLike\),\s*\);\s*if \(completeness\) panel\.append\(buildMaintenanceBox\("Verify", \[completeness\]\)\);/,
+    // WP CACHE-REPAIR-UI-1: plus the Repair handler while showsRepair holds.
+    /const verifyIds = currentVerifyAppids\(\);\s*const title = sheetTitle\(gameLike\);\s*const completeness = buildCompletenessSection\(\s*gameLike,\s*group,\s*verifyIds,\s*\(\) => startSheetVerify\(verifyIds\),\s*title,\s*currentShowsRepair\(gameLike\) \? \(\) => startSheetRepair\(gameLike\.appid, title\) : null,\s*\);\s*if \(completeness\) panel\.append\(buildMaintenanceBox\("Verify", \[completeness\]\)\);/,
   );
   assert.match(body("function render() {"), /const maintenance = buildMaintenancePanel\(gameLike, group\);/);
 });

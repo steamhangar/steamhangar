@@ -2331,6 +2331,7 @@ const JOB_MOVE_RE = /^\/v1\/jobs\/(\d+)\/move$/;
 const GAME_ID_RE = /^\/v1\/games\/(\d+)$/;
 const CACHE_APPID_RE = /^\/v1\/cache\/(\d+)$/;
 const GC_APPID_RE = /^\/v1\/cache\/(\d+)\/gc$/;
+const REPAIR_APPID_RE = /^\/v1\/cache\/(\d+)\/repair$/;
 const DELETE_PLAN_RE = /^\/v1\/cache\/(\d+)\/delete-plan$/;
 
 // ---------------------------------------------------------------------
@@ -2978,6 +2979,67 @@ export async function demoRequest(method, path, { body, params } = {}) {
       failed: [],
       total_bytes_freed: totalBytesFreed,
     };
+  }
+
+  // WP CACHE-REPAIR-UI-1: POST /v1/cache/{appid}/repair (api WP
+  // CACHE-REPAIR-1). Demo approximation: the damaged-only game's missing
+  // bytes stand for its wrong-size files, one file per started MiB, all in
+  // its first depot. Execute "deletes" them (present drops, missing grows),
+  // flags needs_force and queues the forced run, which completes the figure
+  // like any run with missing chunks (advanceJob).
+  if (method === "POST" && (m = path.match(REPAIR_APPID_RE))) {
+    const appid = Number(m[1]);
+    const game = findGame(appid);
+    if (!game) throw notFound(`Unknown appid ${appid} -- vault-api tracks no such app.`);
+    if (game.depots.length === 0) throw notFound(`App ${appid} has no depot mappings, so there is nothing to repair.`);
+    if (body != null) {
+      const unknown = Object.keys(body).filter((k) => k !== "execute");
+      if (unknown.length) throw validationError(`unrecognised field(s): ${unknown.join(", ")}`);
+      if ("execute" in body && typeof body.execute !== "boolean") throw validationError("'execute' must be a literal JSON boolean.");
+    }
+    const execute = !!(body && body.execute);
+    const c = game._demoCompleteness;
+    const damagedBytes = c && c.missing === 0 && c.present < c.expected ? c.expected - c.present : 0;
+    const damagedChunks = Math.ceil(damagedBytes / 1_048_576);
+    const depotid = game.depots[0].depotid;
+    const out = {
+      appid,
+      mode: execute ? "execute" : "dry-run",
+      execute,
+      damaged_chunks: damagedChunks,
+      damaged_bytes: damagedBytes,
+      depots: damagedChunks ? [{ depotid, manifestid: "7340032000000000000", damaged_chunks: damagedChunks, damaged_bytes: damagedBytes }] : [],
+      unreadable_depots: [],
+      exceeds_cap: damagedChunks > 2000,
+      max_files: 2000,
+      removed_chunks: 0,
+      removed_bytes: 0,
+      skipped: {},
+      job_id: null,
+      job_status: null,
+      job_deduplicated: null,
+    };
+    if (damagedChunks === 0) return out;
+    const active = jobs.find((j) => j.appid === appid && ["queued", "running", "paused"].includes(j.status));
+    if (active) {
+      throw conflict(
+        `Job ${active.id} for app ${appid} is ${active.status}; repairing chunk files under an active job would race it. ` +
+          "Retry once it has finished (poll GET /v1/jobs/{id}).",
+      );
+    }
+    if (!execute) return out;
+    if (out.exceeds_cap) throw validationError(`${damagedChunks} damaged chunk files exceed the repair cap of 2000; nothing was deleted.`);
+    // Re-measured like the real route: the deleted files are now missing,
+    // so the forced run fetches them.
+    game._demoCompleteness = { expected: c.expected, present: Math.max(0, c.present - damagedBytes), missing: damagedChunks };
+    game.needs_force = true;
+    const ref = enqueuePrefillForAppid(appid);
+    out.removed_chunks = damagedChunks;
+    out.removed_bytes = damagedBytes;
+    out.job_id = ref.job_id;
+    out.job_status = ref.status;
+    out.job_deduplicated = ref.deduplicated;
+    return out;
   }
 
   // WP 4a.4: POST /v1/cache/{appid}/gc — mirrors api/README.md's

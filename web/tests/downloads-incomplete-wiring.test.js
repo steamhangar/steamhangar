@@ -162,7 +162,9 @@ test("MUTATION PIN: hidden while nothing is incomplete; shown with rows, figures
     assert.equal(nowBtn(s, 20).textContent, "Verify");
     assert.equal(nowBtn(s, 20).getAttribute("aria-label"), "Verify — Aurora");
     assert.equal(nowBtn(s, 40), null, "MUTATION PIN: no Complete now for damaged-only");
-    assert.equal(rowFor(s, 40).querySelector('[data-role="damaged-note"]').textContent, "Damaged chunks — SteamHangar can't repair these yet.");
+    // WP CACHE-REPAIR-UI-1: "Repair" instead, with the note saying why.
+    assert.equal(rowFor(s, 40).querySelector('[data-role="damaged-note"]').textContent, "Damaged chunks — Verify can't fix these, Repair can.");
+    assert.equal(rowFor(s, 40).querySelector('[data-role="repair"]').textContent, "Repair");
     assert.equal(allBtn(s).textContent, "Verify all");
     assert.equal(allBtn(s).getAttribute("aria-label"), "Verify all 2 games", "counts only the completable rows");
 

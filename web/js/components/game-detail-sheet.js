@@ -82,12 +82,22 @@
  * (`buildCompletenessSection`) shows the game's own figure ("80% complete —
  * 3.2 of 4.0 GB on disk · checked …", or "Completeness unknown …"), the
  * group's figure for a game with content packages, the damaged-chunks note
- * for a game short only of wrong-size chunks, and "Verify": `POST
+ * for a game short only of wrong-size chunks with its "Repair" (WP
+ * CACHE-REPAIR-UI-1, below), and "Verify": `POST
  * /v1/prefill/verify` for the game (and its packages) — a forced prefill
  * that fetches whatever is missing. A verify that lands on a RUNNING job
  * only forces the next run, and the toast says "verifies on the next run"
  * (`summarizeVerifyStart`). The block's shape is part of the structural
  * key; its line texts are patched.
+ *
+ * **Repair (WP CACHE-REPAIR-UI-1).** A game short only of wrong-size chunks
+ * (lib/cache-repair.js `showsRepair`) gets "Repair" in the Maintenance
+ * tab's Verify box and in the header row: components/repair-flow.js runs the
+ * dry run, the confirm with its counts and the execute; its "Show job"
+ * goes to Downloads with the queued job scrolled into view
+ * (views/downloads.js `highlightJob`, loaded on demand so this module does
+ * not pull the Downloads view into its tests). Closing the sheet closes the
+ * repair dialog too.
  *
  * **Content packages (WP TOOL-APPS-2c, ADR-0022 §3).** For a game with
  * content packages (the same grouping the Library uses, lib/content-groups.js
@@ -118,7 +128,7 @@ import { STATUS_LABEL } from "./status-icon.js";
 import { createPill } from "./pill.js";
 import { createSheetDialog } from "./sheet-dialog.js";
 import { buildHeaderArt } from "./header-art.js";
-import { onViewChange } from "../router.js";
+import { onViewChange, navigateTo } from "../router.js";
 import { formatBytesGB, formatTimestamp } from "../lib/format.js";
 import { coverCandidates, fallbackHues, wireCoverFallback } from "../lib/cover-art.js";
 import {
@@ -145,11 +155,12 @@ import {
   verifyAppids,
   summarizeVerifyStart,
   describeVerifyStartError,
-  DAMAGED_NOTE,
   VERIFY_HINT,
   VERIFY_LABEL,
   verifyAriaLabel,
 } from "../lib/cache-completeness.js";
+import { showsRepair, repairNoteFor, repairAriaLabel, REPAIR_LABEL, REPAIR_HINT } from "../lib/cache-repair.js";
+import { startRepair, closeRepair } from "./repair-flow.js";
 import {
   sheetUpdateAppids,
   summarizeUpdateStart,
@@ -719,6 +730,7 @@ function closeDetail() {
   // pushed on lib/modal-stack.js's stack, i.e. #app stuck `inert` forever.
   closeDeleteConfirm();
   dismissGcExecuteConfirm();
+  closeRepair(); // WP CACHE-REPAIR-UI-1: same reason
   dialog.close();
 }
 
@@ -787,7 +799,9 @@ function completenessStructuralPart(kind) {
   const header = cardDisplay(currentUpdateRow() || gameLike, kind, STATUS_LABEL).key;
   const damaged = isDamagedOnly(gameLike) ? 1 : 0;
   const groupLine = groupCompletenessLine(group) ? 1 : 0;
-  return `${header}|${currentVerifyAppids().join(",")}|${damaged}|${groupLine}`;
+  // WP CACHE-REPAIR-UI-1: the Repair offer and the note that goes with it.
+  const repair = `${showsRepair(gameLike, state.jobs) ? 1 : 0}:${repairNoteFor(gameLike)}`;
+  return `${header}|${currentVerifyAppids().join(",")}|${damaged}|${groupLine}|${repair}`;
 }
 
 /** The structural-key part for the update state: "" when nothing shows. */
@@ -1022,9 +1036,12 @@ async function startSheetUpdate(appids) {
  * @param {number[]} appids what "Verify" sends; no button when empty
  * @param {() => Promise<void>} onVerify
  * @param {string} title the game's name, for the button's accessible name
+ * @param {(() => Promise<void>) | null} [onRepair] WP CACHE-REPAIR-UI-1:
+ *   the "Repair" handler, or null for no button (the caller decides with
+ *   lib/cache-repair.js `showsRepair`)
  * @returns {HTMLElement | null}
  */
-export function buildCompletenessSection(gameLike, group, appids, onVerify, title) {
+export function buildCompletenessSection(gameLike, group, appids, onVerify, title, onRepair = null) {
   if (!showsCompletenessBlock(gameLike, group)) return null;
   const wrap = document.createElement("div");
   wrap.className = "facts detail-block";
@@ -1040,13 +1057,15 @@ export function buildCompletenessSection(gameLike, group, appids, onVerify, titl
     groupLine.textContent = groupText;
     wrap.appendChild(groupLine);
   }
-  if (isDamagedOnly(gameLike)) {
+  const damagedText = repairNoteFor(gameLike);
+  if (damagedText) {
     const note = document.createElement("div");
     note.className = "tx-partial";
     note.dataset.role = "damaged-note";
-    note.textContent = DAMAGED_NOTE;
+    note.textContent = damagedText;
     wrap.appendChild(note);
   }
+  if (onRepair) wrap.append(...buildRepairControls(title, onRepair));
   if (appids.length) {
     const btn = document.createElement("button");
     btn.type = "button";
@@ -1066,6 +1085,49 @@ export function buildCompletenessSection(gameLike, group, appids, onVerify, titl
     wrap.append(btn, hint);
   }
   return wrap;
+}
+
+/**
+ * WP CACHE-REPAIR-UI-1: the Verify box's "Repair" button and its hint (the
+ * hint is the button's description, like Verify's).
+ * @returns {HTMLElement[]}
+ */
+function buildRepairControls(title, onRepair) {
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "btn sm detail-block";
+  btn.dataset.role = "repair";
+  btn.textContent = REPAIR_LABEL;
+  btn.setAttribute("aria-label", repairAriaLabel(title));
+  const hint = document.createElement("p");
+  hint.className = "hint detail-verify-hint";
+  hint.id = "detail-repair-hint";
+  hint.dataset.role = "repair-hint";
+  hint.textContent = REPAIR_HINT;
+  btn.setAttribute("aria-describedby", hint.id);
+  btn.addEventListener("click", () => withButtonBusy(btn, onRepair));
+  return [btn, hint];
+}
+
+/** WP CACHE-REPAIR-UI-1: "Repair" from the sheet — the dry run, then the
+ * shared dialog (components/repair-flow.js). "Show job" goes to Downloads,
+ * which closes this sheet, and scrolls to the queued job. */
+function startSheetRepair(appid, title) {
+  return startRepair({
+    appid,
+    title,
+    onShowJob: (jobId) => {
+      navigateTo("downloads");
+      import("../views/downloads.js").then((m) => m.highlightJob(jobId)).catch(() => {});
+    },
+    // A successful repair re-renders the sheet without the Repair button.
+    focusFallback: () => (state.appid != null ? closeBtn : null),
+  });
+}
+
+/** Whether the sheet offers "Repair" for the open game right now. */
+function currentShowsRepair(gameLike) {
+  return !!gameLike && showsCompletenessBlock(gameLike, currentGroup()) && showsRepair(gameLike, state.jobs);
 }
 
 /** `POST /v1/prefill/verify` for the sheet's "Verify" (WP
@@ -1179,11 +1241,12 @@ function buildFactLines(gameLike) {
     cacheLine.textContent = completenessLine(gameLike);
     cacheLine.classList.add("long");
     grid.appendChild(cell);
-    if (isDamagedOnly(gameLike)) {
+    const damagedText = repairNoteFor(gameLike); // WP CACHE-REPAIR-UI-1
+    if (damagedText) {
       const damaged = document.createElement("div");
       damaged.className = "tx-partial";
       damaged.dataset.role = "cache-damaged";
-      damaged.textContent = DAMAGED_NOTE;
+      damaged.textContent = damagedText;
       facts.appendChild(damaged);
     }
   }
@@ -1670,12 +1733,14 @@ function buildMaintenancePanel(gameLike, group) {
   panel.dataset.role = "maintenance";
 
   const verifyIds = currentVerifyAppids();
+  const title = sheetTitle(gameLike);
   const completeness = buildCompletenessSection(
     gameLike,
     group,
     verifyIds,
     () => startSheetVerify(verifyIds),
-    sheetTitle(gameLike),
+    title,
+    currentShowsRepair(gameLike) ? () => startSheetRepair(gameLike.appid, title) : null,
   );
   if (completeness) panel.append(buildMaintenanceBox("Verify", [completeness]));
 
@@ -1753,6 +1818,8 @@ function render() {
   acts.className = "gd-acts";
   const headVerify = buildHeadVerifyButton(gameLike);
   if (headVerify) acts.append(headVerify);
+  const headRepair = buildHeadRepairButton(gameLike);
+  if (headRepair) acts.append(headRepair);
   const actions = buildPrimaryAction(gameLike, trackedJob);
   if (actions) acts.append(actions);
   // WP MOBILE-1b: as a bottom sheet the actions sit in the footer.
@@ -1893,6 +1960,26 @@ function buildHeadVerifyButton(gameLike) {
   btn.setAttribute("aria-label", verifyAriaLabel(sheetTitle(gameLike)));
   btn.title = VERIFY_HINT;
   btn.addEventListener("click", () => withButtonBusy(btn, () => startSheetVerify(ids)));
+  return btn;
+}
+
+/**
+ * WP CACHE-REPAIR-UI-1: the header's "Repair", offered when the Maintenance
+ * tab's Verify box offers it (same flow, components/repair-flow.js).
+ * @param {object} gameLike
+ * @returns {HTMLButtonElement | null}
+ */
+function buildHeadRepairButton(gameLike) {
+  if (!currentShowsRepair(gameLike)) return null;
+  const title = sheetTitle(gameLike);
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "btn";
+  btn.dataset.role = "head-repair";
+  btn.textContent = REPAIR_LABEL;
+  btn.setAttribute("aria-label", repairAriaLabel(title));
+  btn.title = REPAIR_HINT;
+  btn.addEventListener("click", () => withButtonBusy(btn, () => startSheetRepair(gameLike.appid, title)));
   return btn;
 }
 

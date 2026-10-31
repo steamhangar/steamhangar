@@ -3985,3 +3985,32 @@ browser:
   script run in a `vm` context, argument parsing, Chromium lookup, and
   `tools/web-shot-fonts.conf` being well-formed XML with a Liberation alias
   for every family in `theme.css`'s `--ui` / `--mono` stacks.
+
+## WP CACHE-REPAIR-UI-1 (2026-10-31) — "Repair" for damaged-only games (web)
+
+"Repair" (`POST /v1/cache/{appid}/repair`, api WP CACHE-REPAIR-1) on a
+row whose own figure is known and below 100 with `cache_missing_chunks ===
+0`, no tool app, not known as not owned (the row says why instead) and no
+active prefill of its own (`lib/cache-repair.js` `showsRepair`). Places:
+the Downloads "Incomplete" row (instead of the old "can't repair these
+yet" note, which now reads "Damaged chunks — Verify can't fix these, Repair
+can."), the detail sheet's Maintenance Verify box and its header.
+`components/repair-flow.js`: dry run (no body) -> confirm (alertdialog,
+counts per depot, "Cancel" focused) -> `{"execute": true}` only from
+"Delete and repair" -> result with "Show job" (Downloads scrolls to and
+focuses the job's Queue row or Active card, `highlightJob`). A failed dry
+run is a toast; a failed execute keeps the dialog with a `role="alert"`
+line. Demo: the route on Starfall Legion.
+
+Tests: `cache-repair.test.js` 14 (visibility rule, THE pin of the flow
+reducer, answers tied to their flow's token, error wording per status,
+every string, the api 409 twin, the demo route), `repair-flow.test.js` 13
+(dialog flow, focus and its fallback, Escape, error paths, cap, no-op
+execute, the `.btn.primary` class outside `.kit`, late dry-run / failed /
+execute answers of a closed flow never reaching the next one),
+`downloads-repair-wiring.test.js` 4 (row button, end to end with the real
+store, "Show job" focus, 409 toast, a "Show job" that lands before its job
+is on screen; a live job is not pre-expanded in History),
+`game-detail-sheet-repair.test.js` 5 (builder and wiring pins). Updated
+pins: the damaged note text in `downloads-incomplete-wiring.test.js` and
+`game-detail-sheet-completeness.test.js`, the Maintenance call shape.
