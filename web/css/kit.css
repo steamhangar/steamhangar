@@ -1075,7 +1075,7 @@
 .kit .lib-chips[hidden], .kit .lib-chips .fchip[hidden], .kit .lib-tools[hidden], .kit .lib-tools .ico[hidden],
 .kit .sortg[hidden], .kit .sortg button[hidden], .kit .segi[hidden], .kit .segi button[hidden], .kit .lib-filtersbtn[hidden],
 .kit .lib-meta.pop[hidden], .kit .lib-meta-cats[hidden], .kit .lib-meta-unk[hidden], .kit .lib-stat[hidden],
-.kit .grid[hidden], .kit .card[hidden], .kit .card .pick[hidden], .kit .card .rowname[hidden], .kit .card .meta[hidden],
+.kit .grid[hidden], .kit .card[hidden], .kit .card .pick[hidden], .kit .grid.selecting .card .pick[hidden], .kit .card .rowname[hidden], .kit .card .meta[hidden],
 .kit .stt[hidden], .kit .stt .icnact[hidden], .kit .card .meta .size[hidden], .kit .card .pkgline[hidden],
 .kit .card .pkgfail[hidden], .kit .card .updbadge[hidden], .kit .card .instbadge[hidden], .kit .card .playbadge[hidden],
 .kit .grid.list .card .rowname[hidden], .kit .grid.list .card .meta[hidden], .kit .grid.list .card .meta .size[hidden],
@@ -1269,6 +1269,6 @@
 .kit .ad-foot{ padding-bottom:calc(14px + env(safe-area-inset-bottom, 0px)); }
 
 /* [hidden] guards for the display-styled classes of this block. */
-.kit .gd-compact[hidden], .kit.game-detail .gd-foot .gd-acts[hidden], .kit.game-detail .gd-foot .jobacts[hidden],
+.kit .gd-compact[hidden], .kit.game-detail.compact .gd-compact[hidden], .kit.game-detail .gd-foot .gd-acts[hidden], .kit.game-detail .gd-foot .jobacts[hidden],
 .kit .hs-head[hidden], .kit .hs-head .hic[hidden], .kit .hs-head .hinfo[hidden],
 .kit .ad-open-here[hidden], .kit .ad-other[hidden], .kit .ad-other-t[hidden], .kit .ad-pairbox .ad-qrreveal[hidden]{ display:none; }

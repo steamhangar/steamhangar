@@ -100,7 +100,10 @@ after(() => {
 });
 
 const tick = (ms = 10) => new Promise((r) => setTimeout(r, ms));
-async function until(pred, label, timeoutMs = 2000) {
+// The waits below poll for a condition (an event that has happened), so the
+// deadline only bounds a real hang. 2 s was hit under full-suite load on CI;
+// 10 s keeps a hang visible without failing a slow but correct run.
+async function until(pred, label, timeoutMs = 10_000) {
   const start = Date.now();
   while (!pred()) {
     if (Date.now() - start > timeoutMs) throw new Error(`timed out waiting for: ${label}`);
@@ -215,6 +218,15 @@ test("MUTATION TARGET: Remove on a card opens the shared confirm, sends one DELE
   await until(() => !confirmIsOpen() && keys(s).length === 1, "card dropped after the refresh");
   assert.deepEqual(server.deletes, ["desk-pc"]);
   assert.deepEqual(keys(s), ["addr:192.168.1.77"]);
+  // The page hides a removed id (module state, up to 30 s) until the store's
+  // agent snapshot no longer lists it, and only clears that while the page
+  // is mounted. Ending before that tick left "desk-pc" hidden for the next
+  // tests ("timed out waiting for: cards", then a null card). The snapshot
+  // is set before the subscribers run, so this also means the page saw it.
+  await until(
+    () => Array.isArray(store.snapshot("clients")) && !store.snapshot("clients").some((a) => a.client_id === "desk-pc"),
+    "the store's agent snapshot caught up with the delete",
+  );
 });
 
 test("MUTATION TARGET: a failed Remove keeps the card and shows the error on it", async () => {
