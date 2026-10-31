@@ -1,6 +1,15 @@
 package dev.steamvault.app.ui.library
 
 import androidx.compose.foundation.background
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withStyle
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.semantics.stateDescription
+import dev.steamvault.app.ui.library.logic.MetaFilter
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -258,11 +267,20 @@ fun LibraryScreen(
         }
     }
 
+    // WP ANDROID-REDESIGN-1b (web LIBRARY-2 "Filters" popover): the metadata
+    // panel folds out under the toolbar; closed on open of the screen.
+    var filtersOpen by rememberSaveable { mutableStateOf(false) }
+
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { Text(stringResource(R.string.library_title)) },
-                actions = { CheckUpdatesAction(controller = controller, scope = scope) },
+                // WP ANDROID-REDESIGN-1b (web LIBRARY-2 split button): "Check
+                // updates", then the menu with "Check & update all cached games".
+                actions = {
+                    CheckUpdatesAction(controller = controller, scope = scope)
+                    CheckUpdatesMenu(controller = controller, scope = scope)
+                },
             )
         },
         containerColor = MaterialTheme.colorScheme.background,
@@ -317,15 +335,25 @@ fun LibraryScreen(
                 controller = controller,
                 activeSort = activeSort,
                 sortKeys = availableSortKeys(sortAvailable, hasMeta),
-            )
-            CheckAndUpdateRow(controller = controller, scope = scope)
-            FilterChipsRow(counts = counts, selectedKey = controller.filterKey, onSelect = { controller.filterKey = it })
+                filters = if (hasMeta) {
+                    FiltersButtonState(
+                        open = filtersOpen,
+                        activeCount = activeFilterCount(controller.metaFilter),
+                        onToggle = { filtersOpen = !filtersOpen },
+                    )
+                } else {
+                    null
+                },
+            ) {
+                FilterChipsRow(counts = counts, selectedKey = controller.filterKey, onSelect = { controller.filterKey = it })
+            }
             if (hasMeta) {
                 LibraryMetaPanel(
                     filter = controller.metaFilter,
                     games = controller.games,
                     unknownExcluded = metaResult.unknownExcluded,
                     onChange = { controller.selectMetaFilter(it) },
+                    visible = filtersOpen,
                 )
             }
             OwnedNoticeRow(
@@ -382,38 +410,88 @@ fun LibraryScreen(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+/**
+ * WP ANDROID-REDESIGN-1b (web LIBRARY-1/2, docs/design/rc20/library.html):
+ * the Library toolbar in Material terms. The web's one wrapping row
+ * (search, chips with counts, sort select + icon-only direction button,
+ * layout segments, Filters, Select) becomes, at phone width: the search
+ * field, the chips ([chips], a sideways strip), then one wrapping row of
+ * controls. Spoken labels stay what they were.
+ */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun LibraryToolbar(controller: LibraryController, activeSort: LibrarySort, sortKeys: List<LibrarySortKey>) {
-    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            OutlinedTextField(
-                value = controller.query,
-                onValueChange = { controller.query = it },
-                modifier = Modifier.weight(1f),
-                singleLine = true,
-                placeholder = { Text(stringResource(R.string.library_search_hint)) },
-                trailingIcon = {
-                    if (controller.query.isNotEmpty()) {
-                        TextButton(onClick = { controller.query = "" }) {
-                            Text(stringResource(R.string.library_search_clear))
-                        }
-                    }
-                },
-            )
-        }
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
+private fun LibraryToolbar(
+    controller: LibraryController,
+    activeSort: LibrarySort,
+    sortKeys: List<LibrarySortKey>,
+    filters: FiltersButtonState?,
+    chips: @Composable () -> Unit,
+) {
+    Column(modifier = Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 4.dp)) {
+        OutlinedTextField(
+            value = controller.query,
+            onValueChange = { controller.query = it },
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+            singleLine = true,
+            shape = RoundedCornerShape(12.dp),
+            placeholder = { Text(stringResource(R.string.library_search_hint)) },
+            leadingIcon = { SearchGlyph() },
+            trailingIcon = {
+                if (controller.query.isNotEmpty()) {
+                    val clear = stringResource(R.string.library_search_clear)
+                    IconButton(
+                        onClick = { controller.query = "" },
+                        modifier = Modifier.semantics { contentDescription = clear },
+                    ) { Text("✕") }
+                }
+            },
+        )
+        Spacer(Modifier.height(6.dp))
+        chips()
+        FlowRow(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-            // WP D12: the toggle takes the row's free width (its three
-            // segments share it equally) and the select button keeps its own.
+            SortRow(
+                active = activeSort,
+                keys = sortKeys,
+                onSelect = { controller.selectSort(it) },
+            )
             LayoutToggle(
                 current = controller.layout,
                 onSelect = { controller.selectLayout(it) },
-                modifier = Modifier.weight(1f).padding(end = 4.dp),
+                modifier = Modifier.align(Alignment.CenterVertically),
             )
+            if (filters != null) {
+                val spoken = if (filters.activeCount > 0) {
+                    stringResource(R.string.library_filters_active, filters.activeCount)
+                } else {
+                    stringResource(R.string.library_filters_button)
+                }
+                val filterState = if (filters.open) {
+                    stringResource(R.string.library_filters_expanded)
+                } else {
+                    stringResource(R.string.library_filters_collapsed)
+                }
+                OutlinedButton(
+                    onClick = filters.onToggle,
+                    contentPadding = PaddingValues(horizontal = 14.dp),
+                    modifier = Modifier
+                        .align(Alignment.CenterVertically)
+                        .semantics {
+                            contentDescription = spoken
+                            stateDescription = filterState
+                        },
+                ) {
+                    Text(stringResource(R.string.library_filters_button), maxLines = 1)
+                    Text(
+                        " ${filters.activeCount}",
+                        maxLines = 1,
+                        color = if (filters.activeCount > 0) MaterialTheme.colorScheme.primary else VaultColors.Dim2,
+                    )
+                }
+            }
             val selectModeDescription = if (controller.selecting) {
                 stringResource(R.string.library_select_mode_exit)
             } else {
@@ -421,38 +499,45 @@ private fun LibraryToolbar(controller: LibraryController, activeSort: LibrarySor
             }
             IconButton(
                 onClick = { if (controller.selecting) controller.exitSelect() else controller.enterSelect() },
-                modifier = Modifier.semantics { contentDescription = selectModeDescription },
+                modifier = Modifier
+                    .align(Alignment.CenterVertically)
+                    .semantics { contentDescription = selectModeDescription },
             ) {
-                // Plain glyphs, not an icon-pack lookup (same house style as
-                // ui/nav/NavIcons.kt) -- the real a11y label lives on the
-                // IconButton's own semantics above, not on this glyph text.
-                Text(if (controller.selecting) "✕" else "☐")
+                SelectGlyph(
+                    on = controller.selecting,
+                    modifier = Modifier,
+                )
             }
         }
-        SortRow(
-            active = activeSort,
-            keys = sortKeys,
-            onSelect = { controller.selectSort(it) },
-        )
     }
 }
 
+/** The Filters button's state (WP ANDROID-REDESIGN-1b), `null` without metadata. */
+private data class FiltersButtonState(val open: Boolean, val activeCount: Int, val onToggle: () -> Unit)
+
+/** How many metadata filters are set (web `paintFiltersButton` count). */
+private fun activeFilterCount(f: MetaFilter): Int =
+    f.categories.size + f.genres.size + listOfNotNull(f.minRating, f.yearFrom, f.yearTo).size
+
 /**
  * WP LIB-SORT: the sort option (dropdown) plus the ascending/descending
- * toggle. Labels are the web twin's literals (`LibrarySortWording`,
- * `LibrarySortKey.label`). Persistence goes through the controller.
+ * toggle, now an icon-only button (web LIBRARY-2 `.sortg`) whose spoken
+ * label names the direction. Labels are the web twin's literals
+ * (`LibrarySortWording`, `LibrarySortKey.label`). Persistence goes through
+ * the controller.
  */
 @Composable
 private fun SortRow(active: LibrarySort, keys: List<LibrarySortKey>, onSelect: (LibrarySort) -> Unit) {
     var menuOpen by remember { mutableStateOf(false) }
     val directionLabel = LibrarySortWording.directionLabel(active)
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
         Box {
-            OutlinedButton(onClick = { menuOpen = true }) {
+            OutlinedButton(
+                onClick = { menuOpen = true },
+                contentPadding = PaddingValues(start = 14.dp, end = 8.dp),
+            ) {
                 Text("${LibrarySortWording.SORT_LABEL}: ${active.key.label}", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                ChevronDownGlyph(Modifier.padding(start = 2.dp))
             }
             DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                 for (key in keys) {
@@ -467,54 +552,55 @@ private fun SortRow(active: LibrarySort, keys: List<LibrarySortKey>, onSelect: (
             }
         }
         val toggleDescription = "${LibrarySortWording.SORT_LABEL} direction: $directionLabel"
-        TextButton(
+        IconButton(
             onClick = {
                 val next = if (active.dir == SortDirection.ASC) SortDirection.DESC else SortDirection.ASC
                 onSelect(LibrarySort(active.key, next))
             },
             modifier = Modifier.semantics { contentDescription = toggleDescription },
         ) {
-            Text((if (active.dir == SortDirection.ASC) "↑ " else "↓ ") + directionLabel)
+            SortDirectionGlyph(descending = active.dir == SortDirection.DESC)
         }
     }
 }
 
 /**
- * "Check & update all cached games" (Phase 4c, WP 4c-app) — the Android
- * twin of `web/js/views/library.js`'s header row below `.lib-head`
- * (WP 4c-web, `docs/WORKPACKAGES.md`'s recorded divergence: the frozen
- * round-7 mockup has no equivalent control at all, since Phase 4c is itself
- * post-mockup scope). **Stated precisely, not as "full-width" (Opus review
- * on this WP):** this row's `fillMaxWidth()` CONTAINER spans the width, but
- * the button inside it is end-aligned and only as wide as its own label —
- * unlike web's own button, which IS `width:100%`. Placement also differs
- * from web's (web: tools → check row → search; Android: search →
- * layout/select → check row). A SEPARATE control from this screen's poll
- * loops — never folded into a pull-to-refresh gesture, which this screen
- * does not have to begin with (no `SwipeRefresh`/`pull-refresh` anywhere in
- * `ui/library/`); the same "a refresh gesture that can start downloads is a
- * trap" rule the web divergence entry records applies here too, it is just
- * satisfied by omission rather than by an explicit carve-out.
+ * "Check & update all cached games" (Phase 4c, WP 4c-app), since WP
+ * ANDROID-REDESIGN-1b the menu entry of the split "Check updates" button in
+ * the top app bar (web LIBRARY-2 `.split` + "More update actions" menu)
+ * instead of its own row. A SEPARATE control from this screen's poll loops
+ * -- never folded into a pull-to-refresh gesture ("a refresh gesture that
+ * can start downloads is a trap", web divergence entry). Shown also on a
+ * vault without update checks, where it is the only entry.
  *
  * The wording/error/in-flight logic itself lives in
- * `ui/library/logic/CachedPrefillOutcome.kt` — this composable only paints
+ * `ui/library/logic/CachedPrefillOutcome.kt` -- this composable only paints
  * [LibraryController.checkAndUpdateBusy] and forwards the click.
  */
 @Composable
-private fun CheckAndUpdateRow(controller: LibraryController, scope: CoroutineScope) {
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
-        horizontalArrangement = Arrangement.End,
-    ) {
-        OutlinedButton(
-            enabled = !controller.checkAndUpdateBusy,
-            onClick = { controller.checkAndUpdateCachedGames(scope) },
-        ) {
-            Text(
-                if (controller.checkAndUpdateBusy) {
-                    stringResource(R.string.library_check_update_button_busy)
-                } else {
-                    stringResource(R.string.library_check_update_button)
+private fun CheckUpdatesMenu(controller: LibraryController, scope: CoroutineScope) {
+    var open by remember { mutableStateOf(false) }
+    val more = stringResource(R.string.library_more_update_actions)
+    Box {
+        IconButton(
+            onClick = { open = true },
+            modifier = Modifier.semantics { contentDescription = more },
+        ) { ChevronDownGlyph() }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            DropdownMenuItem(
+                enabled = !controller.checkAndUpdateBusy,
+                text = {
+                    Text(
+                        if (controller.checkAndUpdateBusy) {
+                            stringResource(R.string.library_check_update_button_busy)
+                        } else {
+                            stringResource(R.string.library_check_update_button)
+                        },
+                    )
+                },
+                onClick = {
+                    open = false
+                    controller.checkAndUpdateCachedGames(scope)
                 },
             )
         }
@@ -524,7 +610,7 @@ private fun CheckAndUpdateRow(controller: LibraryController, scope: CoroutineSco
 /**
  * "Check updates" (WP UPD-3, twin of web UPD-2; D14): asks the vault
  * whether cached games have a newer build -- downloads nothing (that stays
- * [CheckAndUpdateRow]'s job). In the top app bar so the header gains no
+ * [CheckUpdatesMenu]'s job). In the top app bar so the header gains no
  * height and the check row no width (D12 is a separate package). Hidden on
  * a vault without the feature ([LibraryController.updatesSupported]).
  */
@@ -557,25 +643,13 @@ private fun LayoutToggle(
     onSelect: (LibraryLayout) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    // WP D12: short visible labels ("2 col") on a single line -- the full
-    // names ("2-column grid") wrapped to two lines at 360 dp / font 1.3.
-    // The full name stays the spoken label (contentDescription).
+    // WP ANDROID-REDESIGN-1b (web LIBRARY-2 `.segi`): icon-only segments
+    // (D12's short "2 col" labels are gone); the full name is the spoken
+    // label (contentDescription).
     val options = listOf(
-        LayoutOption(
-            LibraryLayout.GRID_2,
-            stringResource(R.string.library_layout_grid2_short),
-            stringResource(R.string.library_layout_grid2),
-        ),
-        LayoutOption(
-            LibraryLayout.GRID_3,
-            stringResource(R.string.library_layout_grid3_short),
-            stringResource(R.string.library_layout_grid3),
-        ),
-        LayoutOption(
-            LibraryLayout.LIST,
-            stringResource(R.string.library_layout_list),
-            stringResource(R.string.library_layout_list),
-        ),
+        LayoutOption(LibraryLayout.GRID_2, stringResource(R.string.library_layout_grid2)),
+        LayoutOption(LibraryLayout.GRID_3, stringResource(R.string.library_layout_grid3)),
+        LayoutOption(LibraryLayout.LIST, stringResource(R.string.library_layout_list)),
     )
     SingleChoiceSegmentedButtonRow(modifier = modifier) {
         options.forEachIndexed { index, option ->
@@ -584,20 +658,14 @@ private fun LayoutToggle(
                 onClick = { onSelect(option.layout) },
                 shape = SegmentedButtonDefaults.itemShape(index = index, count = options.size),
                 modifier = Modifier.semantics { contentDescription = option.description },
-                label = {
-                    Text(
-                        text = option.label,
-                        maxLines = 1,
-                        softWrap = false,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                },
+                icon = {},
+                label = { LayoutGlyph(option.layout) },
             )
         }
     }
 }
 
-private data class LayoutOption(val layout: LibraryLayout, val label: String, val description: String)
+private data class LayoutOption(val layout: LibraryLayout, val description: String)
 
 @Composable
 private fun FilterChipsRow(
@@ -622,7 +690,21 @@ private fun FilterChipsRow(
             FilterChip(
                 selected = chip.key == selectedKey,
                 onClick = { onSelect(chip.key) },
-                label = { Text("${chip.label} ${chip.count}", maxLines = 1, softWrap = false) },
+                // WP ANDROID-REDESIGN-1b (web `.chip small`): the count in the
+                // dim caption tone after the word; one spoken label.
+                label = {
+                    Text(
+                        text = buildAnnotatedString {
+                            append(chip.label)
+                            append(" ")
+                            withStyle(SpanStyle(color = if (chip.key == selectedKey) Color.Unspecified else VaultColors.Dim2)) {
+                                append(chip.count.toString())
+                            }
+                        },
+                        maxLines = 1,
+                        softWrap = false,
+                    )
+                },
             )
         }
     }

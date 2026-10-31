@@ -1,5 +1,10 @@
 package dev.steamvault.app.ui.library
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -64,8 +69,12 @@ fun LibraryMetaPanel(
     games: List<GameSummary>,
     unknownExcluded: Int,
     onChange: (MetaFilter) -> Unit,
+    visible: Boolean = true,
 ) {
     val genres = remember(games) { availableGenres(games) }
+    // WP ANDROID-REDESIGN-1b: folded behind the toolbar's "Filters" button
+    // (web LIBRARY-2 popover); expands and collapses with Material motion.
+    AnimatedVisibility(visible = visible, enter = expandVertically() + fadeIn(), exit = shrinkVertically() + fadeOut()) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -155,6 +164,19 @@ fun LibraryMetaPanel(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+            )
+        }
+    }
+    }
+    // Folded, the panel still says when filters hide games of unknown metadata.
+    if (!visible) {
+        val folded = unknownNote(unknownExcluded)
+        if (folded.isNotEmpty()) {
+            Text(
+                text = folded,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 2.dp),
             )
         }
     }
