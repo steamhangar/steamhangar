@@ -116,7 +116,11 @@ class AndroidGaps1WiringTest {
     fun `MUTATION PIN -- onboarding step 2 shows the SteamID64 field, Look up and the save note`() {
         assertCalledFrom(onboarding, "LibrarySteamIdSection(controller, scope)", "SteamStep")
         assertCalledFrom(onboarding, "value = controller.libraryIdInput", "LibrarySteamIdSection")
-        assertCalledFrom(onboarding, "scope.launch { controller.lookupLibrarySteamId() }", "LibrarySteamIdSection")
+        assertCalledFrom(onboarding, "controller.startLibraryLookup(scope)", "LibrarySteamIdSection")
+        // Review must-fix: Finish waits for a running Look up and its save
+        // (web finishOnce awaits pendingLookup), and is disabled meanwhile.
+        assertCalledFrom(onboarding, "controller.finishAfterPendingLookup()\n                        onFinished()", "OnboardingNav")
+        assertCalledFrom(onboarding, "enabled = controller.canAdvance && !controller.finishing", "OnboardingNav")
         assertCalledFrom(onboarding, "LookupResult(controller.libraryLookup, controller.libraryLookupError)", "LibrarySteamIdSection")
         assertCalledFrom(onboarding, "text = saveNoteText(note)", "LibrarySteamIdSection")
     }

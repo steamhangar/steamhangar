@@ -167,13 +167,16 @@ private fun OnboardingNav(
         Button(
             onClick = {
                 if (controller.step == OnboardingStep.DONE) {
-                    controller.finish()
-                    onFinished()
+                    // WP ANDROID-GAPS-1: a running Look up and its save finish first.
+                    scope.launch {
+                        controller.finishAfterPendingLookup()
+                        onFinished()
+                    }
                 } else {
                     controller.next()
                 }
             },
-            enabled = controller.canAdvance,
+            enabled = controller.canAdvance && !controller.finishing,
             modifier = Modifier.weight(1f),
         ) {
             Text(
@@ -358,7 +361,7 @@ private fun LibrarySteamIdSection(controller: OnboardingController, scope: kotli
         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, autoCorrectEnabled = false),
         modifier = Modifier.fillMaxWidth(),
     )
-    OutlinedButton(onClick = { scope.launch { controller.lookupLibrarySteamId() } }) {
+    OutlinedButton(onClick = { controller.startLibraryLookup(scope) }) {
         Text(
             stringResource(
                 if (controller.libraryLookupBusy) R.string.onboarding_library_lookup_busy else R.string.onboarding_library_lookup,

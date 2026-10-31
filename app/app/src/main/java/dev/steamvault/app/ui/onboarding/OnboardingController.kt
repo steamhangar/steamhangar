@@ -32,6 +32,9 @@ import dev.steamvault.app.ui.settings.logic.LibrarySteamIdSavePlan
 import dev.steamvault.app.ui.settings.logic.PREVIEW_LIMIT
 import dev.steamvault.app.ui.settings.logic.describeLookupError
 import dev.steamvault.app.ui.settings.logic.planLibrarySteamIdSave
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
 
 /** Which connectivity profile the user picked in step 1 -- see `net/profile/ConnectivityProfile.kt`. */
 enum class ConnectivityProfileChoice { SYSTEM_VPN, PUBLIC_DOMAIN }
@@ -157,7 +160,7 @@ class OnboardingController(
         identityState = identityRepository.state()
         loginError = null
         libraryIdInput = ""
-        libraryLookupBusy = false
+        // libraryLookupBusy is NOT reset: only the running lookup clears it.
         libraryLookup = null
         libraryLookupError = null
         librarySave = null
@@ -293,7 +296,9 @@ class OnboardingController(
 
     /** Fills an EMPTY SteamID64 field: the vault's stored library id first
      * (web: "the stored library id, never over something already typed"),
-     * else this device's own Steam sign-in. Filling saves nothing. */
+     * else this device's own Steam sign-in. The sign-in fallback is an
+     * app-only addition on purpose (the web has no Steam sign-in, so it
+     * pre-fills only the stored id). Filling saves nothing. */
     private fun prefillLibraryId() {
         if (libraryIdInput.isNotBlank()) return
         val stored = steamIdFromSettings(lastVerifiedSettings)
@@ -349,6 +354,37 @@ class OnboardingController(
             librarySave = saveLibrarySteamId(client, steamId)
         } finally {
             libraryLookupBusy = false
+        }
+    }
+
+    /** The lookup started by [startLibraryLookup], if one runs. */
+    private var lookupJob: Job? = null
+
+    /** "Look up" from the screen: runs [lookupLibrarySteamId] and keeps its
+     * job, so [finishAfterPendingLookup] can wait for it. */
+    fun startLibraryLookup(scope: CoroutineScope) {
+        if (libraryLookupBusy) return
+        lookupJob = scope.launch { lookupLibrarySteamId() }
+    }
+
+    /** Finish was tapped and is waiting for a running lookup; Finish is
+     * disabled meanwhile so a second tap cannot start a second finish. */
+    var finishing by mutableStateOf(false)
+        private set
+
+    /**
+     * Finish (web `finishOnce`: `if (pendingLookup) await pendingLookup;`):
+     * waits for a running Look up and its save, so leaving onboarding never
+     * cuts the relay/settings/PATCH requests off, then [finish]es.
+     */
+    suspend fun finishAfterPendingLookup() {
+        if (finishing) return
+        finishing = true
+        try {
+            lookupJob?.join()
+            finish()
+        } finally {
+            finishing = false
         }
     }
 

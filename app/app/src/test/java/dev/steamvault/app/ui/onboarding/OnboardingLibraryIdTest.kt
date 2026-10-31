@@ -8,6 +8,8 @@ import dev.steamvault.app.repo.SteamLoginResult
 import dev.steamvault.app.storage.InMemoryCredentialStore
 import dev.steamvault.app.ui.settings.LibraryIdMessage
 import dev.steamvault.app.ui.settings.logic.LibraryLookupError
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
@@ -17,12 +19,14 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
+import java.util.concurrent.TimeUnit
 
 /**
  * WP ANDROID-GAPS-1: onboarding step 2 stores the SteamID64 as the vault's
  * library id (web onboarding WEB-FEAT-2): Look up asks the relay first, and
  * only an answered lookup is saved, through the same plan as Settings' Save.
  */
+@OptIn(ExperimentalCoroutinesApi::class)
 class OnboardingLibraryIdTest {
 
     private class Strings : OnboardingStrings {
@@ -166,6 +170,53 @@ class OnboardingLibraryIdTest {
         c.lookupLibrarySteamId()
         assertEquals(LibrarySaveNote.Saved(STORED), c.librarySave)
         assertEquals(5, server.requestCount)
+    }
+
+    @Test
+    fun `MUTATION PIN -- Finish waits for a running Look up and its save before persisting`() = runTest(UnconfinedTestDispatcher()) {
+        val store = InMemoryCredentialStore()
+        val c = OnboardingController(store, Identity(), Strings())
+        c.start(OnboardingMode.FIRST_RUN)
+        c.baseUrlText = server.url("/").toString().trimEnd('/')
+        c.apiKeyText = "k"
+        server.enqueue(MockResponse().setBody("""{"status":"ok"}"""))
+        server.enqueue(MockResponse().setBody(settingsJson("")))
+        c.testConnection()
+        c.libraryIdInput = STORED
+        // A slow relay: the lookup is still running when Finish is tapped.
+        server.enqueue(
+            MockResponse().setBody("""{"configured":true,"game_count":1,"games":[{"appid":10,"name":"Alpha"}]}""")
+                .setBodyDelay(400, TimeUnit.MILLISECONDS),
+        )
+        server.enqueue(MockResponse().setBody("""{"configured":true,"players":[]}"""))
+        server.enqueue(MockResponse().setBody(settingsJson("")))
+        server.enqueue(MockResponse().setBody(settingsJson(STORED)))
+        c.startLibraryLookup(this)
+        assertTrue(c.libraryLookupBusy)
+
+        c.finishAfterPendingLookup()
+
+        assertEquals("finish must not return before the save", LibrarySaveNote.Saved(STORED), c.librarySave)
+        assertEquals("k", store.getApiKey())
+        assertEquals(6, server.requestCount) // health, settings, relay x2, settings, PATCH
+        assertTrue(!c.finishing)
+    }
+
+    @Test
+    fun `start does not clear the busy flag of a running lookup`() = runTest(UnconfinedTestDispatcher()) {
+        val c = tested()
+        c.libraryIdInput = STORED
+        server.enqueue(
+            MockResponse().setBody("""{"configured":true,"game_count":0,"games":[]}""").setBodyDelay(300, TimeUnit.MILLISECONDS),
+        )
+        server.enqueue(MockResponse().setBody("""{"configured":true,"players":[]}"""))
+        server.enqueue(MockResponse().setBody(settingsJson(STORED)))
+        c.startLibraryLookup(this)
+        assertTrue(c.libraryLookupBusy)
+        c.start(OnboardingMode.RECONNECT)
+        assertTrue(c.libraryLookupBusy)
+        c.finishAfterPendingLookup()
+        assertTrue(!c.libraryLookupBusy)
     }
 
     private companion object {

@@ -4072,12 +4072,15 @@ for it.
 - **Onboarding stores the SteamID64** (web WEB-FEAT-2): step 2 has "Your
   Steam library" with a SteamID64 field, pre-filled (never over typed
   text) from the stored setting after the verified test, else from this
-  device's Steam sign-in. "Look up" asks the vault's relay (game count,
+  device's Steam sign-in (an app-only fallback on purpose: the web has no
+  Steam sign-in and pre-fills only the stored id). "Look up" asks the vault's relay (game count,
   first names, persona) and only an answered lookup is saved, through the
   same `planLibrarySteamIdSave` as Settings' Save (a JSON string, only a
   real change is sent). The note says "Saved ..." or "Not saved: <reason>
   The lookup above still worked." (read-only vault, env-only setting,
-  server without the setting, server error).
+  server without the setting, server error). Finish waits for a running
+  Look up and its save (web `finishOnce` awaits `pendingLookup`) and is
+  disabled meanwhile, so leaving onboarding never cuts the save off.
 
 All dialogs take the SCREEN's coroutine scope: a dialog leaves
 composition the moment its request succeeds, and the re-fetch after it
