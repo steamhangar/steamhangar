@@ -18,6 +18,13 @@
  *  - `ok`: everything shown.
  * A dash always stands for a `null` the server sent; a real `0` prints as
  * a number.
+ *
+ * **One "now" (WP GRAPH-RECENT-1 + LOADING-NOW-1).** "Current speed", the
+ * status pill and "Loading now" read the live tier on every range: the live
+ * view through `mergeLive`, the persisted ranges through `mergeNow` (the
+ * server's `now` block). All three share one window, the live
+ * current-speed window (`active_window_seconds`), the same one the Clients
+ * page's `live_now` uses; the graph's newest buckets come from the same ring.
  */
 
 import { formatAgo, formatBytesGB } from "./format.js";
@@ -239,6 +246,8 @@ export function headerTiles(throughput, rateCap = null) {
   const fine = throughput.bucket_seconds === 60; // the 1-minute tier (1 h / 6 h once it has filled)
   const tile = (key, label, value, title, detail = null, limit = null) => ({ key, label, value: value ?? DASH, title, detail, limit });
   const windowMinutes = Number.isInteger(throughput.active_window_minutes) ? throughput.active_window_minutes : 15;
+  // WP LOADING-NOW-1: a live answer counts over the current-speed window (seconds).
+  const windowSeconds = activeWindowSeconds(throughput);
   const inRange = Number.isInteger(summary.active_clients) ? summary.active_clients : null;
   return [
     tile(
@@ -294,8 +303,8 @@ export function headerTiles(throughput, rateCap = null) {
       "clients",
       "Loading now",
       Number.isInteger(throughput.active_clients_now) ? String(throughput.active_clients_now) : null,
-      `Machines with cache traffic in the last ${windowMinutes} minutes. The server's own prefill runner is not counted.${inRange === null ? "" : ` ${inRange} machines loaded something ${phrase}.`}`,
-      `machines with cache traffic in the last ${windowMinutes} min`,
+      `${windowSeconds ? `Machines the cache served in the last ${windowSeconds} seconds (the window of "Current speed").` : `Machines with cache traffic in the last ${windowMinutes} minutes.`} The server's own prefill runner is not counted.${inRange === null ? "" : ` ${inRange} machines loaded something ${phrase}.`}`,
+      windowSeconds ? `machines the cache served in the last ${windowSeconds} s` : `machines with cache traffic in the last ${windowMinutes} min`,
     ),
   ];
 }
@@ -305,8 +314,9 @@ export function headerTiles(throughput, rateCap = null) {
  * (no row, no heading) unless the feed is `ok` and at least one machine had
  * cache traffic inside the active window; the server's own prefill runner
  * is not counted (it is the job cards' business). Same source as the
- * "Loading now" tile: `active_clients_now`, which `mergeLive` takes from
- * the live ring.
+ * "Loading now" tile: `active_clients_now`, which `mergeLive` and
+ * `mergeNow` take from the live ring (WP LOADING-NOW-1: over the
+ * current-speed window, `active_window_seconds`).
  * @param {object | null | undefined} throughput
  * @returns {{label: string, detail: string, title: string} | null}
  */
@@ -315,11 +325,26 @@ export function clientDownloadingRow(throughput) {
   const n = throughput.active_clients_now;
   if (!Number.isInteger(n) || n < 1) return null;
   const minutes = Number.isInteger(throughput.active_window_minutes) ? throughput.active_window_minutes : 15;
+  const seconds = activeWindowSeconds(throughput);
+  const machines = `${n} ${n === 1 ? "machine" : "machines"}`;
   return {
     label: "Client downloading",
-    detail: `${n} ${n === 1 ? "machine" : "machines"} with cache traffic in the last ${minutes} min`,
+    detail: seconds ? `${machines} served by the cache in the last ${seconds} s` : `${machines} with cache traffic in the last ${minutes} min`,
     title: "Machines other than this server that loaded something from the cache recently. The server's own prefill runner is not counted.",
   };
+}
+
+/**
+ * WP LOADING-NOW-1: the window of `active_clients_now` in seconds when it
+ * was read from the live tier (`mergeLive` / `mergeNow` set
+ * `active_window_seconds`), else `null` (the swept count's window is
+ * `active_window_minutes`).
+ * @param {object} throughput
+ * @returns {number | null}
+ */
+export function activeWindowSeconds(throughput) {
+  const s = throughput ? throughput.active_window_seconds : null;
+  return Number.isInteger(s) && s > 0 ? s : null;
 }
 
 /**
@@ -686,7 +711,32 @@ export function mergeLive(summary, live) {
     if (Number.isInteger(live.active_clients)) {
       merged.active_clients_now = live.active_clients;
       if (Number.isInteger(live.active_window_minutes)) merged.active_window_minutes = live.active_window_minutes;
+      // WP LOADING-NOW-1: the count's window is the current-speed window.
+      merged.active_window_seconds = Number.isInteger(live.active_window_seconds) ? live.active_window_seconds : null;
     }
   }
+  return merged;
+}
+
+/**
+ * WP GRAPH-RECENT-1 + LOADING-NOW-1: a persisted range's answer
+ * (`GET /v1/throughput?range=1h|6h|...`) with "Current speed", the status
+ * pill's runner figure and "Loading now" taken from its `now` block (the
+ * live tier, one window) instead of the last sweep, so the header agrees
+ * with the graph's newest point (which the server stitches from the same
+ * ring). Unchanged without a `now` block (feed not `ok`, a server before
+ * rc21, `null`). Pure; the input is not modified.
+ * @param {object | null | undefined} throughput
+ * @returns {object | null | undefined}
+ */
+export function mergeNow(throughput) {
+  const now = throughput && throughput.now;
+  if (!now || !now.current || feedState(throughput) !== "ok") return throughput;
+  const merged = { ...throughput, current: now.current, live: true };
+  if (Number.isInteger(now.active_clients)) {
+    merged.active_clients_now = now.active_clients;
+    merged.active_window_seconds = Number.isInteger(now.window_seconds) ? now.window_seconds : null;
+  }
+  if (typeof now.runner_active === "boolean") merged.runner_active_now = now.runner_active;
   return merged;
 }

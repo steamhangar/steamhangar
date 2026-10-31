@@ -16,6 +16,15 @@ fills from vault-core's event log:
   in-memory live tier (``vault_api/live_tier.py``). Polling it is what makes
   the server tail the event log every ~2 s (only while somebody polls).
 
+WP GRAPH-RECENT-1 + LOADING-NOW-1: the persisted ranges poll the live tier
+too. ``/v1/throughput`` carries a ``now`` block (current speed, "loading
+now" and the runner flag, all over the one live "now" window the Clients
+page's ``live_now`` uses) next to the swept ``current`` it keeps for older
+clients, and ``/v1/throughput/series`` stitches the ring into its newest 1-
+and 5-minute buckets (``1h``/``6h``/``24h``), so the graph shows the minutes
+since the last sweep and agrees with the header. The range's summary tiles
+(served, average, peak, hit rate) stay swept, as in the live view.
+
 WP CLIENTS-LIVE-1: the clients overview polls the live tier too. Each entry
 carries ``live_now`` (the shape of ``loading_now``, read from the ring per
 address instead of the swept window, over the current-speed window only) and
@@ -231,6 +240,31 @@ class JobThroughputOut(BaseModel):
     mapped_depots: int = 0
 
 
+class LiveCurrentOut(BaseModel):
+    bytes_per_second: float
+    runner_bytes_per_second: float
+    window_start: str
+    window_end: str
+    window_seconds: int
+
+
+class ThroughputNowOut(BaseModel):
+    """The page's "now" figures from the live tier (WP GRAPH-RECENT-1,
+    LOADING-NOW-1): seconds old, not a sweep. One window for all of them,
+    the live "Current speed" window (``window_seconds``), the same one the
+    Clients page's ``live_now`` reads."""
+
+    current: LiveCurrentOut
+    #: Client addresses that were served bytes in the window, the prefill
+    #: runner excluded.
+    active_clients: int
+    #: The prefill runner was served bytes in the window.
+    runner_active: bool
+    window_seconds: int
+    #: Minutes from here on are fully in the ring (``/v1/throughput/live``).
+    live_since: str | None
+
+
 class ThroughputOut(BaseModel):
     event_feed: EventFeedOut
     range: ThroughputRangeName
@@ -248,6 +282,10 @@ class ThroughputOut(BaseModel):
     summary: SummaryOut | None
     #: One entry per RUNNING prefill job (never null; values inside may be).
     jobs: list[JobThroughputOut]
+    #: WP GRAPH-RECENT-1 / LOADING-NOW-1: ``current``, ``active_clients_now``
+    #: and ``runner_active_now`` read from the live tier instead of the last
+    #: sweep. Null when the feed is not ``ok``; absent before rc21.
+    now: ThroughputNowOut | None = None
 
 
 class SeriesPointOut(BaseModel):
@@ -266,6 +304,10 @@ class SeriesPointOut(BaseModel):
     #: Largest 5-minute total inside the bucket / 300 s (the 1-minute tier's
     #: rows are their own peak: bytes / 60 s).
     peak_bytes_per_second: float
+    #: WP GRAPH-RECENT-1: ``persisted`` (the swept tier) or ``live`` (the
+    #: in-memory ring, for a newest bucket the sweep has not fully read yet;
+    #: such a bucket is its own peak).
+    source: Literal["persisted", "live"] = "persisted"
 
 
 class SeriesOut(BaseModel):
@@ -556,7 +598,8 @@ def get_throughput(
 ) -> ThroughputOut:
     """Downloads header numbers (D13 SPEED-1 + D15)."""
     settings: Settings = deps.effective_settings(request)
-    now = datetime.now(timezone.utc)
+    ring: live_tier.LiveTier = request.app.state.live_tier
+    now = ring.clock()
     minutes = traffic.active_window_minutes(settings.event_sweep_interval_minutes)
     with open_db() as conn:
         state = event_sweep.read_state(conn)
@@ -570,6 +613,7 @@ def get_throughput(
         active_now: int | None = None
         runner_now: bool | None = None
         summary: SummaryOut | None = None
+        now_out: ThroughputNowOut | None = None
         if feed_on:
             summary = _summary(
                 traffic.server_summary(conn, spec, clients),
@@ -593,6 +637,10 @@ def get_throughput(
         jobs = _job_throughput(
             conn, window, now, feed_on, settings.manifest_oracle_enabled
         )
+    # The ring is read after the connection is closed: tailing the log never
+    # holds SQLite open.
+    if feed_on and window is not None:
+        now_out = _ring_now(ring, settings, now, windows)
     return ThroughputOut(
         event_feed=feed,
         range=range,
@@ -605,6 +653,91 @@ def get_throughput(
         runner_active_now=runner_now,
         summary=summary,
         jobs=jobs,
+        now=now_out,
+    )
+
+
+def _ring_now(
+    ring: live_tier.LiveTier,
+    settings: Settings,
+    now: datetime,
+    windows: tuple[runner_identity.RunnerWindow, ...],
+) -> ThroughputNowOut:
+    """Arm and tail the live tier, then read the "now" figures from it."""
+    ring.touch(now)
+    ring.refresh(settings.event_log_path, now)
+    is_runner = _runner_test(windows)
+    current = ring.current(now, is_runner)
+    # One read of the window for both figures (same rule as the Clients page).
+    clients, runner = live_tier.loading_counts(ring.addr_activity(now, is_runner)[0])
+    return ThroughputNowOut(
+        current=_live_current_out(current),
+        active_clients=clients,
+        runner_active=runner,
+        window_seconds=current.window_seconds,
+        live_since=ring.covered_from(),
+    )
+
+
+#: WP GRAPH-RECENT-1: the tiers whose newest buckets the ring can hold (a
+#: bucket of at most 5 minutes; the ring keeps 15).
+_STITCHED_TIERS = (traffic.TIER_1M, traffic.TIER_5M)
+
+
+def _ring_buckets(
+    ring: live_tier.LiveTier,
+    settings: Settings,
+    now: datetime,
+    bucket_seconds: int,
+    windows: tuple[runner_identity.RunnerWindow, ...],
+) -> dict[int, live_tier.RingBucket]:
+    """Arm and tail the live tier, then read its totals per series bucket."""
+    ring.touch(now)
+    ring.refresh(settings.event_log_path, now)
+    return ring.buckets(now, bucket_seconds, _runner_test(windows))
+
+
+def _series_point(
+    point: traffic.SeriesPoint,
+    runner_part: traffic.Totals,
+    spec: traffic.RangeSpec,
+    ring: dict[int, live_tier.RingBucket],
+) -> SeriesPointOut:
+    """One graph point: the swept bucket, or the ring's where the ring holds
+    more of it (``live_tier.prefer_ring``, WP GRAPH-RECENT-1).
+
+    One source per point, never a sum, so nothing is counted twice. A ring
+    bucket is its own peak (bytes / bucket length, as a 1-minute row is).
+    """
+    when = live_tier.minute_epoch(point.bucket_at) if ring else None
+    bucket = ring.get(when) if when is not None else None
+    swept = live_tier.LiveTotals(
+        requests=point.totals.requests, bytes_served=point.totals.bytes_served
+    )
+    if bucket is not None and live_tier.prefer_ring(bucket.all, swept):
+        whole, run = bucket.all, bucket.runner
+        rate = whole.bytes_served / spec.bucket_seconds
+        return SeriesPointOut(
+            t=point.bucket_at,
+            bytes_served=whole.bytes_served,
+            hit_bytes=whole.hit_bytes - run.hit_bytes,
+            miss_bytes=whole.miss_bytes - run.miss_bytes,
+            requests=whole.requests - run.requests,
+            runner_bytes=run.bytes_served,
+            bytes_per_second=rate,
+            peak_bytes_per_second=rate,
+            source="live",
+        )
+    clients = traffic.subtract(point.totals, runner_part)
+    return SeriesPointOut(
+        t=point.bucket_at,
+        bytes_served=point.totals.bytes_served,
+        hit_bytes=clients.hit_bytes,
+        miss_bytes=clients.miss_bytes,
+        requests=clients.requests,
+        runner_bytes=runner_part.bytes_served,
+        bytes_per_second=point.totals.bytes_served / spec.bucket_seconds,
+        peak_bytes_per_second=point.peak_bucket_bytes / traffic.peak_unit_seconds(spec.tier),
     )
 
 
@@ -616,20 +749,26 @@ def get_throughput_series(
 ) -> SeriesOut:
     """Server-wide traffic per bucket for the Downloads graphs."""
     settings: Settings = deps.effective_settings(request)
-    now = datetime.now(timezone.utc)
+    ring: live_tier.LiveTier = request.app.state.live_tier
+    now = ring.clock()
     with open_db() as conn:
         state = event_sweep.read_state(conn)
-        feed, _window = _feed(settings, state, now)
+        feed, window = _feed(settings, state, now)
         spec = traffic.range_spec(conn, range, now)
         points = traffic.series(conn, spec) if feed.enabled else []
+        windows = runner_identity.windows(conn) if feed.enabled else ()
         runner_rows = (
-            traffic.scoped_bucket_totals(
-                conn, spec, traffic.runner_scope(runner_identity.windows(conn))
-            )
+            traffic.scoped_bucket_totals(conn, spec, traffic.runner_scope(windows))
             if feed.enabled
             else {}
         )
-    five = traffic.peak_unit_seconds(spec.tier)
+    # WP GRAPH-RECENT-1: the minutes since the last sweep come from the ring --
+    # only with a fresh feed, like the header's "now" figures they must agree with.
+    ring_rows = (
+        _ring_buckets(ring, settings, now, spec.bucket_seconds, windows)
+        if window is not None and spec.tier in _STITCHED_TIERS
+        else {}
+    )
     empty = traffic.Totals()
     return SeriesOut(
         event_feed=feed,
@@ -638,19 +777,8 @@ def get_throughput_series(
         bucket_seconds=spec.bucket_seconds,
         range_start=spec.start,
         points=[
-            SeriesPointOut(
-                t=point.bucket_at,
-                bytes_served=point.totals.bytes_served,
-                hit_bytes=clients.hit_bytes,
-                miss_bytes=clients.miss_bytes,
-                requests=clients.requests,
-                runner_bytes=runner_part.bytes_served,
-                bytes_per_second=point.totals.bytes_served / spec.bucket_seconds,
-                peak_bytes_per_second=point.peak_bucket_bytes / five,
-            )
+            _series_point(point, runner_rows.get(point.bucket_at, empty), spec, ring_rows)
             for point in points
-            for runner_part in (runner_rows.get(point.bucket_at, empty),)
-            for clients in (traffic.subtract(point.totals, runner_part),)
         ],
     )
 
@@ -671,14 +799,6 @@ class LivePointOut(BaseModel):
     peak_bytes_per_second: float
 
 
-class LiveCurrentOut(BaseModel):
-    bytes_per_second: float
-    runner_bytes_per_second: float
-    window_start: str
-    window_end: str
-    window_seconds: int
-
-
 class LiveOut(BaseModel):
     event_feed: EventFeedOut
     #: Always ``live``; ``tier`` is ``live`` too (the stitched series).
@@ -692,11 +812,18 @@ class LiveOut(BaseModel):
     range_start: str | None
     #: Null when the feed is disabled.
     current: LiveCurrentOut | None
-    #: Machines with cache traffic in the last ``active_window_minutes``,
-    #: counted from the ring (the persisted figure lags a sweep). The prefill
-    #: runner is not counted. Null when the feed is disabled.
+    #: Client addresses loading now, counted from the ring (the persisted
+    #: figure lags a sweep): served bytes in the ``current`` window (WP
+    #: LOADING-NOW-1, the Clients page's ``live_now`` rule; was 5 minutes of
+    #: any traffic). The prefill runner is not counted. Null when the feed is
+    #: disabled.
     active_clients: int | None = None
-    active_window_minutes: int = live_tier.ACTIVE_SECONDS // 60
+    #: WP LOADING-NOW-1: the window of ``active_clients`` in seconds (=
+    #: ``current.window_seconds``). Null when the feed is disabled.
+    active_window_seconds: int | None = None
+    #: Deprecated since rc21: the window rounded up to whole minutes (1);
+    #: read ``active_window_seconds``.
+    active_window_minutes: int = 1
     #: Oldest first, zero-filled, ending with the running 5 s cell. Empty
     #: when the feed is disabled.
     points: list[LivePointOut]
@@ -748,6 +875,16 @@ def _live_points(
     )
 
 
+def _live_current_out(current: live_tier.LiveCurrent) -> LiveCurrentOut:
+    return LiveCurrentOut(
+        bytes_per_second=current.bytes_per_second,
+        runner_bytes_per_second=current.runner_bytes_per_second,
+        window_start=current.window_start,
+        window_end=current.window_end,
+        window_seconds=current.window_seconds,
+    )
+
+
 def _live_totals(totals: traffic.Totals) -> live_tier.LiveTotals:
     return live_tier.LiveTotals(
         requests=totals.requests,
@@ -788,13 +925,8 @@ def get_throughput_live(
         live_since=tier.covered_from(),
         range_start=points[0].t if points else None,
         active_clients=active,
-        current=LiveCurrentOut(
-            bytes_per_second=current.bytes_per_second,
-            runner_bytes_per_second=current.runner_bytes_per_second,
-            window_start=current.window_start,
-            window_end=current.window_end,
-            window_seconds=current.window_seconds,
-        ),
+        active_window_seconds=current.window_seconds,
+        current=_live_current_out(current),
         points=[
             LivePointOut(
                 t=p.t,
