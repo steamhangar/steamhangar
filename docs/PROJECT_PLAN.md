@@ -3813,7 +3813,7 @@ below carry their own later dates, item 12 is the current one).
         DOWNLOADS-1; shown only while a client downloads, no empty heading).
         Web only: `clientDownloadingRow` in `lib/traffic-view.js` over
         `active_clients_now` (live ring via `mergeLive`).
-      - [ ] nit (MOBILE-1a): tests still use the operator's real VLAN as
+      - [x] nit (MOBILE-1a; 2d3a644, now 10.0.0.x): tests still use the operator's real VLAN as
         sample data (`api/tests/test_d15_runner.py:622` 192.168.10.15,
         `CoverArtTest.kt:131` and `GameCardModelTest.kt:227` 192.168.10.20);
         switch to 192.168.1.x (Kotlin part with the Android packages)
