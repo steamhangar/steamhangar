@@ -4098,7 +4098,7 @@ below carry their own later dates, item 12 is the current one).
       decision 2026-11-01: patch, not rc22, with every item below incl.
       PAUSE-ALL-GC-1, JOB-SIZE-1 and RUNNER-NAME-1; `dev.sh diag db` requested
       in Antrag A-20261101-02)
-      - [ ] **MAP-ATTRIB-1** (api) a prefill maps every depot whose directory
+      - [x] **MAP-ATTRIB-1** (473610f; three review rounds incl. a simulation on a full read-only prod export; attribution only with evidence, one-time cleanup removes 5 and restores 3 pairs on prod, see docs/handover/rc21-1-rollout-notes.md) (api) a prefill maps every depot whose directory
         changed during its run to the running app (`prefill.py`
         `diff_depots` / `apply_observed_mapping`, ~884-990), so traffic a PC
         loads in parallel lands on the wrong game. Prod evidence 2026-11-01:

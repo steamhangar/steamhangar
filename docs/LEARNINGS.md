@@ -1407,3 +1407,15 @@ These are not style preferences; each entry cost a review round to learn.
 - **Making a refused job type pausable touches every text that assumed
   the old type** (resume, cancel-while-paused, DELETE 409), not only the
   guard.
+- **Simulate a data-repair step on a full read-only prod export before
+  release** (export via `dev.sh diag db`, page past its 200-row cap, run
+  the real function on a scratch SQLite). Unit fixtures missed both the
+  fifth removal (Enshrouded) and 22 wrong restores (Witcher 3 packages).
+- **A cleanup that removes wrong rows can leave an app with no mapping**:
+  it needs a restore counterpart, and the restore must respect the
+  ownership model other packages built on purpose (package depots are
+  recorded under the game but mapped only to the package) and only use a
+  record equal to the oracle public gid (`gc_keepset_gids` leaves public
+  out on purpose).
+- **`upsert_mapping` commits internally**: never call it inside a
+  `BEGIN IMMEDIATE` that must stay atomic.
