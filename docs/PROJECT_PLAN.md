@@ -4122,6 +4122,14 @@ below carry their own later dates, item 12 is the current one).
         was readable (skips logged for the operator), so it never becomes a
         permanent startup rule. The rc21.1 rollout Antrag must list the
         expected removed and restored pairs.
+        Final expected prod effect (reviewer simulation on a full read-only
+        export, b97a62e): removed (436781, 3624140), (553851, 3624140),
+        (553854, 3624140), (1716751, 3624140), (1465471, 1203620); restored
+        (292033, 292030), (292036, 292030), (1203621, 1203620) — restores only
+        from the app's own record (containing_appid A or NULL) whose gid equals
+        the oracle public gid. Depot dirs measured on prod 2026-11-01 (operator,
+        read-only): 292033 3.47 GiB, 292036 3.77 GiB, 1203621 42.97 GiB, all
+        present; these are the "unmapped" depots of the storage balance.
       - [x] **TOOL-NAMES-1** (4971b52; oracle_names.py: at most 2 oracle lookups per 60 s refresher tick for apps no source names, backoff, oracle off = no request; GC can only gain protection, pinned by tests) (api) Steam Tool/Config apps without a store
         page show "Unknown app" (prod: 3990420 "Steam Frame Wireless Adapter
         Driver", Tool, no depots; 1716750 "Ubisoft Connect PC Client",
