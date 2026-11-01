@@ -3981,9 +3981,17 @@ below carry their own later dates, item 12 is the current one).
           Repair only in the sheet's completeness block (web also in header
           and Maintenance tab, REDESIGN-1b); a flow reset during execute only
           re-reads (inherited from the web).
-        - [ ] **ANDROID-REDESIGN-1a** rc20 redesign follow-up, part 1:
+        - [x] **ANDROID-REDESIGN-1a** (39b9d91 + fixups 674edab/29cfd05/4b5ddcf, goldens 11cf7a2; Remove and Rename on the card, summary tiles always present) rc20 redesign follow-up, part 1:
           Clients cards (Add a device tabs not built: the app has no such
           flow; open decision ANDROID-ADD-DEVICE-1 in the roadmap).
+        - [ ] nit (ANDROID-REDESIGN-1a review): `SectionLabel` sets
+          `contentDescription` on an uppercase Text; inside merged cards
+          TalkBack may read "Connected, CONNECTED" (check on a device; else
+          `clearAndSetSemantics { text = ... }`); 12dp gap above DEVICES
+          before the first answer; no agent-only cards when the overview
+          returns 404 (web shows them); footer buttons wrap below a long
+          last-active line; no golden for the bypass row or the empty state;
+          the PC list is fetched twice while the PCs sheet is open.
         - [x] **ANDROID-REDESIGN-1b** (bab33ac + fixups, goldens 590a34d) part 2: Library toolbar and detail
           tabs (Overview / Depots / Maintenance, Repair in the header and the
           Maintenance tab), sheet motion where it fits Material, distinct
@@ -4062,7 +4070,7 @@ below carry their own later dates, item 12 is the current one).
       - [x] (ANDROID-DL-1) Android Downloads follows LIVE-DELAY-1 (default range live,
         `active_clients` in the live answer); the Kotlin twin test no longer
         pins the web default
-      - [ ] Android follow-up of the rc20 redesign: Clients cards, Add a
+      - [x] (ANDROID-REDESIGN-1a/1b/1c, POLISH-1; Add a device is open decision ANDROID-ADD-DEVICE-1) Android follow-up of the rc20 redesign: Clients cards, Add a
         device tabs, Downloads, Settings section nav, Library toolbar and
         detail tabs, sheet motion where it fits Material
       - [x] **VERIFY-LABEL-1** (web; roadmap "Decided 2026-10-17") the Downloads

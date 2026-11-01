@@ -1382,3 +1382,8 @@ These are not style preferences; each entry cost a review round to learn.
   so adding a parameter does not break the pin.
 - **Roborazzi checks after `capture()` do not run on a golden mismatch**: a
   new layout assert is only proven in the verifying run after the refresh.
+- **A LazyColumn item inserted above an already visible keyed item opens
+  the list scrolled past it**: keep top items present from the start
+  (empty content until data arrives).
+- **"Is on screen" checks need `assertIsDisplayed`, not `assertExists`**:
+  a composed item outside the viewport passes `assertExists`.
