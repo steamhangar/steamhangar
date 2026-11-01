@@ -361,9 +361,11 @@ class OnboardingController(
     private var lookupJob: Job? = null
 
     /** "Look up" from the screen: runs [lookupLibrarySteamId] and keeps its
-     * job, so [finishAfterPendingLookup] can wait for it. */
+     * job, so [finishAfterPendingLookup] can wait for it. A second tap before
+     * the first lookup has started (busy is set only once it runs) must not
+     * replace the job Finish waits for (NITS-APP-1). */
     fun startLibraryLookup(scope: CoroutineScope) {
-        if (libraryLookupBusy) return
+        if (libraryLookupBusy || lookupJob?.isActive == true) return
         lookupJob = scope.launch { lookupLibrarySteamId() }
     }
 

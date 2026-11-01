@@ -35,6 +35,9 @@ class VerifySpeedTest {
         mapped_depots = 2,
     )
 
+    /** A poll whose fetch answers [throughput]. `poll(null)` stands for "no
+     * answer yet": the test never calls `refreshOnce()` on it, so the
+     * `throughput!!` below is never evaluated for null. */
     private fun poll(throughput: ThroughputOut?, range: String = "24h") = TrafficPoll(
         initialRange = range,
         fetch = { StatsAnswer(throughput!!, SeriesOut(range = it)) },

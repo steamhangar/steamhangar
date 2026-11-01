@@ -18,8 +18,6 @@ class ContentGroupsContractTest {
         assertEquals("+1 content package", packagesLineText(1))
         assertEquals("+3 content packages", packagesLineText(3))
         assertEquals("1 failed", failedPackagesText(1))
-        assertEquals("3 content packages", packagesAriaText(3, 0))
-        assertEquals("3 content packages, 1 failed", packagesAriaText(3, 1))
     }
 
     @Test

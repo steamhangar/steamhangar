@@ -144,6 +144,9 @@ class StorageBalanceCardTest {
     }
 
     // ---- source pins --------------------------------------------------------
+    // NITS-APP-1 (ANDROID-RC21-1-TWINS review): each call is pinned by its
+    // nearest enclosing function (same helper as D15dWiringTest), so a dead
+    // copy elsewhere cannot satisfy the pin and a move says "moved".
 
     private fun code(path: String): String {
         val file = File(path)
@@ -153,33 +156,70 @@ class StorageBalanceCardTest {
             .replace(Regex("//.*"), "")
     }
 
+    private val FUN = Regex("""(?:@Composable\s+)?(?:private\s+)?fun\s+(?:<[^>]+>\s+)?(\w+)""")
+
+    private fun nearestEnclosingFun(code: String, callIdx: Int): String? =
+        FUN.findAll(code)
+            .map { it.range.first to it.groupValues[1] }
+            .filter { (start, _) -> start < callIdx }
+            .maxByOrNull { (start, _) -> start }
+            ?.second
+
+    /** First occurrence of [call] that is not its own definition (`fun NAME(`). */
+    private fun callIndex(code: String, call: String): Int {
+        var from = 0
+        while (true) {
+            val idx = code.indexOf(call, from)
+            if (idx < 0) return -1
+            if (!code.substring(0, idx).trimEnd().endsWith("fun")) return idx
+            from = idx + call.length
+        }
+    }
+
+    private fun assertCalledFrom(path: String, call: String, expectedFun: String) {
+        val src = code(path)
+        val idx = callIndex(src, call)
+        assertTrue("$path: '$call' is DELETED -- the wiring is gone", idx >= 0)
+        assertEquals(
+            "$path: '$call' MOVED -- its nearest enclosing function is no longer $expectedFun",
+            expectedFun,
+            nearestEnclosingFun(src, idx),
+        )
+    }
+
     private val screen = "src/main/java/dev/steamvault/app/ui/settings/SettingsScreen.kt"
     private val main = "src/main/java/dev/steamvault/app/MainActivity.kt"
 
     @Test
     fun `MUTATION PIN -- the card sits at the end of the Expert panel and is fetched when the panel opens`() {
+        assertCalledFrom(screen, "if (current == EXPERT_SECTION) controller.loadCacheSummary()", "SettingsScreen")
+        assertCalledFrom(screen, "LaunchedEffect(controller, current) {", "SettingsScreen")
         val text = code(screen)
-        assertTrue(text.contains("if (current == EXPERT_SECTION) controller.loadCacheSummary()"))
-        assertTrue(text.contains("LaunchedEffect(controller, current) {"))
+        val effect = text.indexOf("LaunchedEffect(controller, current) {")
+        val fetch = text.indexOf("if (current == EXPERT_SECTION) controller.loadCacheSummary()")
+        assertTrue("the fetch runs inside the panel effect", fetch > effect && text.substring(effect, fetch).count { it == '}' } == 0)
+        assertCalledFrom(screen, "controller.storageBalance?.let { StorageBalanceCard(it) }", "SettingsScreen")
         val card = text.indexOf("controller.storageBalance?.let { StorageBalanceCard(it) }")
-        assertTrue("the card is drawn from the controller's view", card >= 0)
         val gate = text.lastIndexOf("if (current == EXPERT_SECTION && controller.expertOn) {", card)
         val form = text.lastIndexOf("else -> SettingsForm(controller, current)", card)
         assertTrue("only on the Expert panel, after the form", gate in (form + 1) until card)
-        val start = text.indexOf("private fun StorageBalanceCard(")
-        val end = text.indexOf("private fun ExpertSwitchRow(", start)
-        check(start >= 0 && end > start) { "expected StorageBalanceCard before ExpertSwitchRow" }
-        val body = text.substring(start, end)
-        assertTrue(body.contains("FieldCard(StorageBalanceText.TITLE)"))
-        assertTrue("the warning on top", body.contains("view.warning?.let"))
-        assertTrue("one tile per figure", body.contains("for (tile in view.tiles)"))
-        assertTrue("the note line", body.contains("Text(view.note,"))
+        assertCalledFrom(screen, "FieldCard(StorageBalanceText.TITLE)", "StorageBalanceCard")
+        assertCalledFrom(screen, "view.warning?.let", "StorageBalanceCard")
+        assertCalledFrom(screen, "for (tile in view.tiles)", "StorageBalanceCard")
+        assertCalledFrom(screen, "Text(view.note,", "StorageBalanceCard")
     }
 
     @Test
     fun `MUTATION PIN -- both connections hand the controller a cache repository`() {
+        assertCalledFrom(main, "VaultCacheRepository(it)", "refreshVaultApiClient")
+        assertCalledFrom(main, "DemoCacheRepository(demo)", "enterDemoMode")
         val text = code(main)
-        assertTrue(text.contains("settingsViewPreferences,\n                VaultCacheRepository(it),\n            )"))
-        assertTrue(text.contains("settingsViewPreferences,\n            DemoCacheRepository(demo),\n        )"))
+        // The repository is the controller's last argument (whitespace-tolerant).
+        for (repo in listOf("VaultCacheRepository\\(it\\)", "DemoCacheRepository\\(demo\\)")) {
+            assertTrue(
+                "SettingsController gets $repo as its last argument",
+                Regex("SettingsController\\((?:[^()]|\\([^()]*\\))*?$repo,?\\s*\\)").containsMatchIn(text),
+            )
+        }
     }
 }

@@ -588,9 +588,10 @@ their open boxes (items 2, 7 and 11) are in section 12. Item 13 stays here.
         WORKPACKAGES.md:1120 cites an old plan line range. Core plan is
         85.8 KB, not 70: section 12 keeps every open item's full text and
         shrinks as rc22 ticks them (orchestrator choice, Weg B).
-      - [ ] nit (ANDROID-VERIFY-SPEED-1 review): `FeedState` import out of
+      - [x] nit (ANDROID-VERIFY-SPEED-1 review): `FeedState` import out of
         order in `DownloadsStats.kt`; `VerifySpeedTest.poll(null)` uses
         `throughput!!` and needs a comment that refreshOnce is never called.
+<<<<<<< Updated upstream
       - [ ] DEV-MODS-1 live check once the operator loads the mods as
         managed mods (Antrag after 1a): core accepts output-trim's rewritten
         Bash result (`{ result, context }` and the `isError` branch); which
@@ -608,9 +609,22 @@ their open boxes (items 2, 7 and 11) are in section 12. Item 13 stays here.
         `Date.now()` (not `$.clock.now()`); read-back and SMALL_RANGE checks
         match loosely (fail open); kept files are never pruned (max-age or
         max-count prune later); no context assertion on the error branch.
+=======
+        (fixed in NITS-APP-1: `DownloadsStats.kt` imports sorted, KDoc on
+        `VerifySpeedTest.poll`)
+>>>>>>> Stashed changes
+      - [ ] nit (NITS-APP-1 review): NightGoldenTwinTest lives in src/test but
+        reads src/testDebug goldens (also runs in the release task; could
+        move to testDebug); a third local copy of the assertCalledFrom
+        helpers (shared test helper later); `tools/doc-lines-check.py`
+        compares against the frozen pre-DIET ref, so every later tick shows
+        as a "lost" line (it was a one-off proof; document or retire it).
       - [ ] remaining nits: MAP-DRIFT-1 fail-safe tests, claim-vs-move race
         test, aria-live on queue move, D19WiringTest pin,
         regrow-without-idle-gap test
+        (D19WiringTest pin fixed in NITS-APP-1: the loaded-body pins use the enclosing-composable generation and a
+        bounded `LoadedDetailBody` body instead of a contains-scan to the end
+        of the file)
       - the open boxes of **B** above (signed APK, standard-user check,
         real-device checks, rollout gates (h) and (i), release notes) and
         the failed-jobs measurement (Subnautica, Timberborn, Hogwarts
@@ -1254,6 +1268,9 @@ is done, tick it HERE, not in the archive.
       line; TalkBack focus stays on "Show N more" (web moves it to the
       first new row); the two graph fills are hard to tell apart in the
       night golden (REDESIGN-1b); import order in `DownloadsStats.kt`.
+      (partly fixed in NITS-APP-1: `DownloadsStats.kt` imports sorted; the
+      Downloads shots are already 1000/1250 dp high, see REDESIGN-1c; still
+      open: `splitGeometry` fallback, Show-more focus, night fills)
     - [ ] nit (ANDROID-GAPS-1 review): the Rename button leaves an empty
       band at the bottom of nameable Clients cards (`ClientsScreen.kt:273`,
       REDESIGN-1a); busy dialog buttons are not visually disabled (guards
@@ -1263,6 +1280,10 @@ is done, tick it HERE, not in the archive.
       current step-1 fields, not the verified ones; no Remove on the
       Clients page cards (web has it, REDESIGN-1a); demo Delete history
       does not zero the synthetic traffic like the web demo's "since" cut.
+      (partly fixed in NITS-APP-1: `startLibraryLookup` also checks
+      `lookupJob?.isActive`, pinned by `OnboardingLibraryIdTest` "a double
+      tap before the lookup runs"; the rest needs goldens or a behaviour
+      decision)
     - [ ] nit (ANDROID-DL-2 review): focus after "Show more" goes to a
       wrapper Box (input focus; TalkBack accessibility focus may not
       follow, check on a device); "Show job" only scrolls, no focus;
@@ -1284,20 +1305,28 @@ is done, tick it HERE, not in the archive.
       in rc20-visual-check.md so the device check does not flag them:
       Filters only with metadata, store details first on Overview
       (CARD-LAYOUT-1 pin); `strings.xml:210` hint `http://192.168.1.50:8080`
-      belongs to SAMPLE-IP-1.
+      belongs to SAMPLE-IP-1. (NITS-APP-1 check: `DETAIL_TABS_TAG` is used
+      by `DetailSheetScreenshotTest`; the deviations are already listed in
+      rc20-visual-check.md "Android rc21: accepted deviations"; still open:
+      `groupCompletenessLine` on Overview, the hint via SAMPLE-IP-1)
     - [ ] nit (ANDROID-REDESIGN-1c review; KDoc and Overview ISO times fixed in POLISH-1): hero runner mini item and the
       0-devices caption descriptions differ from the web tile titles;
       downloads_stats shot heights 1000/1250 leave empty canvas;
       the "Surveyor Outfits" package row squeezes its name at 360dp/1.3.
-    - [ ] nit (ANDROID-POLISH-1 review): `assertOneControlRow` does not
+    - [x] nit (ANDROID-POLISH-1 review): `assertOneControlRow` does not
       check the sort button (`LibraryScreenshotTest.kt:646-659`);
       `EXPERT_SECTION_ID` duplicates the id literal from
       `SettingsLayout.SECTIONS`; import order in `GameDetailSheet.kt:67`;
       at 360dp/1.3 with metadata Select still wraps alone (documented
-      worst case).
-    - [ ] nit (APP-NIGHT-GOLDEN-1 review): a blind golden refresh would
+      worst case). (fixed in NITS-APP-1: `assertOneControlRow` checks the
+      sort button; `EXPERT_SECTION_ID` is the one Kotlin constant,
+      `SettingsController.EXPERT_SECTION` derives from it and
+      `SettingsDirtyDotsTest` pins it to a `SECTIONS` id; `GameDetailSheet.kt`
+      imports sorted; the 360dp/1.3 wrap stays the documented worst case)
+    - [x] nit (APP-NIGHT-GOLDEN-1 review): a blind golden refresh would
       silently accept a changed night shot; add a test asserting the
-      night shot equals its notnight twin pixel for pixel.
+      night shot equals its notnight twin pixel for pixel. (fixed in
+      NITS-APP-1: `NightGoldenTwinTest`)
   - Cancel question (NOW-LOADING-1, answered from code, reviewer-checked;
     no prod measurement): a cancelled job's SteamPrefill does not keep
     loading. `cancel_job` only sets `stop_request` (jobs.py ~894-990);
@@ -1384,3 +1413,6 @@ is done, tick it HERE, not in the archive.
     contains-style pins (use assertCalledFrom like D15dWiringTest);
     `smoother.observe` runs as a composition side effect (idempotent); a
     malformed `storage_balance` fails the whole summary decode on Android.
+    (partly fixed in NITS-APP-1: `StorageBalanceCardTest` source pins use
+    `assertCalledFrom`; still open: the decode tolerance, a behaviour
+    decision)

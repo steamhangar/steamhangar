@@ -43,6 +43,28 @@ class D19WiringTest {
         assertEquals("$path: '$call' MOVED -- no longer inside $expected", expected, enclosing(code, idx))
     }
 
+    /** Like [assertCalledFrom] for a call with several sites: one of them
+     * must sit directly inside [expected] (the first site may be elsewhere). */
+    private fun assertSomeCallFrom(path: String, call: String, expected: String) {
+        val code = stripComments(read(path))
+        val sites = Regex(Regex.escape(call)).findAll(code).map { it.range.first }
+            .filter { !code.substring(0, it).trimEnd().endsWith("fun") }.toList()
+        assertTrue("$path: '$call' is DELETED -- the wiring is gone", sites.isNotEmpty())
+        assertTrue(
+            "$path: '$call' MOVED -- no call site inside $expected (found in ${sites.map { enclosing(code, it) }})",
+            sites.any { enclosing(code, it) == expected },
+        )
+    }
+
+    /** The comment-stripped text of the composable [name], up to the next composable. */
+    private fun bodyOf(code: String, name: String): String {
+        val start = checkNotNull(COMPOSABLE_FUN.findAll(code).firstOrNull { it.groupValues[1] == name }?.range?.first) {
+            "composable $name not found"
+        }
+        val end = COMPOSABLE_FUN.findAll(code).firstOrNull { it.range.first > start }?.range?.first ?: code.length
+        return code.substring(start, end)
+    }
+
     private val base = "src/main/java/dev/steamvault/app"
     private val sheet = "$base/ui/detail/GameDetailSheet.kt"
     private val blocks = "$base/ui/detail/CardInfoBlocks.kt"
@@ -56,17 +78,18 @@ class D19WiringTest {
     @Test
     fun `MUTATION PIN -- the loaded body draws the expected block only when the model says so`() {
         assertCalledFrom(sheet, "showsExpectedBlock(", "NotTrackedBody")
-        val code = stripComments(read(sheet))
-        val loaded = code.substring(code.indexOf("private fun LoadedDetailBody"))
-        assertTrue(loaded.contains("showsExpectedBlock("))
-        assertTrue(loaded.contains("ExpectedDepotsBlock("))
-        assertTrue(loaded.contains("StoreDetailsBlock("))
+        // NITS-APP-1: the loaded body's sites are pinned by their enclosing
+        // composable, not by a contains-scan to the end of the file (a dead
+        // helper further down would have satisfied that).
+        assertSomeCallFrom(sheet, "showsExpectedBlock(", "LoadedDetailBody")
+        assertSomeCallFrom(sheet, "ExpectedDepotsBlock(", "LoadedDetailBody")
+        assertSomeCallFrom(sheet, "StoreDetailsBlock(", "LoadedDetailBody")
     }
 
     @Test
     fun `MUTATION PIN -- CARD-LAYOUT-1 the game block comes before the hangar blocks in the loaded body`() {
         val code = stripComments(read(sheet))
-        val loaded = code.substring(code.indexOf("private fun LoadedDetailBody"))
+        val loaded = bodyOf(code, "LoadedDetailBody")
         val store = loaded.indexOf("StoreDetailsBlock(")
         assertTrue(store >= 0)
         assertEquals("one call site only", store, loaded.lastIndexOf("StoreDetailsBlock("))

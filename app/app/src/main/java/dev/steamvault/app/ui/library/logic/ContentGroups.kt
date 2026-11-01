@@ -155,12 +155,6 @@ fun packagesLineText(count: Int): String = "+$count content ${plural(count, "pac
 /** "1 failed" (the warning after the packages line). */
 fun failedPackagesText(count: Int): String = "$count failed"
 
-/** The card's spoken fragment for a group. */
-fun packagesAriaText(count: Int, failedCount: Int): String {
-    val base = "$count content ${plural(count, "package", "packages")}"
-    return if (failedCount > 0) "$base, $failedCount failed" else base
-}
-
 /**
  * A package's display name in its parent's list: Steam often spells it
  * "<parent name> - <what>", redundant under the parent's heading. Drops a

@@ -64,4 +64,11 @@ class SettingsDirtyDotsTest {
             assertTrue(key, d.expertSwitch)
         }
     }
+
+    @Test
+    fun `the expert dot id is a real section id`() {
+        // NITS-APP-1: the constant must name an entry of the web-pinned list.
+        assertTrue(SettingsLayout.SECTIONS.any { it.id == EXPERT_SECTION_ID })
+        assertEquals("expert", EXPERT_SECTION_ID)
+    }
 }
