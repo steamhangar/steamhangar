@@ -37,6 +37,8 @@ import yaml
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = REPO_ROOT / ".github" / "scripts" / "apk-cert-digest.sh"
 PUBLISH_PATH = REPO_ROOT / ".github" / "workflows" / "publish.yml"
+# WP CI-SIGN-PIN-1: the step also compares the digest with this pin.
+PIN_PATH = REPO_ROOT / "app" / "signing-cert.sha256"
 JOB = "android-build"
 STEP = "Verify APK signature (apksigner)"
 
@@ -274,11 +276,19 @@ def test_step_uses_the_script_and_no_inline_parser() -> None:
 
 
 def _run_step(tmp_path: Path, verify_out: str, certs_out: str, *,
-              verify_rc: int = 0, with_apk: bool = True
+              verify_rc: int = 0, with_apk: bool = True,
+              pin: str | None = None, strict: bool = True
               ) -> tuple[subprocess.CompletedProcess[str], Path, Path]:
+    """`pin`: content of app/signing-cert.sha256 (None = the committed file);
+    `strict`: the step's APK_PIN_STRICT (true on a v* tag run)."""
     ws = tmp_path / "ws"
     (ws / ".github/scripts").mkdir(parents=True)
     shutil.copy(SCRIPT, ws / ".github/scripts/apk-cert-digest.sh")
+    (ws / "app").mkdir()
+    if pin is None:
+        shutil.copy(PIN_PATH, ws / "app/signing-cert.sha256")
+    else:
+        (ws / "app/signing-cert.sha256").write_text(pin, encoding="utf-8")
     if with_apk:
         apk = ws / "app/app/build/outputs/apk/release"
         apk.mkdir(parents=True)
@@ -307,8 +317,10 @@ def _run_step(tmp_path: Path, verify_out: str, certs_out: str, *,
     summary = tmp_path / "summary.md"
     env = {k: v for k, v in os.environ.items()
            if not k.startswith(("GITHUB_", "ANDROID_"))}
+    env.pop("APK_PIN_STRICT", None)
     env.update(RUNNER_TEMP=str(runner_temp), ANDROID_SDK_ROOT=str(tmp_path / "sdk"),
-               GITHUB_OUTPUT=str(output), GITHUB_STEP_SUMMARY=str(summary))
+               GITHUB_OUTPUT=str(output), GITHUB_STEP_SUMMARY=str(summary),
+               APK_PIN_STRICT="true" if strict else "false")
     script = tmp_path / "step.sh"
     script.write_text(_step()["run"], encoding="utf-8")
     # GitHub's default `run:` shell on Linux: `bash -e {0}`.
