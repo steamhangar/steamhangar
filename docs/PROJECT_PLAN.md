@@ -4260,14 +4260,37 @@ below carry their own later dates, item 12 is the current one).
         malformed `storage_balance` fails the whole summary decode on Android.
       - [x] close: release gate, tag `v0.1.0-rc21.1` (2026-11-01, operator's yes: tag on a65fede, main CI 41298914431 green, verify 627/0; rollout Antrag A-20261101-03 filed; prod rollout check pending)
 
-    - [ ] **rc22 — release hardening, no new features** (packages to be cut
-      in the version's planning session)
-      - D7 `:443` measurement and the `VAULT_TLS_CLIENT_MAX_CONNS`
+    - [ ] **rc22 — release hardening, no new features** (packages cut
+      2026-11-01 in the planning session, user yes the same day; each
+      package runs through the Workflow tool, max 3 agents at a time).
+      Order: wave 0 DOC-DIET-1 alone; wave 1 DEV-MODS-1a, DEV-MODS-1b,
+      ANDROID-VERIFY-SPEED-1; wave 2 NITS-WEB-1, NITS-APP-1, NITS-API-1;
+      wave 3 SAMPLE-IP-1, CI-SIGN-PIN-1, VERIFY-FAST-1; wave 4
+      RELEASE-SPLIT-1a/b/c ([Fable] second pass), RELEASE-NOTES-1.
+      Measurements (orchestrator, read-only `dev.sh diag`, every rate step
+      only after the operator's yes): D7 `:443`, CAP-503-LOOP-1,
+      HIT-PATH-1, failed-jobs measurement. Operator: the B boxes below.
+      - [ ] D7 `:443` measurement and the `VAULT_TLS_CLIENT_MAX_CONNS`
+        default (closes the D7 box above)
       - [ ] **ANDROID-VERIFY-SPEED-1** (android; found 2026-11-01) the web's
         decided Verifying speed line "Verifying files, no download speed"
         (VERIFY_SPEED_TEXT, DOWNLOADS-1, operator 2026-10-16) was never ported
         to Android; port it with a twin pin.
-        default (closes the D7 box above)
+      - [ ] **NITS-WEB-1** (web) from NITS-AUDIT-1 and the remaining nits:
+        client-side request timeout in `api.js`, group-sheet "Update now"
+        test, origin check in `isVaultReturnTo`, aria-live on queue move,
+        CARD-CORNERS-1 candidate fix.
+      - [ ] **NITS-APP-1** (android) dead `packagesAriaText`, trivial last
+        assertion in `DownloadsStatsLiveTest`, D19WiringTest pin, open
+        Android review nits of rc20-rc21.1.
+      - [ ] **NITS-API-1** (api + agent) MAP-DRIFT-1 fail-safe tests,
+        claim-vs-move race test, regrow-without-idle-gap test, open api
+        review nits of rc20-rc21.1.
+      - [ ] **SAMPLE-IP-1** (tests/examples; user decision 2026-11-01,
+        Weg A) sweep the generic `192.168.1.x` examples to `10.0.0.x`.
+      - [ ] **CI-SIGN-PIN-1** (ci; CI-FIX-3 follow-up) pin the APK signing
+        certificate fingerprint in CI.
+      - [ ] **RELEASE-NOTES-1** (docs) v0.1.0 release notes (B box).
       - [ ] **DOC-DIET-1** (docs + agents, user decision 2026-11-01,
         Weg A; first rc22 package) every coder/reviewer start reads
         `PROJECT_PLAN.md` (292 KB) and `LEARNINGS.md` (87 KB), roughly
@@ -4278,9 +4301,13 @@ below carry their own later dates, item 12 is the current one).
         review.
       - [ ] **DEV-FLOW-1** (process, user decision 2026-11-01) every rc22
         package runs its coder -> reviewer -> fix loop through the Workflow
-        tool (max 3 agents at a time); a private artifact dashboard with a
-        database (packages, CI, open decisions, Antraege) replaces status
-        messages. rc21.1 keeps the manual flow.
+        tool (max 3 agents at a time); a private dashboard with a
+        database (packages, CI, open decisions, Antraege, agents) replaces
+        status messages. rc21.1 keeps the manual flow. Form (user decision
+        2026-11-01, no artifact tool in the session): a local SQLite file
+        on the dev host (outside the repo) rendered to one HTML page that
+        is sent to the operator; agent numbers are synced from the token
+        meter at each package end (Weg 1).
       - [ ] **DEV-MODS-1** (dev tooling, user decision 2026-11-01, Weg A)
         Claude Code mods under `tools/claude-mods/` (generic, no host
         paths; host paths come in as plugin options): token meter per
