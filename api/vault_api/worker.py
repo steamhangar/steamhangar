@@ -610,6 +610,11 @@ class PrefillWorker:
                 # the app owns them (other PCs load other games into the same
                 # cache during the run). A crash here adds nothing new.
                 owned: set[int] | None = set()
+                # WP MAP-LOSS-1: the oracle's depot list of the app also keeps
+                # an unobserved depot (its own recorded manifests are read by
+                # the replace step itself). ``None`` = no oracle protection;
+                # a crash here never fails the job.
+                oracle_listed: set[int] | None = None
                 if observed:
                     evidence_settings = self._job_settings(conn)
                     try:
@@ -636,8 +641,23 @@ class PrefillWorker:
                             appid, job_id,
                         )
                         owned = set()
+                    try:
+                        oracle_listed = map_attrib.oracle_depots(
+                            conn, appid,
+                            oracle_enabled=evidence_settings.manifest_oracle_enabled,
+                        )
+                    except Exception:  # noqa: BLE001 - the job already succeeded
+                        logger.exception(
+                            "Reading the oracle depot list for appid %s (job %s) "
+                            "failed; the depot mapping replace keeps only depots "
+                            "named by manifest files or recorded manifests.",
+                            appid, job_id,
+                        )
+                        oracle_listed = None
                 change = prefill.apply_observed_mapping(
-                    conn, appid, observed, manifest_named=manifest_named, owned=owned
+                    conn, appid, observed,
+                    manifest_named=manifest_named, owned=owned,
+                    oracle_listed=oracle_listed,
                 )
                 if change.not_attributed:
                     logger.info(

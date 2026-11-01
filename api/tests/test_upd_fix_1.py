@@ -347,9 +347,10 @@ def test_startup_runs_the_repair(tmp_path: Path) -> None:
 def test_a_later_update_of_a_depot_the_last_run_did_not_touch_still_flags(
     tmp_path: Path,
 ) -> None:
-    """Reviewer probe: two mapped depots; a run writes only depot A, so
-    ``apply_observed_mapping`` drops B from the map. When Steam later updates
-    B, the game must still read stale."""
+    """Reviewer probe: two mapped depots; a run writes only depot A. Before
+    WP MAP-LOSS-1 ``apply_observed_mapping`` dropped B from the map; now the
+    app's own recorded manifest keeps it. Either way, when Steam later
+    updates B, the game must still read stale."""
     from vault_api.prefill import apply_observed_mapping
 
     settings = _settings(tmp_path)
@@ -360,11 +361,15 @@ def test_a_later_update_of_a_depot_the_last_run_did_not_touch_still_flags(
         upsert_mapping(conn, depot_b, APPID, None)
         _record(conn, NEWEST, "2026-10-14T19:39:10Z", depot=depot_a)
         _record(conn, OLD, "2026-10-14T19:39:10Z", depot=depot_b)
-        apply_observed_mapping(conn, APPID, {depot_a}, manifest_named=set(), owned=None)
+        apply_observed_mapping(
+            conn, APPID, {depot_a}, manifest_named=set(), owned=None, oracle_listed=None
+        )
         assert [
             row["depotid"]
-            for row in conn.execute("SELECT depotid FROM depot_app_map WHERE appid = ?", (APPID,))
-        ] == [depot_a]
+            for row in conn.execute(
+                "SELECT depotid FROM depot_app_map WHERE appid = ? ORDER BY depotid", (APPID,)
+            )
+        ] == [depot_a, depot_b]
 
         depots = {
             str(depot_a): {"name": "a", "manifests": {"public": {"gid": str(NEWEST)}}},
