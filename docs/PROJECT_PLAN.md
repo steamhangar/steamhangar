@@ -4147,6 +4147,22 @@ below carry their own later dates, item 12 is the current one).
         captions read the product name from one constant (operator decision
         2026-11-01: today "SteamHangar", "GameHangar" with D18), so it is
         clear who loads.
+      - [ ] **STORAGE-BALANCE-1** (api + web; operator decision 2026-11-01:
+        Weg A, a storage balance in the product, not a dev-only check) after
+        every update check a log line and fields in `/v1/cache/summary`:
+        planned (current manifests of measured apps, shared depots counted
+        once), present (of those on disk), on disk (size walk), and the rest
+        split as far as known: unmeasured apps, unmapped depots, old-build
+        orphans (GC plan); an expert-mode "Storage balance" row and a warning
+        above a threshold (e.g. > 15 % or > 50 GB unexplained). Prod
+        measurement 2026-11-01 (`zfs list` + read-only DB): on disk 575 GB
+        (refer; used 581 GB), planned 346.2 GB / present 346.2 GB over 39
+        depots, so about 229 GB (40 %) is outside the measured manifests:
+        63 mapped depots but only 39 measured (21 of 57 apps measured; the
+        unmeasured ones are mostly content packages, DLCs, tool/config and
+        not-owned apps, e.g. 378640-378649, 370000-370003, 2506210-2506280,
+        436780, 1716750, 228980), plus 3 unmapped depots with 38.7 GB of
+        latest manifests; old-build orphans not yet sized.
       - [ ] close: release gate, tag `v0.1.0-rc21.1`
 
     - [ ] **rc22 — release hardening, no new features** (packages to be cut
