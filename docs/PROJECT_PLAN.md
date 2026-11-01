@@ -584,7 +584,20 @@ their open boxes (items 2, 7 and 11) are in section 12. Item 13 stays here.
         hint compares against the bundled agent version (minimum version,
         alias list for the identical rc18-rc20.2 agent builds); About and
         release notes show each component's version. New ADR. Details in
-        the roadmap.
+        the roadmap. Done in RELEASE-SPLIT-1a: ADR-0031
+        (`docs/adr/0031-component-versions.md`, incl. the git history
+        table), manifest `.github/components.json` (server rc21.1, agent
+        rc17, app rc21.1), `.github/scripts/component-versions.py`
+        (plan/write/check/history), `publish.yml` job `component-plan`
+        before every build, dry run (`enforce: false`); tests
+        `api/tests/test_release_split_1a.py`. Release step from rc22 on:
+        the release commit runs `component-versions.py write --version
+        <new> --previous-tag <prev>` (a tag run without it warns in dry run,
+        fails with enforce). Open for
+        1b: vault-api bakes the recorded agent/APK, agent/app reuse
+        (`reuse: release-assets`), APK pin skip for reused APKs, alias
+        list (rc18 to rc21.1, git-corrected), minimum versions, then
+        `enforce: true`; 1c: About and release notes.
       - [ ] **VERIFY-FAST-1** (deploy/tests + devbox, decided 2026-10-18,
         Weg A) `verify-stack.sh` gets section selection (`VERIFY_SECTIONS`);
         `dev.sh verify` defaults to a lean set (1 config drift, 3 compose

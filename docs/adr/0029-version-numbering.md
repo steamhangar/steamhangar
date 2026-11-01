@@ -6,7 +6,8 @@ Date: 2026-10-18
 
 Related: `docs/PROJECT_PLAN.md` §11 item 13 (version blocks),
 `docs/handover/post-0.1.0-roadmap.md` "Release plan", ADR-0016 (freeze),
-WP VER-1, RELEASE-SPLIT-1 (rc22).
+WP VER-1, RELEASE-SPLIT-1 (rc22). Extended by ADR-0031 (component
+versions under the one product version).
 
 ## Context
 

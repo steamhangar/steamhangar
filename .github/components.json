@@ -1,0 +1,92 @@
+{
+  "schema": 1,
+  "tag_prefix": "v",
+  "enforce": false,
+  "components": {
+    "server": {
+      "description": "vault-core, vault-api (incl. web/ and the vault-runner role), vault-dns, vault-proxy images",
+      "version": "0.1.0-rc21.1",
+      "reuse": "retag",
+      "paths": [
+        "core/Dockerfile",
+        "core/docker/",
+        "core/nginx/",
+        "dns/Dockerfile",
+        "dns/dnsmasq.conf.template",
+        "dns/docker-entrypoint.sh",
+        "deploy/proxy/",
+        "api/Dockerfile",
+        "api/requirements.txt",
+        "api/vault_api/",
+        "api/dist/",
+        "web/",
+        ".dockerignore"
+      ],
+      "exclude": [
+        "web/tests/",
+        "**/README.md"
+      ],
+      "artifacts": {
+        "images": [
+          "ghcr.io/steamhangar/vault-core:{version}",
+          "ghcr.io/steamhangar/vault-api:{version}",
+          "ghcr.io/steamhangar/vault-dns:{version}",
+          "ghcr.io/steamhangar/vault-proxy:{version}"
+        ]
+      }
+    },
+    "agent": {
+      "description": "vault-agent binaries (Go), Windows Scheduled Task scripts, systemd units",
+      "version": "0.1.0-rc17",
+      "reuse": "none",
+      "paths": [
+        "agent/go/",
+        "agent/packaging/windows/install-task.ps1",
+        "agent/packaging/windows/run-vault-agent.ps1",
+        "agent/packaging/windows/uninstall-task.ps1",
+        "agent/packaging/systemd/"
+      ],
+      "exclude": [
+        "agent/go/**/*_test.go",
+        "agent/go/**/testdata/**",
+        "**/README.md"
+      ],
+      "artifacts": {
+        "files": [
+          "vault-agent-v{version}-windows-amd64.exe",
+          "vault-agent-v{version}-linux-amd64",
+          "vault-agent-v{version}-linux-arm64",
+          "vault-agent-report.service",
+          "vault-agent-report.timer",
+          "install-task.ps1",
+          "run-vault-agent.ps1",
+          "uninstall-task.ps1",
+          "SHA256SUMS"
+        ]
+      }
+    },
+    "app": {
+      "description": "signed Android release APK",
+      "version": "0.1.0-rc21.1",
+      "reuse": "none",
+      "paths": [
+        "app/build.gradle.kts",
+        "app/settings.gradle.kts",
+        "app/gradle.properties",
+        "app/gradle/",
+        "app/gradlew",
+        "app/app/build.gradle.kts",
+        "app/app/proguard-rules.pro",
+        "app/app/src/main/"
+      ],
+      "exclude": [
+        "**/README.md"
+      ],
+      "artifacts": {
+        "files": [
+          "steamhangar-app-v{version}.apk"
+        ]
+      }
+    }
+  }
+}

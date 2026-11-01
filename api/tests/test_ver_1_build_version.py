@@ -237,7 +237,9 @@ def test_publish_checks_the_baked_version_against_metadata_action_on_tags() -> N
     names = [s.get("name") for s in job["steps"]]
     check_name = "Check the baked version matches the image tag"
     step = _step(job, name=check_name)
-    assert step["if"] == "startsWith(github.ref, 'refs/tags/v')"
+    # RELEASE-SPLIT-1a (ADR-0031): only a leg that builds checks it; a reused
+    # (retagged) server image keeps the version it was built with.
+    assert step["if"] == "startsWith(github.ref, 'refs/tags/v') && steps.mode.outputs.build == 'true'"
     assert _norm(step["env"]["META_VERSION"]) == "${{ steps.meta.outputs.version }}"
     assert _norm(step["env"]["BUILD_VERSION"]) == "${{ needs.build-version.outputs.version }}"
     assert '[ "$META_VERSION" != "$BUILD_VERSION" ]' in step["run"]
