@@ -5,7 +5,7 @@
   "components": {
     "server": {
       "description": "vault-core, vault-api (incl. web/ and the vault-runner role), vault-dns, vault-proxy images",
-      "version": "0.1.0-rc21.1",
+      "version": "0.1.0-rc22",
       "reuse": "retag",
       "paths": [
         "core/Dockerfile",
@@ -37,7 +37,7 @@
     },
     "agent": {
       "description": "vault-agent binaries (Go), Windows Scheduled Task scripts, systemd units",
-      "version": "0.1.0-rc17",
+      "version": "0.1.0-rc22",
       "minimum_version": "0.1.0-rc17",
       "reuse": "release-assets",
       "paths": [
@@ -68,7 +68,7 @@
     },
     "app": {
       "description": "signed Android release APK",
-      "version": "0.1.0-rc21.1",
+      "version": "0.1.0-rc22",
       "minimum_version": "0.1.0-rc17",
       "reuse": "release-assets",
       "paths": [
