@@ -4204,6 +4204,16 @@ below carry their own later dates, item 12 is the current one).
         not-owned apps, e.g. 378640-378649, 370000-370003, 2506210-2506280,
         436780, 1716750, 228980), plus 3 unmapped depots with 38.7 GB of
         latest manifests; old-build orphans not yet sized.
+      - [ ] **MAP-LOSS-1** (api; finding 2026-11-01, MAP-ATTRIB-1 review) an
+        app's OWN depot loses its mapping row although its own recorded
+        manifest and the oracle name it (prod: Enshrouded 1203621, The
+        Witcher 3 292033/292036; restored once by MAP-ATTRIB-1). Find the
+        cause (the replace step on partial evidence, GROUP-VERIFIED / MAP-DRIFT
+        family; Enshrouded job 205 on 2026-10-31 is a candidate) so it cannot
+        recur; the one-time restore does not prevent it.
+      - [ ] nit (MAP-ATTRIB-1 review): one oracle_branch_manifests query per
+        restore candidate; the inlined `apps` INSERT duplicates upsert_mapping
+        on purpose (it commits inside BEGIN IMMEDIATE).
       - [ ] close: release gate, tag `v0.1.0-rc21.1`
 
     - [ ] **rc22 — release hardening, no new features** (packages to be cut
