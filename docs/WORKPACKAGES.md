@@ -17,7 +17,8 @@ what may run in parallel and what must stay serial — and why.
 
 1. Branch off current `main`: `wp/<id>-<slug>` (e.g. `wp/3.9-oracle`).
 2. Start a session whose brief is the package section below, verbatim, plus:
-   read `docs/LEARNINGS.md` and the listed ADRs BEFORE writing code.
+   read the `docs/LEARNINGS.md` index, the package's area file(s) under
+   `docs/learnings/` and the listed ADRs BEFORE writing code.
 3. Pipeline inside the session is unchanged and mandatory:
    coder implements → reviewer reviews → FAIL loops back → PASS.
    Packages marked **[Fable]** additionally get a second review pass with
@@ -25,7 +26,8 @@ what may run in parallel and what must stay serial — and why.
    — the marker names the boundary, not a model.
 4. One package = one branch = one conventional commit (squash if needed).
    Update `docs/PROJECT_PLAN.md` checkboxes (with evidence notes) and
-   append distilled findings to `docs/LEARNINGS.md` in the same commit.
+   append distilled findings to the area file under `docs/learnings/` in
+   the same commit.
 5. Merge to `main` only after PASS. Rebase onto `main` first; the only
    expected cross-branch conflicts are `LEARNINGS.md` / `PROJECT_PLAN.md` /
    `README.md` — all append-biased: resolve by keeping BOTH sides.

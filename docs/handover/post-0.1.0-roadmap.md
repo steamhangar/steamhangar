@@ -97,7 +97,12 @@ Antrag filed and the rollout on the operator's stack checked.
   `docs/PROJECT_PLAN.md` §11 item 13 B (signed APK, standard-user check,
   real-device checks, rollout gates (h) and (i), release notes) and the
   failed-jobs measurement (Subnautica, Timberborn, Hogwarts Legacy);
-  RELEASE-SPLIT-1 (below, decided 2026-10-18).
+  RELEASE-SPLIT-1 (below, decided 2026-10-18). Cut 2026-11-01 into
+  waves, see the rc22 block in `docs/PROJECT_PLAN.md` (NITS-AUDIT-1 is
+  split into NITS-WEB-1, NITS-APP-1, NITS-API-1, SAMPLE-IP-1,
+  CI-SIGN-PIN-1, RELEASE-NOTES-1; the rest of its list stays here).
+  ADD-DEVICE-QR-1 (operator report 2026-11-01): only one QR sharp at a
+  time in Add a device (eye toggle on the download QR).
 - **Added 2026-10-18 (planning session):** VERIFY-FAST-1 (lean default
   `dev.sh verify`, `verify full` for tags and nightly; decided Weg A),
   CARD-CORNERS-1 (Library card corners with real covers, waiting for a
@@ -341,6 +346,7 @@ once decided (the decision then lives in the item it belongs to).
   (recommended): sweep them to `10.0.0.x` (still RFC1918) in one test-only
   package; Weg B: keep them as generic examples and only keep the
   operator's server VLAN out.
+  **Decided 2026-11-01: Weg A**, rc22 package SAMPLE-IP-1.
 - **ANDROID-ADD-DEVICE-1** (found 2026-10-31 in ANDROID-REDESIGN-1a; rc21
   ships without it): the Android app has no "Add a device" flow to
   restyle (no pairing link, QR, install command, /v1/dist client or secret
@@ -349,6 +355,9 @@ once decided (the decision then lives in the item it belongs to).
   FLAG_SECURE, sensitive clipboard) because it hands out the API key from
   the phone; Weg B (coder's and orchestrator's recommendation): drop it
   from Android parity, device setup stays on the web.
+  **Decided 2026-11-01: Weg B.** Operator's reason: the Android screen is
+  only reachable once the app is already set up, so a pairing flow there
+  adds nothing; device setup stays on the web.
 - **D18 GitHub org** (v0.2.0): ask GitHub for the inactive `GameHangar`
   name, pick a free org, or keep `steamhangar` and rename product and repo
   only. See D18.
