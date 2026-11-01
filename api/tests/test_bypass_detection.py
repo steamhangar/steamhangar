@@ -29,7 +29,7 @@ from vault_api.main import create_app
 AUTH = {"X-Api-Key": TEST_API_KEY}
 
 #: The address every fixture client reports from and appears in the log as.
-ADDR = "192.168.1.42"
+ADDR = "10.0.0.42"
 
 
 def utc_now() -> datetime:
@@ -153,12 +153,12 @@ def test_every_address_a_client_reported_from_is_kept(tmp_path: Path) -> None:
     client, settings = make_client(tmp_path)
     conn = conn_for(settings)
     try:
-        add_report(conn, "laptop", source_addr="192.168.1.50")
-        add_report(conn, "laptop", source_addr="192.168.1.51")
+        add_report(conn, "laptop", source_addr="10.0.0.50")
+        add_report(conn, "laptop", source_addr="10.0.0.51")
     finally:
         conn.close()
 
-    assert one_client(client)["source_addrs"] == ["192.168.1.50", "192.168.1.51"]
+    assert one_client(client)["source_addrs"] == ["10.0.0.50", "10.0.0.51"]
 
 
 def test_a_report_with_no_usable_peer_address_is_still_stored(
@@ -186,8 +186,8 @@ def test_a_report_with_no_usable_peer_address_is_still_stored(
 @pytest.mark.parametrize(
     "raw, expected",
     [
-        ("192.168.1.42", "192.168.1.42"),
-        ("  192.168.1.42  ", "192.168.1.42"),
+        ("10.0.0.42", "10.0.0.42"),
+        ("  10.0.0.42  ", "10.0.0.42"),
         ("fe80::1%eth0", "fe80::1%eth0"),
         (None, None),
         ("", None),
@@ -214,10 +214,10 @@ def test_cache_statistics_are_summed_across_every_address_of_a_client(
     client, settings = make_client(tmp_path)
     conn = conn_for(settings)
     try:
-        add_report(conn, "laptop", source_addr="192.168.1.50")
-        add_report(conn, "laptop", source_addr="192.168.1.51")
-        add_cache_stats(conn, "192.168.1.50", hits=5, misses=1, bytes_served=1000)
-        add_cache_stats(conn, "192.168.1.51", hits=7, misses=3, bytes_served=2000)
+        add_report(conn, "laptop", source_addr="10.0.0.50")
+        add_report(conn, "laptop", source_addr="10.0.0.51")
+        add_cache_stats(conn, "10.0.0.50", hits=5, misses=1, bytes_served=1000)
+        add_cache_stats(conn, "10.0.0.51", hits=7, misses=3, bytes_served=2000)
         # Another machine's traffic must not leak into this client's totals.
         add_cache_stats(conn, "10.0.0.9", hits=99, misses=99, bytes_served=99)
         set_feed_age(conn, days_old=10)
@@ -419,10 +419,10 @@ def test_only_the_bypassing_client_is_flagged_among_several(
     client, settings = make_client(tmp_path)
     conn = conn_for(settings)
     try:
-        add_report(conn, "good-pc", source_addr="192.168.1.10")
-        add_report(conn, "ghost-pc", source_addr="192.168.1.11")
+        add_report(conn, "good-pc", source_addr="10.0.0.10")
+        add_report(conn, "ghost-pc", source_addr="10.0.0.11")
         set_feed_age(conn, days_old=10)
-        add_cache_stats(conn, "192.168.1.10", last_seen=ago(hours=1))
+        add_cache_stats(conn, "10.0.0.10", last_seen=ago(hours=1))
     finally:
         conn.close()
 

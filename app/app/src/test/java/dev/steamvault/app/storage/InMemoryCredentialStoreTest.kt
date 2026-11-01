@@ -23,13 +23,13 @@ class InMemoryCredentialStoreTest {
     fun `set then get round-trips each value independently`() {
         val store = InMemoryCredentialStore()
         store.setApiKey("test-key-123")
-        store.setBaseUrl("http://192.168.1.50:8080")
+        store.setBaseUrl("http://10.0.0.50:8080")
         store.setProfileKind(ProfileKind.SYSTEM_VPN)
         store.setSteamId64("76561198042117903")
         store.setSteamPersonaName("Example Persona")
 
         assertEquals("test-key-123", store.getApiKey())
-        assertEquals("http://192.168.1.50:8080", store.getBaseUrl())
+        assertEquals("http://10.0.0.50:8080", store.getBaseUrl())
         assertEquals(ProfileKind.SYSTEM_VPN, store.getProfileKind())
         assertEquals("76561198042117903", store.getSteamId64())
         assertEquals("Example Persona", store.getSteamPersonaName())

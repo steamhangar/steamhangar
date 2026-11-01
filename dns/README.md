@@ -104,7 +104,7 @@ at the end of step 1 regardless of whether you add rule 2.**
 1. **A-record rewrite (does the whole job on current AdGuard Home):**
    *Filters -> DNS rewrites -> Add DNS rewrite*
    - Domain: `*.steamcontent.com`
-   - Answer: your cache server's IP address (e.g. `192.168.1.50`)
+   - Answer: your cache server's IP address (e.g. `10.0.0.50`)
    - Save. This is a wildcard match (per AdGuard Home's own rewrite
      matching rules, a leading `*.` matches any subdomain but not the bare
      domain itself -- steamcontent.com itself has no legitimate use here,
@@ -151,11 +151,11 @@ instead:
    ```toml
    [misc]
      dnsmasq_lines = [
-       "address=/steamcontent.com/192.168.1.50",
+       "address=/steamcontent.com/10.0.0.50",
        "local=/steamcontent.com/"
      ]
    ```
-   (replace `192.168.1.50` with your actual cache server IP). This is
+   (replace `10.0.0.50` with your actual cache server IP). This is
    the exact same two-line pairing as `dns/dnsmasq.conf.template` in this
    repo, for the same reason (ADR requirement 6, explained above) --
    Pi-hole's dnsmasq core (FTL) has the exact same AAAA-forwarding
@@ -178,10 +178,10 @@ config-file drop-ins on v6:
 
 1. Create `/etc/dnsmasq.d/02-steamhangar.conf` on the Pi-hole host:
    ```
-   address=/steamcontent.com/192.168.1.50
+   address=/steamcontent.com/10.0.0.50
    local=/steamcontent.com/
    ```
-   (replace `192.168.1.50` with your actual cache server IP).
+   (replace `10.0.0.50` with your actual cache server IP).
 2. Apply it: `pihole restartdns` (or `service pihole-FTL restart` on
    older installs).
 3. Verify both directions exactly as in step 3 above.
@@ -199,10 +199,10 @@ overrides) inside the `server:` clause:
 ```
 server:
     local-zone: "steamcontent.com." redirect
-    local-data: "steamcontent.com. A 192.168.1.50"
+    local-data: "steamcontent.com. A 10.0.0.50"
 ```
 
-(replace `192.168.1.50` with your actual cache server IP), then reload
+(replace `10.0.0.50` with your actual cache server IP), then reload
 (`unbound-control reload`, or restart the `unbound` service). Two things
 worth understanding about why this is only one directive pair, not two:
 
@@ -271,7 +271,7 @@ amplification/reflection attacks against third parties, using your
 homelab's bandwidth and IP reputation.
 
 **Binding requirement, honoured by WP 1.9's Compose file:** port 53 must be
-published on a specific LAN-only host IP, e.g. `"192.168.1.50:53:53/udp"`
+published on a specific LAN-only host IP, e.g. `"10.0.0.50:53:53/udp"`
 (+ the matching `/tcp` line) -- **never** a bare `"53:53/udp"`, which
 Docker maps to `0.0.0.0` on the host, i.e. every interface including any
 WAN-facing one. WP 1.9 states this explicitly in `deploy/compose.yaml`

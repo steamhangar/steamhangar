@@ -149,13 +149,13 @@ func TestValidAgentVersion_Grammar(t *testing.T) {
 // de-duplicated, sorted and capped; nothing usable omits the field.
 func TestPayload_WithLocalAddrsFiltersLikeTheServer(t *testing.T) {
 	p := Payload{ClientID: "pc", AppIDs: []int{440}}.WithLocalAddrs([]string{
-		"fd00:10:0:0::42", "127.0.0.1", "fe80::1", "::ffff:192.168.1.42", "192.168.1.42", "junk",
+		"fd00:10:0:0::42", "127.0.0.1", "fe80::1", "::ffff:10.0.0.42", "10.0.0.42", "junk",
 	})
-	if want := []string{"192.168.1.42", "fd00:10::42"}; !reflect.DeepEqual(p.LocalAddrs, want) {
+	if want := []string{"10.0.0.42", "fd00:10::42"}; !reflect.DeepEqual(p.LocalAddrs, want) {
 		t.Errorf("LocalAddrs = %v, want %v", p.LocalAddrs, want)
 	}
 	body, _ := json.Marshal(p)
-	if want := `{"client_id":"pc","appids":[440],"local_addrs":["192.168.1.42","fd00:10::42"]}`; string(body) != want {
+	if want := `{"client_id":"pc","appids":[440],"local_addrs":["10.0.0.42","fd00:10::42"]}`; string(body) != want {
 		t.Errorf("body = %s, want %s", body, want)
 	}
 
@@ -176,7 +176,7 @@ func TestPayload_WithLocalAddrsFiltersLikeTheServer(t *testing.T) {
 
 func TestPayload_HasAndWithoutNameTheOptionalFields(t *testing.T) {
 	p, _ := Payload{ClientID: "pc", AppIDs: []int{440}}.WithPresence("0.1.0", 10*time.Minute, true)
-	p = p.WithLocalAddrs([]string{"192.168.1.42"})
+	p = p.WithLocalAddrs([]string{"10.0.0.42"})
 	for _, name := range OptionalFields {
 		if !p.Has(name) {
 			t.Errorf("Has(%q) = false on a full payload", name)

@@ -107,7 +107,7 @@ def test_missing_route_files_mean_no_gateways(tmp_path: Path) -> None:
         ("0.0.0.0", True),
         ("10.88.0.2", False),  # same subnet, not the gateway
         ("10.89.0.1", False),  # gateway column without RTF_GATEWAY
-        ("192.168.1.42", False),
+        ("10.0.0.42", False),
         ("testclient", False),  # not an IP literal: the rule does not speak
         ("", False),
     ],
@@ -132,8 +132,8 @@ def test_stated_addresses_are_stored_canonical_sorted_and_deduplicated(
             "appids": [440],
             "local_addrs": [
                 "fd00:10:0:0::42",
-                "192.168.1.42",
-                "::ffff:192.168.1.42",
+                "10.0.0.42",
+                "::ffff:10.0.0.42",
                 "2001:db8::42",
             ],
         },
@@ -145,7 +145,7 @@ def test_stated_addresses_are_stored_canonical_sorted_and_deduplicated(
         stored = conn.execute("SELECT local_addrs FROM agent_reports").fetchone()[0]
     finally:
         conn.close()
-    assert json.loads(stored) == ["192.168.1.42", "2001:db8::42", "fd00:10::42"]
+    assert json.loads(stored) == ["10.0.0.42", "2001:db8::42", "fd00:10::42"]
 
 
 @pytest.mark.parametrize("value", [None, []])
@@ -167,9 +167,9 @@ def test_absent_or_empty_stated_addresses_store_null(tmp_path: Path, value) -> N
     "bad",
     [
         ["not-an-ip"],
-        ["192.168.1.300"],
-        [" 192.168.1.42"],
-        ["192.168.1.42\n"],
+        ["10.0.0.300"],
+        [" 10.0.0.42"],
+        ["10.0.0.42\n"],
         ["fe80::1%eth0"],
         ["127.0.0.1"],
         ["::1"],
@@ -179,7 +179,7 @@ def test_absent_or_empty_stated_addresses_store_null(tmp_path: Path, value) -> N
         ["224.0.0.1"],
         ["ff02::1"],
         [42],
-        "192.168.1.42",
+        "10.0.0.42",
         [f"10.0.0.{n}" for n in range(1, 10)],  # nine: one over the cap
     ],
 )
@@ -228,7 +228,7 @@ def _stamp_without_local_addrs(db_path: str, version: int) -> None:
                 report_interval_seconds INTEGER
             );
             INSERT INTO agent_reports (client_id, reported_at, appids, source_addr)
-            VALUES ('old-pc', '2026-10-01T00:00:00Z', '[440]', '192.168.1.7');
+            VALUES ('old-pc', '2026-10-01T00:00:00Z', '[440]', '10.0.0.7');
             UPDATE schema_version SET version = {version};
             """
         )
@@ -272,7 +272,7 @@ def test_a_v23_database_gains_the_column_and_keeps_its_rows(tmp_path: Path) -> N
                 report_interval_seconds INTEGER
             );
             INSERT INTO agent_reports (client_id, reported_at, appids, source_addr)
-            VALUES ('old-pc', '2026-10-01T00:00:00Z', '[440]', '192.168.1.7');
+            VALUES ('old-pc', '2026-10-01T00:00:00Z', '[440]', '10.0.0.7');
             UPDATE schema_version SET version = 23;
             """
         )
@@ -293,7 +293,7 @@ def test_a_v23_database_gains_the_column_and_keeps_its_rows(tmp_path: Path) -> N
         conn.close()
     assert version == SCHEMA_VERSION >= 24
     assert columns["local_addrs"] == "TEXT"
-    assert (row["source_addr"], row["local_addrs"]) == ("192.168.1.7", None)
+    assert (row["source_addr"], row["local_addrs"]) == ("10.0.0.7", None)
 
 
 # ===========================================================================
@@ -303,17 +303,17 @@ def test_a_v23_database_gains_the_column_and_keeps_its_rows(tmp_path: Path) -> N
 
 def test_effective_addresses_per_report(routes) -> None:
     hop = peer_hops.forwarding_hop_filter()
-    stated = json.dumps(["192.168.1.42"])
-    assert agent_reports.effective_addrs(GATEWAY, stated, hop) == ["192.168.1.42"]
+    stated = json.dumps(["10.0.0.42"])
+    assert agent_reports.effective_addrs(GATEWAY, stated, hop) == ["10.0.0.42"]
     # Stated addresses win over a usable peer too: they are what the PC uses.
-    assert agent_reports.effective_addrs("192.168.1.9", stated, hop) == ["192.168.1.42"]
-    assert agent_reports.effective_addrs("192.168.1.9", None, hop) == ["192.168.1.9"]
+    assert agent_reports.effective_addrs("10.0.0.9", stated, hop) == ["10.0.0.42"]
+    assert agent_reports.effective_addrs("10.0.0.9", None, hop) == ["10.0.0.9"]
     assert agent_reports.effective_addrs(GATEWAY, None, hop) == []
     assert agent_reports.effective_addrs("127.0.0.1", None, hop) == []
     assert agent_reports.effective_addrs(None, None, hop) == []
     # A hand-edited, invalid stored list reads as "stated nothing".
     assert agent_reports.effective_addrs(GATEWAY, '["127.0.0.1"]', hop) == []
-    assert agent_reports.effective_addrs("192.168.1.9", "{bad", hop) == ["192.168.1.9"]
+    assert agent_reports.effective_addrs("10.0.0.9", "{bad", hop) == ["10.0.0.9"]
 
 
 def test_clients_lists_stated_addresses_and_keeps_the_raw_peer_for_diagnosis(
@@ -323,14 +323,14 @@ def test_clients_lists_stated_addresses_and_keeps_the_raw_peer_for_diagnosis(
     conn = conn_for(settings)
     try:
         agent_reports.store_report(
-            conn, "pc", [440], 10, source_addr=GATEWAY, local_addrs=["192.168.1.42"]
+            conn, "pc", [440], 10, source_addr=GATEWAY, local_addrs=["10.0.0.42"]
         )
     finally:
         conn.close()
     row = one_client(TestClient(create_app(settings)))
-    assert row["source_addrs"] == ["192.168.1.42"]
+    assert row["source_addrs"] == ["10.0.0.42"]
     assert row["peer_addrs"] == [GATEWAY]
-    assert row["reported_addrs"] == ["192.168.1.42"]
+    assert row["reported_addrs"] == ["10.0.0.42"]
 
 
 # ===========================================================================
@@ -370,7 +370,7 @@ def test_control_the_same_old_agent_from_a_real_lan_peer_is_accused(
     client, settings = make_client(tmp_path)
     conn = _accusing_setup(settings)
     try:
-        add_report(conn, "old-agent", source_addr="192.168.1.42")
+        add_report(conn, "old-agent", source_addr="10.0.0.42")
     finally:
         conn.close()
     assert one_client(client)["bypass_suspected"] is True
@@ -383,9 +383,9 @@ def test_a_new_agent_behind_the_gateway_is_judged_on_its_stated_address(
     conn = _accusing_setup(settings)
     try:
         agent_reports.store_report(
-            conn, "pc", [440], 10, source_addr=GATEWAY, local_addrs=["192.168.1.42"]
+            conn, "pc", [440], 10, source_addr=GATEWAY, local_addrs=["10.0.0.42"]
         )
-        add_cache_stats(conn, "192.168.1.42", bytes_served=12345)
+        add_cache_stats(conn, "10.0.0.42", bytes_served=12345)
     finally:
         conn.close()
     row = one_client(client)
@@ -403,7 +403,7 @@ def test_a_new_agent_absent_from_the_cache_log_is_still_accused(
     conn = _accusing_setup(settings)
     try:
         agent_reports.store_report(
-            conn, "pc", [440], 10, source_addr=GATEWAY, local_addrs=["192.168.1.42"]
+            conn, "pc", [440], 10, source_addr=GATEWAY, local_addrs=["10.0.0.42"]
         )
         add_cache_stats(conn, GATEWAY)  # gateway traffic is not the PC's
     finally:
@@ -455,14 +455,14 @@ def overview(tmp_path: Path, routes):
     conn = get_connection(settings.db_path)
     try:
         agent_reports.store_report(
-            conn, "new-pc", [440], 10, source_addr=GATEWAY, local_addrs=["192.168.1.42"]
+            conn, "new-pc", [440], 10, source_addr=GATEWAY, local_addrs=["10.0.0.42"]
         )
         agent_reports.store_report(conn, "old-pc", [570], 10, source_addr=GATEWAY)
         write_log(
             tmp_path / "event.log",
-            event_line(time=iso(now - timedelta(minutes=2)), addr="192.168.1.42",
+            event_line(time=iso(now - timedelta(minutes=2)), addr="10.0.0.42",
                        cache_status="HIT", depot="100", bytes_sent="1000"),
-            event_line(time=iso(now - timedelta(minutes=2)), addr="192.168.1.77",
+            event_line(time=iso(now - timedelta(minutes=2)), addr="10.0.0.77",
                        cache_status="HIT", depot="200", bytes_sent="700"),
             event_line(time=iso(now - timedelta(minutes=1)), addr=GATEWAY,
                        cache_status="MISS", depot="300", bytes_sent="300"),
@@ -478,14 +478,14 @@ def test_the_overview_maps_agents_on_their_stated_addresses(overview) -> None:
         "/v1/clients/overview", headers=AUTH
     ).json()
     by_key = {entry["key"]: entry for entry in body["clients"]}
-    assert by_key["agent:new-pc"]["addresses"] == ["192.168.1.42"]
+    assert by_key["agent:new-pc"]["addresses"] == ["10.0.0.42"]
     assert by_key["agent:new-pc"]["stats"]["bytes_served"] == 1000
     # The old agent gets no address: the gateway is nobody's.
     assert by_key["agent:old-pc"]["addresses"] == []
     # So the gateway and the old PC's LAN address stay address clients.
     assert by_key[f"addr:{GATEWAY}"]["kind"] == "address"
-    assert by_key["addr:192.168.1.77"]["kind"] == "address"
-    assert "addr:192.168.1.42" not in by_key
+    assert by_key["addr:10.0.0.77"]["kind"] == "address"
+    assert "addr:10.0.0.42" not in by_key
 
 
 def test_address_owners_never_assigns_a_hop(tmp_path: Path, routes) -> None:
@@ -495,8 +495,8 @@ def test_address_owners_never_assigns_a_hop(tmp_path: Path, routes) -> None:
         agent_reports.store_report(conn, "a", [1], 10, source_addr=GATEWAY)
         agent_reports.store_report(conn, "b", [1], 10, source_addr="127.0.0.1")
         agent_reports.store_report(
-            conn, "c", [1], 10, source_addr=GATEWAY, local_addrs=["192.168.1.5"]
+            conn, "c", [1], 10, source_addr=GATEWAY, local_addrs=["10.0.0.5"]
         )
-        assert agent_reports.address_owners(conn) == {"192.168.1.5": "c"}
+        assert agent_reports.address_owners(conn) == {"10.0.0.5": "c"}
     finally:
         conn.close()

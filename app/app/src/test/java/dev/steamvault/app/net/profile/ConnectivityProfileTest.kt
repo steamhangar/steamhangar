@@ -26,9 +26,9 @@ class ConnectivityProfileTest {
 
     @Test
     fun `SystemVpnProfile allows a plain http LAN URL`() {
-        val profile = SystemVpnProfile("http://192.168.1.50:8080")
+        val profile = SystemVpnProfile("http://10.0.0.50:8080")
         assertTrue(profile.allowsCleartext)
-        assertEquals("http://192.168.1.50:8080", profile.baseUrl)
+        assertEquals("http://10.0.0.50:8080", profile.baseUrl)
     }
 
     @Test
@@ -95,7 +95,7 @@ class ConnectivityProfileTest {
     fun `interceptor lets http through for a profile that allows it (SystemVpn)`() {
         val profile = FakeProfile(allowsCleartext = true)
         val interceptor = CleartextPolicyInterceptor(profile)
-        val request = Request.Builder().url("http://192.168.1.50/v1/health").build()
+        val request = Request.Builder().url("http://10.0.0.50/v1/health").build()
         val chain = FakeChain(request)
 
         interceptor.intercept(chain)

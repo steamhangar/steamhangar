@@ -36,7 +36,7 @@ function agentClient(over = {}) {
     key: "agent:desk-pc",
     kind: "agent",
     client_id: "desk-pc",
-    addresses: ["192.168.1.42"],
+    addresses: ["10.0.0.42"],
     connected: true,
     agent_presence: "online",
     last_active: iso(8 * 60_000),
@@ -52,7 +52,7 @@ function agentClient(over = {}) {
     ],
     recent_unattributed_bytes: 1.4 * GIB,
     name: null,
-    name_addr: "192.168.1.42",
+    name_addr: "10.0.0.42",
     display_name: "desk-pc",
     agent: { client_id: "desk-pc", agent_version: "0.1.0-rc18.1", last_reported_at: iso(5 * 60_000), bypass_suspected: false },
     ...over,
@@ -99,7 +99,7 @@ test("MUTATION TARGET: the card has the three zones and the footer, in kit.html'
     ["identity", "activity", "recent", "cf"],
   );
   assert.equal(text(c, ".ch .nm"), "desk-pc");
-  assert.equal(text(c, ".ch .meta"), "vault-agent · 192.168.1.42");
+  assert.equal(text(c, ".ch .meta"), "vault-agent · 10.0.0.42");
   assert.ok(c.querySelector(".ch .ico"), "icon tile");
   assert.equal(text(c, ".sec"), "Recently loaded");
 });

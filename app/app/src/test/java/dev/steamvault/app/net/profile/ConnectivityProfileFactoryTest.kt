@@ -16,19 +16,19 @@ class ConnectivityProfileFactoryTest {
 
     @Test
     fun `base URL alone with no profile kind yields no profile`() {
-        val store = InMemoryCredentialStore().apply { setBaseUrl("http://192.168.1.50:8080") }
+        val store = InMemoryCredentialStore().apply { setBaseUrl("http://10.0.0.50:8080") }
         assertNull(buildConnectivityProfile(store))
     }
 
     @Test
     fun `system_vpn kind builds a SystemVpnProfile that allows cleartext`() {
         val store = InMemoryCredentialStore().apply {
-            setBaseUrl("http://192.168.1.50:8080")
+            setBaseUrl("http://10.0.0.50:8080")
             setProfileKind(ProfileKind.SYSTEM_VPN)
         }
         val profile = buildConnectivityProfile(store)
         assertTrue(profile is SystemVpnProfile)
-        assertEquals("http://192.168.1.50:8080", profile?.baseUrl)
+        assertEquals("http://10.0.0.50:8080", profile?.baseUrl)
         assertTrue(profile!!.allowsCleartext)
     }
 
@@ -64,7 +64,7 @@ class ConnectivityProfileFactoryTest {
     @Test
     fun `an unrecognized profile kind string yields no profile`() {
         val store = InMemoryCredentialStore().apply {
-            setBaseUrl("http://192.168.1.50:8080")
+            setBaseUrl("http://10.0.0.50:8080")
             setProfileKind("carrier_pigeon")
         }
         assertNull(buildConnectivityProfile(store))

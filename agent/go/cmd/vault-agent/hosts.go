@@ -118,7 +118,7 @@ func requireCacheIP(raw, what string, stderr io.Writer) (string, int, bool) {
 	ip := strings.TrimSpace(raw)
 	if ip == "" {
 		fmt.Fprintf(stderr, "%s: --cache-ip is required "+
-			"(the LAN IPv4 address of the machine running vault-core, e.g. 192.168.1.50)\n", what)
+			"(the LAN IPv4 address of the machine running vault-core, e.g. 10.0.0.50)\n", what)
 		return "", 2, false
 	}
 	if err := hostsfile.ValidateCacheIP(ip); err != nil {
@@ -187,7 +187,7 @@ func hostsApply(args []string, stdout, stderr io.Writer, progName string) int {
 	fs := flag.NewFlagSet("hosts apply", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	cacheIP := fs.String("cache-ip", "",
-		"IPv4 address of the machine running vault-core, e.g. 192.168.1.50 (required)")
+		"IPv4 address of the machine running vault-core, e.g. 10.0.0.50 (required)")
 	hostsPath := hostsPathFlag(fs)
 	if code, ok := parseHostsFlags(fs, args[1:], stderr); !ok {
 		return code

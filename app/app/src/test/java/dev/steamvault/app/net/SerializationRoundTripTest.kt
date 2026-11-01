@@ -309,7 +309,7 @@ class SerializationRoundTripTest {
         val json = """
             {"client_id":"gaming-pc","first_seen":"2026-08-05T20:44:34Z",
              "last_reported_at":"2026-08-05T20:44:36Z","app_count":3,
-             "source_addrs":["192.168.1.42"],"cache_hits":120,"cache_misses":4,
+             "source_addrs":["10.0.0.42"],"cache_hits":120,"cache_misses":4,
              "bytes_served":734003200,"last_seen_in_cache_log":"2026-08-10T09:00:00Z",
              "bypass_suspected":true}
         """.trimIndent()
@@ -317,7 +317,7 @@ class SerializationRoundTripTest {
         val decoded = decodeStrictAndLenient<ClientOut>(json)
 
         assertEquals("gaming-pc", decoded.client_id)
-        assertEquals(listOf("192.168.1.42"), decoded.source_addrs)
+        assertEquals(listOf("10.0.0.42"), decoded.source_addrs)
         assertEquals(true, decoded.bypass_suspected)
     }
 

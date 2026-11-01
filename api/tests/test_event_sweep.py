@@ -44,7 +44,7 @@ def event_line(
     *,
     version: str = "v1",
     time: str = "2026-08-09T14:03:11+02:00",
-    addr: str = "192.168.1.42",
+    addr: str = "10.0.0.42",
     cache_status: str = "MISS",
     depot: str = "70403",
     uri: str | None = None,
@@ -160,7 +160,7 @@ def test_a_well_formed_v1_line_parses_every_field() -> None:
 
     assert reason == ""
     assert line is not None
-    assert line.addr == "192.168.1.42"
+    assert line.addr == "10.0.0.42"
     assert line.cache_status == "MISS"
     assert line.depotid == 70403
     assert line.bytes_sent == 999232
@@ -264,7 +264,7 @@ def test_a_bytes_sent_field_that_is_not_ascii_digits_is_refused(value: str) -> N
 
 @pytest.mark.parametrize(
     "addr",
-    ["", "192.168.1.42 ", "a" * 65, "192.168.1.42\x07", "192 168"],
+    ["", "10.0.0.42 ", "a" * 65, "10.0.0.42\x07", "192 168"],
 )
 def test_a_malformed_client_address_is_refused(addr: str) -> None:
     line, reason = event_sweep.parse_line(event_line(addr=addr))
@@ -340,7 +340,7 @@ def test_statistics_count_hits_misses_bypasses_and_errors_separately(
 
     event_sweep.sweep_once(db, settings, moment())
 
-    totals = stats_for(db, "192.168.1.42")
+    totals = stats_for(db, "10.0.0.42")
     assert totals["requests"] == 5
     assert totals["hits"] == 2
     assert totals["misses"] == 1
@@ -360,15 +360,15 @@ def test_statistics_are_kept_per_client_address(
     settings = make_settings(tmp_path, cooldown=0)
     write_log(
         Path(settings.event_log_path),
-        event_line(addr="192.168.1.10", cache_status="HIT"),
-        event_line(addr="192.168.1.11", cache_status="HIT"),
-        event_line(addr="192.168.1.11", cache_status="HIT"),
+        event_line(addr="10.0.0.10", cache_status="HIT"),
+        event_line(addr="10.0.0.11", cache_status="HIT"),
+        event_line(addr="10.0.0.11", cache_status="HIT"),
     )
 
     event_sweep.sweep_once(db, settings, moment())
 
-    assert stats_for(db, "192.168.1.10")["hits"] == 1
-    assert stats_for(db, "192.168.1.11")["hits"] == 2
+    assert stats_for(db, "10.0.0.10")["hits"] == 1
+    assert stats_for(db, "10.0.0.11")["hits"] == 2
 
 
 def test_client_statistics_retention_keeps_only_the_newest_windows(
@@ -382,7 +382,7 @@ def test_client_statistics_retention_keeps_only_the_newest_windows(
         event_sweep.sweep_once(db, settings, moment(minute=index * 10))
 
     rows = db.execute(
-        "SELECT COUNT(*) FROM client_cache_stats WHERE client_addr = '192.168.1.42'"
+        "SELECT COUNT(*) FROM client_cache_stats WHERE client_addr = '10.0.0.42'"
     ).fetchone()[0]
     assert rows == 2, "retention must bound the per-address window history"
 
@@ -399,7 +399,7 @@ def test_two_sweeps_in_the_same_second_merge_instead_of_colliding(
     append_log(log, event_line(cache_status="HIT"))
     event_sweep.sweep_once(db, settings, moment())  # identical timestamp
 
-    assert stats_for(db, "192.168.1.42")["hits"] == 2
+    assert stats_for(db, "10.0.0.42")["hits"] == 2
 
 
 # ===========================================================================
@@ -439,7 +439,7 @@ def test_the_partial_line_is_read_whole_once_its_newline_arrives(
 
     assert outcome.lines == 1
     # Exactly once in total — not zero (lost) and not twice (duplicated).
-    totals = stats_for(db, "192.168.1.42")
+    totals = stats_for(db, "10.0.0.42")
     assert totals["requests"] == 2
     assert totals["hits"] == 1
     assert totals["misses"] == 1
@@ -472,7 +472,7 @@ def test_a_genuine_partial_tail_is_not_treated_as_an_oversized_line(
         handle.write(b"\n")
     second = event_sweep.sweep_once(db, settings, moment(minute=5))
     assert second.lines == 1
-    assert stats_for(db, "192.168.1.42")["hits"] == 1
+    assert stats_for(db, "10.0.0.42")["hits"] == 1
 
 
 def test_an_oversized_line_is_skipped_once_and_the_sweep_continues(
@@ -508,7 +508,7 @@ def test_an_oversized_line_is_skipped_once_and_the_sweep_continues(
     second = event_sweep.sweep_once(db, settings, moment(minute=5))
     assert second.lines == 2
     assert second.oversized_skipped_bytes == 0, "skipped exactly once"
-    assert stats_for(db, "192.168.1.42")["hits"] == 2
+    assert stats_for(db, "10.0.0.42")["hits"] == 2
     assert event_sweep.read_state(db).oversized_skips_total == 1
 
 
@@ -620,14 +620,14 @@ def test_a_crash_before_the_commit_does_not_double_count_statistics(
         event_sweep.sweep_once(db, settings, moment())
 
     # Nothing was committed: no counters, and the cursor never moved.
-    assert stats_for(db, "192.168.1.42")["hits"] == 0
+    assert stats_for(db, "10.0.0.42")["hits"] == 0
     assert event_sweep.read_state(db).cursor_offset == 0
 
     monkeypatch.setattr(event_sweep, "commit_batch", real_commit)
     outcome = event_sweep.sweep_once(db, settings, moment(minute=5))
 
     assert outcome.lines == 3
-    assert stats_for(db, "192.168.1.42")["hits"] == 3, "exactly once, not twice"
+    assert stats_for(db, "10.0.0.42")["hits"] == 3, "exactly once, not twice"
 
 
 def test_a_failure_inside_the_commit_rolls_the_statistics_back(
@@ -655,13 +655,13 @@ def test_a_failure_inside_the_commit_rolls_the_statistics_back(
     with pytest.raises(RuntimeError):
         event_sweep.sweep_once(db, settings, moment())
 
-    assert stats_for(db, "192.168.1.42")["hits"] == 0, "rolled back with the cursor"
+    assert stats_for(db, "10.0.0.42")["hits"] == 0, "rolled back with the cursor"
     assert event_sweep.read_state(db).cursor_offset == 0
 
     monkeypatch.setattr(event_sweep, "_prune_depot_misses", real_prune)
     event_sweep.sweep_once(db, settings, moment(minute=5))
 
-    assert stats_for(db, "192.168.1.42")["hits"] == 3, "exactly once, not twice"
+    assert stats_for(db, "10.0.0.42")["hits"] == 3, "exactly once, not twice"
 
 
 def test_a_re_read_batch_does_not_enqueue_a_second_job(
@@ -705,7 +705,7 @@ def test_a_backlog_larger_than_one_batch_is_consumed_across_sweeps(
     third = event_sweep.sweep_once(db, settings, moment(minute=10))
 
     assert first.lines + second.lines + third.lines == 6
-    assert stats_for(db, "192.168.1.42")["hits"] == 6
+    assert stats_for(db, "10.0.0.42")["hits"] == 6
 
 
 # ===========================================================================
@@ -785,7 +785,7 @@ def test_a_zero_cooldown_disables_the_trigger_entirely(
     assert outcome.enqueued == ()
     assert queued_appids(db) == []
     # Statistics still work — that is the point of having an off switch here.
-    assert stats_for(db, "192.168.1.42")["misses"] == 1
+    assert stats_for(db, "10.0.0.42")["misses"] == 1
 
 
 def test_the_per_sweep_cap_drops_further_candidates_and_says_so(
@@ -991,7 +991,7 @@ def test_a_manifest_miss_does_not_trigger(
 
     assert outcome.enqueued == ()
     # Still counted, in both the client stats and the depot stats.
-    assert stats_for(db, "192.168.1.42")["misses"] == 1
+    assert stats_for(db, "10.0.0.42")["misses"] == 1
     assert db.execute(
         "SELECT miss_count FROM depot_miss_stats WHERE depotid = 70403"
     ).fetchone()["miss_count"] == 1
@@ -1023,7 +1023,7 @@ def test_a_miss_that_did_not_succeed_never_triggers(
 
     assert outcome.enqueued == ()
     assert queued_appids(db) == []
-    assert stats_for(db, "192.168.1.42")["errors"] == 1
+    assert stats_for(db, "10.0.0.42")["errors"] == 1
 
 
 def test_many_misses_for_one_app_in_one_batch_enqueue_exactly_one_job(
@@ -1038,7 +1038,7 @@ def test_many_misses_for_one_app_in_one_batch_enqueue_exactly_one_job(
 
     assert outcome.enqueued == (440,)
     assert queued_appids(db) == [440]
-    assert stats_for(db, "192.168.1.42")["misses"] == 500
+    assert stats_for(db, "10.0.0.42")["misses"] == 500
 
 
 # ===========================================================================
@@ -1135,7 +1135,7 @@ def test_a_denied_truncation_keeps_sweeping_correctly_and_is_recorded(
     # The sweep itself succeeded completely.
     assert outcome.swept is True
     assert outcome.lines == 4
-    assert stats_for(db, "192.168.1.42")["hits"] == 4
+    assert stats_for(db, "10.0.0.42")["hits"] == 4
     assert outcome.truncated is False
     assert outcome.truncate_denied is True
     # The cursor advanced past everything read — nothing is lost or re-read.
@@ -1165,7 +1165,7 @@ def test_repeated_denials_keep_counting_and_never_break_the_sweep(
         assert outcome.swept is True
 
     assert event_sweep.read_state(db).truncate_denied_count == 3
-    assert stats_for(db, "192.168.1.42")["hits"] == 12
+    assert stats_for(db, "10.0.0.42")["hits"] == 12
 
 
 def test_another_oserror_during_truncation_is_not_reported_as_denied(
@@ -1202,7 +1202,7 @@ def test_writing_continues_correctly_after_this_sweeper_truncated(
     outcome = event_sweep.sweep_once(db, settings, moment(minute=5))
 
     assert outcome.lines == 1
-    assert stats_for(db, "192.168.1.42")["misses"] == 1
+    assert stats_for(db, "10.0.0.42")["misses"] == 1
 
 
 # ===========================================================================
@@ -1238,7 +1238,7 @@ def test_the_interval_gate_allows_one_sweep_per_interval(
     assert too_soon.swept is False
     assert too_soon.skipped_reason == "interval-not-elapsed"
     assert due.swept is True
-    assert stats_for(db, "192.168.1.42")["hits"] == 2
+    assert stats_for(db, "10.0.0.42")["hits"] == 2
 
 
 def test_the_sweep_runs_regardless_of_the_prefill_schedule_window(

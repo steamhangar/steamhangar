@@ -741,8 +741,8 @@ The optional, **opt-in** DNS-free deployment mode from `docs/PROJECT_PLAN.md`
 elevated Notepad.
 
 ```
-vault-agent hosts apply  --cache-ip 192.168.1.50   # add/update the entry
-vault-agent hosts status [--cache-ip 192.168.1.50] # what's there, and is it live?
+vault-agent hosts apply  --cache-ip 10.0.0.50      # add/update the entry
+vault-agent hosts status [--cache-ip 10.0.0.50]    # what's there, and is it live?
 vault-agent hosts remove                           # clean uninstall
 ```
 
@@ -753,7 +753,7 @@ only way this code writes anything is you typing `hosts apply`.
 
 ```
 # BEGIN steamhangar-agent (managed block - do not edit inside)
-192.168.1.50 lancache.steamcontent.com
+10.0.0.50 lancache.steamcontent.com
 # END steamhangar-agent
 ```
 
@@ -838,7 +838,7 @@ The hosts file is only writable by an Administrator.
 Open a new terminal as Administrator (press Start, type "Terminal",
 then press Ctrl+Shift+Enter) and run exactly:
 
-    vault-agent.exe hosts apply --cache-ip 192.168.1.50
+    vault-agent.exe hosts apply --cache-ip 10.0.0.50
 ```
 
 There is deliberately **no self-elevation** (`runas` / re-exec under sudo) in
@@ -1027,16 +1027,16 @@ want to confirm the real thing end to end, this is the whole procedure:
    `Ctrl+Shift+Enter`).
 3. Apply, using your cache server's LAN IP:
    ```
-   vault-agent hosts apply --cache-ip 192.168.1.50
+   vault-agent hosts apply --cache-ip 10.0.0.50
    ```
    Expect `absent -> present-correct`, a `backup:` path, and the three-line
    block echoed back.
 4. Confirm it is live:
    ```
-   vault-agent hosts status --cache-ip 192.168.1.50
+   vault-agent hosts status --cache-ip 10.0.0.50
    ```
    Expect `state: present-correct` and
-   `resolver: lancache.steamcontent.com -> 192.168.1.50`.
+   `resolver: lancache.steamcontent.com -> 10.0.0.50`.
    (`Resolve-DnsName lancache.steamcontent.com` is the independent
    second opinion.)
 5. **Fully quit and restart Steam** — tray icon → Exit, not just closing the

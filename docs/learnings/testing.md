@@ -151,3 +151,13 @@ at the end, under a dated heading, one entry each with the WP that proved it.
 
 ## 2026-10-31 — rc21 (GRAPH-RECENT-1, LOADING-NOW-1)
 - See also [process.md](process.md), this section: "**Sample addresses in tests: 10.0.0.x.** The operator's server VLAN ..."
+
+### 2026-11-01 SAMPLE-IP-1
+
+- Shortening example literals breaks column alignment: gofmt realigns Go
+  map literals (`gofmt -l`), and hand-aligned trailing comments in README
+  or compose code blocks need re-padding.
+- Sweeping into a subnet that tests already use creates prefix pairs
+  (10.0.0.5 vs 10.0.0.50); check every fixture that pairs an unrelated
+  address with the cache IP (safe here: exact string or whole-line checks).
+- Before touching a UI string, check whether a golden renders it.

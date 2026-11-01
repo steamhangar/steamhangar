@@ -499,7 +499,7 @@ field 1 below.
 Example line (tabs shown as `→` for readability):
 
 ```
-v1→2026-08-09T14:03:11+02:00→192.168.1.42→MISS→70403→/depot/70403/chunk/773d10050d99b2544665873ec2125b3bf273e8b2→999232→lancache.steamcontent.com→200
+v1→2026-08-09T14:03:11+02:00→10.0.0.42→MISS→70403→/depot/70403/chunk/773d10050d99b2544665873ec2125b3bf273e8b2→999232→lancache.steamcontent.com→200
 ```
 
 ### Escaping: `escape=default`, not `escape=json`
@@ -1239,8 +1239,8 @@ the defaults are literal; edit the two lines by hand there.
 HTTP log (`docker compose logs vault-core`), natively in `logs/tls.log`:
 
 ```
-02/Oct/2026:18:45:01 +0000 tls client=192.168.1.20 sni="cache2-ams1.steamcontent.com" target="cache2-ams1.steamcontent.com:443" upstream=155.133.248.13:443 status=200 bytes_sent=5321 bytes_received=812 session_time=0.412
-02/Oct/2026:18:45:07 +0000 tls client=192.168.1.20 sni="example.com" target="" upstream=- status=500 bytes_sent=0 bytes_received=0 session_time=0.051
+02/Oct/2026:18:45:01 +0000 tls client=10.0.0.20 sni="cache2-ams1.steamcontent.com" target="cache2-ams1.steamcontent.com:443" upstream=155.133.248.13:443 status=200 bytes_sent=5321 bytes_received=812 session_time=0.412
+02/Oct/2026:18:45:07 +0000 tls client=10.0.0.20 sni="example.com" target="" upstream=- status=500 bytes_sent=0 bytes_received=0 session_time=0.051
 ```
 
 **Container switch.** `VAULT_TLS_PASSTHROUGH` (image default `1`):
@@ -1325,7 +1325,7 @@ and `limit_conn=<PASSED|REJECTED|->` (`REJECTED` = 503 from the cap).
 `client=<address>`: `$remote_addr`, the direct TCP peer, IPv4 or IPv6 text
 form, the same key and meaning as the port-443 stream log's `client=`
 field. Example tail:
-`upstream_host="fake1.steamcontent.com" host="lancache.steamcontent.com" limit_conn=PASSED client=192.168.1.42`.
+`upstream_host="fake1.steamcontent.com" host="lancache.steamcontent.com" limit_conn=PASSED client=10.0.0.42`.
 No `X-Forwarded-For` is trusted (vault-core is never behind another
 proxy). A request that arrives through Docker's userland proxy (from the
 host itself or the loopback publish) shows the bridge gateway instead of

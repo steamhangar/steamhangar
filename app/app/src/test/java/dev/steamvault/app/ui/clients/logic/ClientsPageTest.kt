@@ -28,7 +28,7 @@ class ClientsPageTest {
         key = "agent:demon",
         kind = "agent",
         client_id = "demon",
-        addresses = listOf("192.168.1.20"),
+        addresses = listOf("10.0.0.20"),
         connected = true,
         last_active = "2026-10-14T11:56:00Z",
         installed_app_count = 12,
@@ -62,7 +62,7 @@ class ClientsPageTest {
         assertEquals("demon", clientName(agent))
         assertEquals("10.0.0.9", clientName(address))
         assertEquals("10.0.0.7", clientName(address.copy(addresses = emptyList(), key = "addr:10.0.0.7")))
-        assertEquals("vault-agent · 192.168.1.20", clientKindText(agent))
+        assertEquals("vault-agent · 10.0.0.20", clientKindText(agent))
         assertEquals("vault-agent · no address in the cache log", clientKindText(agent.copy(addresses = emptyList())))
         assertEquals("No agent · seen in the cache log", clientKindText(address))
     }
@@ -79,17 +79,17 @@ class ClientsPageTest {
 
     @Test
     fun `D15-NAMES the title is the server's display_name, the line keeps what it replaced`() {
-        val named = agent.copy(name = "Living room PC", name_addr = "192.168.1.20", display_name = "Living room PC")
+        val named = agent.copy(name = "Living room PC", name_addr = "10.0.0.20", display_name = "Living room PC")
         assertEquals("Living room PC", clientName(named))
-        assertEquals("vault-agent on \u2068demon\u2069 · 192.168.1.20", clientKindText(named))
+        assertEquals("vault-agent on \u2068demon\u2069 · 10.0.0.20", clientKindText(named))
         assertEquals(
             "vault-agent on \u2068demon\u2069 · no address in the cache log",
             clientKindText(named.copy(addresses = emptyList())),
         )
         // Unnamed, the server's display_name is the PC name: line unchanged.
-        val unnamed = agent.copy(name = null, name_addr = "192.168.1.20", display_name = "demon")
+        val unnamed = agent.copy(name = null, name_addr = "10.0.0.20", display_name = "demon")
         assertEquals("demon", clientName(unnamed))
-        assertEquals("vault-agent · 192.168.1.20", clientKindText(unnamed))
+        assertEquals("vault-agent · 10.0.0.20", clientKindText(unnamed))
         val namedAddr = address.copy(name = "frame", name_addr = "10.0.0.9", display_name = "frame")
         assertEquals("frame", clientName(namedAddr))
         assertEquals("No agent · 10.0.0.9 · seen in the cache log", clientKindText(namedAddr))

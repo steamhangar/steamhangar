@@ -192,8 +192,8 @@ against.
    point your router's DHCP-advertised DNS at it:
    ```bash
    # in deploy/.env:
-   #   CACHE_IP=192.168.1.50        <- LAN IP of this host
-   #   VAULT_DNS_BIND=192.168.1.50  <- publish :53 on that IP only, never 0.0.0.0
+   #   CACHE_IP=10.0.0.50        <- LAN IP of this host
+   #   VAULT_DNS_BIND=10.0.0.50  <- publish :53 on that IP only, never 0.0.0.0
    docker compose --profile dns up -d
    ```
 3. **Single gaming PC, no DNS server at all**: use vault-agent's opt-in

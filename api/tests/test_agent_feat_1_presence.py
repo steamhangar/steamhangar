@@ -91,7 +91,7 @@ def _make_v16_agent_reports(db_path: str) -> None:
         )
         conn.execute(
             "INSERT INTO agent_reports (client_id, reported_at, appids, source_addr) "
-            "VALUES ('old-pc', '2026-10-01T10:00:00Z', '[440, 730]', '192.168.1.20')"
+            "VALUES ('old-pc', '2026-10-01T10:00:00Z', '[440, 730]', '10.0.0.20')"
         )
         conn.execute("UPDATE schema_version SET version = 16")
         conn.commit()
@@ -119,7 +119,7 @@ def test_v16_database_gains_both_columns_in_place(tmp_path) -> None:
     assert types["report_interval_seconds"] == "INTEGER"
     # The existing row survives untouched, with "the agent did not say".
     assert row["appids"] == "[440, 730]"
-    assert row["source_addr"] == "192.168.1.20"
+    assert row["source_addr"] == "10.0.0.20"
     assert row["agent_version"] is None
     assert row["report_interval_seconds"] is None
 
