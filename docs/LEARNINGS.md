@@ -1375,3 +1375,10 @@ These are not style preferences; each entry cost a review round to learn.
   ("SAVED BY CACHE" clipped silently; only the golden showed it).
 - **Assert lower LazyColumn items only in a tall shot**: items below the
   viewport are never composed and `assertExists` fails.
+- **Material3 Button's 58dp minimum width applies only when the incoming
+  minWidth is 0**: `Modifier.widthIn(min = X)` gets below it; the 48dp
+  touch target stays via `minimumInteractiveComponentSize`.
+- **Pin up to the comma, not the closing paren** (`ExpertSwitchRow(x,`),
+  so adding a parameter does not break the pin.
+- **Roborazzi checks after `capture()` do not run on a golden mismatch**: a
+  new layout assert is only proven in the verifying run after the refresh.

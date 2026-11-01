@@ -4011,19 +4011,23 @@ below carry their own later dates, item 12 is the current one).
           at 360dp font130 from a demo game with packages and a
           Repair-eligible state) and one Library golden with metadata so the
           Filters button renders.
-        - [ ] **ANDROID-POLISH-1** (before the rc21 tag; REDESIGN-1c review
+        - [x] **ANDROID-POLISH-1** (45d41cf + goldens 8d42231; Settings strip dirty dots, Filters as funnel + count so the 411dp toolbar is one row, Overview times formatted, KDoc fixed) (before the rc21 tag; REDESIGN-1c review
           should-fixes) a dot with a spoken "(unsaved changes)" on each
           Settings strip tab whose section holds a draft, and on the expert
           switch row (web settings.js dirty dots); the Library Select
           checkbox wraps alone onto its own row when Filters shows
           (`library_411dp_font100_meta.png`, REDESIGN-1b toolbar), fix the
           row so typical vaults with metadata get one control row.
-        - [ ] nit (ANDROID-REDESIGN-1c review): SettingsController KDoc still
-          says "remembered open sections"; hero runner mini item and the
+        - [ ] nit (ANDROID-REDESIGN-1c review; KDoc and Overview ISO times fixed in POLISH-1): hero runner mini item and the
           0-devices caption descriptions differ from the web tile titles;
           downloads_stats shot heights 1000/1250 leave empty canvas; Overview
-          shows raw ISO times for "Last download"/"Confirmed current at";
           the "Surveyor Outfits" package row squeezes its name at 360dp/1.3.
+        - [ ] nit (ANDROID-POLISH-1 review): `assertOneControlRow` does not
+          check the sort button (`LibraryScreenshotTest.kt:646-659`);
+          `EXPERT_SECTION_ID` duplicates the id literal from
+          `SettingsLayout.SECTIONS`; import order in `GameDetailSheet.kt:67`;
+          at 360dp/1.3 with metadata Select still wraps alone (documented
+          worst case).
         - [x] **APP-NIGHT-GOLDEN-1** closed as works-as-designed (2026-10-31,
           reviewer-confirmed): the app is single-dark-theme on purpose
           (`Theme.kt`, no `values-night/`, mockup NOTES.md:117, app README);
