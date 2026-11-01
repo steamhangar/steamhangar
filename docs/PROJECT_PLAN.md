@@ -4173,6 +4173,9 @@ below carry their own later dates, item 12 is the current one).
         download says "Speed not measured yet: the server does not know this
         game's depots yet" (prod: Subnautica job 254); use the D19 depot
         preview (expected depots and size from the oracle) for the job card.
+        Scope addition (operator 2026-11-01): an ETA on the running job card
+        (remaining bytes / smoothed download speed, MISS bytes only, hidden
+        while unstable, for verify runs or above 24 h; "about N min left").
       - [ ] **RUNNER-NAME-1** (web + android) the "Prefill runner" row and
         captions read the product name from one constant (operator decision
         2026-11-01: today "SteamHangar", "GameHangar" with D18), so it is
