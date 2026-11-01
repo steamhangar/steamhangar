@@ -105,7 +105,7 @@ class TrafficApiTest {
         assertEquals(6L, runner.misses)
         assertEquals(2L, runner.errors)
         assertEquals(summary.bytes_served, summary.client_bytes_served!! + runner.bytes_served)
-        assertEquals("4.0 GB by the prefill runner, < 1 MB of that from the cache", headerTiles(t)!!.first { it.key == "loaded" }.detail)
+        assertEquals("4.0 GB by SteamHangar, < 1 MB of that from the cache", headerTiles(t)!!.first { it.key == "loaded" }.detail)
         assertEquals(5000000000L, summary.internet_bytes)
         assertEquals(524288.0, t.current!!.runner_bytes_per_second!!, 0.0)
         assertEquals(0.0002, runner.byte_hit_rate!!, 0.0)

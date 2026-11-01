@@ -69,8 +69,6 @@ class TrafficWebTwinTest {
                 "Hit rate",
                 "Saved by the cache",
                 "Loading now",
-                "all traffic incl. prefill runner, 5-10 min window",
-                "clients only, runner excluded",
                 // WP GRAPH-ZOOM: the 1-minute tier's bucket word and the new range captions.
                 "minute",
                 "5 minutes",
@@ -96,11 +94,15 @@ class TrafficWebTwinTest {
                 " loaded so far",
                 "Nothing finished \${RANGE_PHRASES[range]}.",
                 // WP D15-RUNNER: the "Loaded" tile's second line.
-                "`\${size} by the prefill runner, \${cached} of that from the cache`",
-                "`\${size} by the prefill runner`",
+                // WP RUNNER-NAME-1: named by the product (PRODUCT_NAME).
+                "`\${size} by \${PRODUCT_NAME}, \${cached} of that from the cache`",
+                "`\${size} by \${PRODUCT_NAME}`",
                 // WP METRIC-AUDIT: the scope details.
-                "`\${scope} · \${runner} by the prefill runner`",
-                "`clients only, runner excluded (runner: \${rate})`",
+                "`\${scope} · \${runner} by \${PRODUCT_NAME}`",
+                "`all traffic incl. \${PRODUCT_NAME}, 5-10 min window`",
+                "`\${liveScope} · \${liveRunner} by \${PRODUCT_NAME}`",
+                "const scope = `clients only, \${PRODUCT_NAME} excluded`;",
+                "`\${scope} (\${PRODUCT_NAME}: \${rate})`",
                 "machines with cache traffic in the last \${windowMinutes} min",
                 // WP LOADING-NOW-1 (ANDROID-DL-1): a live count's window in seconds.
                 "machines the cache served in the last \${windowSeconds} s",
@@ -120,7 +122,7 @@ class TrafficWebTwinTest {
                 "live: \"Live\",",
                 "live: \"in the last hour\",",
                 "{ live: \"1 h ago\",",
-                "`all traffic incl. prefill runner, last \${liveSeconds} s`",
+                "`all traffic incl. \${PRODUCT_NAME}, last \${liveSeconds} s`",
                 "export const LIVE_POLL_MS = 3000;",
                 "export const LIVE_SUMMARY_MS = 30000;",
                 "export const LIVE_SUMMARY_RANGE = \"1h\";",

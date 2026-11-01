@@ -160,8 +160,8 @@ class TrafficViewTest {
         )
         assertEquals(listOf("40.0 MB/s", "20.0 MB/s", "60.0 MB/s", "5.0 GB", "0 GB", "80%", "4.0 GB", "2"), tiles.map { it.value })
         assertEquals("machines with cache traffic in the last 15 min", tiles.last().detail)
-        assertEquals("all traffic incl. prefill runner, 5-10 min window", tiles.first().detail)
-        assertEquals("clients only, runner excluded", tiles.first { it.key == "hit-rate" }.detail)
+        assertEquals("all traffic incl. SteamHangar, 5-10 min window", tiles.first().detail)
+        assertEquals("clients only, SteamHangar excluded", tiles.first { it.key == "hit-rate" }.detail)
     }
 
     @Test
@@ -173,10 +173,10 @@ class TrafficViewTest {
             summary = base.summary!!.copy(prefill_runner = RunnerTrafficOut(bytes_served = 4 * gib, hit_bytes = 3 * gib, byte_hit_rate = 0.75)),
         )
         val tiles = headerTiles(t)!!.associateBy { it.key }
-        assertEquals("all traffic incl. prefill runner, 5-10 min window · 10.0 MB/s by the prefill runner", tiles.getValue("current").detail)
-        assertEquals("clients only, runner excluded (runner: 75%)", tiles.getValue("hit-rate").detail)
+        assertEquals("all traffic incl. SteamHangar, 5-10 min window · 10.0 MB/s by SteamHangar", tiles.getValue("current").detail)
+        assertEquals("clients only, SteamHangar excluded (SteamHangar: 75%)", tiles.getValue("hit-rate").detail)
         assertEquals("machines with cache traffic in the last 20 min", tiles.getValue("clients").detail)
-        assertEquals("4.0 GB by the prefill runner, 3.0 GB of that from the cache", tiles.getValue("loaded").detail)
+        assertEquals("4.0 GB by SteamHangar, 3.0 GB of that from the cache", tiles.getValue("loaded").detail)
     }
 
     @Test
@@ -197,13 +197,13 @@ class TrafficViewTest {
             summary = base.summary!!.copy(client_bytes_served = 1 * gib, prefill_runner = RunnerTrafficOut(bytes_served = 4 * gib)),
         )
         val tiles = headerTiles(withRunner)!!.associateBy { it.key }
-        assertEquals("4.0 GB by the prefill runner", tiles.getValue("loaded").detail)
-        assertEquals("Served (cache + prefill): 5.0 GB, 4.0 GB by the prefill runner", tileDescription(tiles.getValue("loaded")))
+        assertEquals("4.0 GB by SteamHangar", tiles.getValue("loaded").detail)
+        assertEquals("Served (cache + prefill): 5.0 GB, 4.0 GB by SteamHangar", tileDescription(tiles.getValue("loaded")))
         // An older server (no runner figures) and a range without runner traffic: no line.
         assertNull(headerTiles(base)!!.first { it.key == "loaded" }.detail)
         assertNull(runnerDetail(base.summary!!.copy(prefill_runner = RunnerTrafficOut(bytes_served = 0))))
         assertNull(runnerDetail(null))
-        assertEquals("< 1 MB by the prefill runner", runnerDetail(SummaryOut(prefill_runner = RunnerTrafficOut(bytes_served = 1))))
+        assertEquals("< 1 MB by SteamHangar", runnerDetail(SummaryOut(prefill_runner = RunnerTrafficOut(bytes_served = 1))))
     }
 
     @Test
@@ -457,7 +457,7 @@ class TrafficViewTest {
         assertEquals(10 * mib, merged.current!!.bytes_per_second, 0.0)
         val current = headerTiles(merged)!!.first { it.key == "current" }
         assertEquals("10.0 MB/s", current.value)
-        assertEquals("all traffic incl. prefill runner, last 18 s · 2.0 MB/s by the prefill runner", current.detail)
+        assertEquals("all traffic incl. SteamHangar, last 18 s · 2.0 MB/s by SteamHangar", current.detail)
         assertEquals(
             headerTiles(summary)!!.filter { it.key != "current" },
             headerTiles(merged)!!.filter { it.key != "current" },
@@ -472,7 +472,7 @@ class TrafficViewTest {
         assertEquals("live", off.range)
         assertEquals(summary.current, off.current)
         assertEquals(
-            "all traffic incl. prefill runner, 5-10 min window",
+            "all traffic incl. SteamHangar, 5-10 min window",
             headerTiles(off)!!.first { it.key == "current" }.detail,
         )
         val stale = mergeLive(summary, LiveOut(event_feed = feed("stale"), current = LiveCurrentOut(bytes_per_second = 1.0)))
@@ -513,7 +513,7 @@ class TrafficViewTest {
         val tiles = headerTiles(merged)!!
         assertEquals("12.0 MB/s", tiles.first { it.key == "current" }.value)
         assertEquals(
-            "all traffic incl. prefill runner, last 17 s · 1.0 MB/s by the prefill runner",
+            "all traffic incl. SteamHangar, last 17 s · 1.0 MB/s by SteamHangar",
             tiles.first { it.key == "current" }.detail,
         )
         val clients = tiles.first { it.key == "clients" }

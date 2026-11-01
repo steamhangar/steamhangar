@@ -24,8 +24,9 @@
  *    log" and nothing more: no line here may claim the address is a PC, a
  *    person or a game console.
  *  - The prefill runner (WP D15-RUNNER) is the server itself downloading;
- *    its title is the server's `display_name` ("Prefill runner") and the
- *    line under it says so. Traffic from before the runner first marked its
+ *    its title is the product's name (`clientTitle`, WP RUNNER-NAME-1:
+ *    `PRODUCT_NAME`, not the server's `display_name` "Prefill runner") and
+ *    the line under it says it is this server's prefill downloads. Traffic from before the runner first marked its
  *    address stays with that address (api/README.md "The prefill runner in
  *    the client figures").
  *  - "Installed" exists for agent clients only (`installed_app_count`).
@@ -41,6 +42,7 @@ import { formatAgo } from "./format.js";
 import { canRename, isolate } from "./client-names.js";
 import { UNKNOWN_APP_NAME } from "./app-names.js";
 import { isReleaseVersion } from "./agent-install.js";
+import { PRODUCT_NAME } from "./product.js";
 import { DASH, RANGE_PHRASES, formatRate, formatSpeed, formatTrafficBytes } from "./traffic-view.js";
 import { describeBypassClient, isRemovableClientId, presenceLine } from "./clients-view.js";
 
@@ -74,6 +76,18 @@ export function clientName(client) {
   if (Array.isArray(client.addresses) && client.addresses[0]) return client.addresses[0];
   const key = typeof client.key === "string" ? client.key : "";
   return key.startsWith("addr:") ? key.slice(5) : key || DASH;
+}
+
+/**
+ * WP RUNNER-NAME-1: the title a card shows. The prefill runner is the
+ * server itself, so it is titled by the product (`PRODUCT_NAME`), whatever
+ * `display_name` the server sent ("Prefill runner"; the runner cannot be
+ * renamed); every other client keeps `clientName`.
+ * @param {object} client
+ * @returns {string}
+ */
+export function clientTitle(client) {
+  return isRunnerClient(client) ? PRODUCT_NAME : clientName(client);
 }
 
 /**
@@ -570,7 +584,7 @@ export function clientCardModel(client, { range, serverVersion = null, nowMs = D
   return {
     key: String(client.key),
     kind,
-    name: clientName(client),
+    name: clientTitle(client),
     meta: clientKindText(client),
     pill: connectionPill(client),
     outdated: outdated ? { ...outdated, text: outdatedAgentText(outdated) } : null,

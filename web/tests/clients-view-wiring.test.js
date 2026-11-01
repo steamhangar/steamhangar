@@ -190,7 +190,8 @@ test("MUTATION TARGET: D15-RUNNER — the runner card is its own kind, titled by
   await until(() => card(s, "runner") !== null, "runner card");
   const r = card(s, "runner");
   assert.equal(r.getAttribute("data-kind"), "runner");
-  assert.equal(text(r, ".nm"), "Prefill runner");
+  // WP RUNNER-NAME-1: the product's name, not the server's display_name.
+  assert.equal(text(r, ".nm"), "SteamHangar");
   assert.equal(text(r, '[data-role="client-kind"]'), "This server's prefill downloads · 172.18.0.1");
   assert.equal(r.querySelector('[data-role="rename-client"]'), null, "no rename: name_addr is null");
   assert.equal(r.querySelector('[data-role="installed"]'), null);
