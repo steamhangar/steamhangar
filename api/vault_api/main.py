@@ -445,7 +445,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # WP UPD-1: ONE update-check runner, shared by the scheduler tick and
     # POST /v1/updates/check so the two triggers can never overlap.
     # Constructing it starts no thread; each run starts its own.
-    app.state.update_checker = UpdateCheckRunner(settings.db_path)
+    app.state.update_checker = UpdateCheckRunner(settings.db_path, size_cache=app.state.size_cache)
     app.state.scheduler = PrefillScheduler(
         settings,
         webhook_notifier=app.state.webhook_notifier,

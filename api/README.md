@@ -62,6 +62,7 @@ api/
 │   ├── prefill.py        # SteamPrefill runner + depot attribution
 │   ├── worker.py         # the single background job worker thread
 │   ├── sizes.py          # depot disk walk, TTL size cache, summary aggregation
+│   ├── storage_balance.py # where the bytes on disk come from (WP STORAGE-BALANCE-1)
 │   ├── deletion.py       # per-game deletion: path/link guards, shared-depot plan
 │   ├── agent_reports.py  # agent snapshots: store, ADR-0002 diff, retention
 │   ├── manifests.py      # manifest parsers (.bin / cache-stored), pure functions
@@ -2494,6 +2495,44 @@ per tracked game is less data than the mapping query already reads.
   up to the nearest existing ancestor directory first (a fresh install may not
   have created it yet); `null` if no ancestor exists at all (defensive, should
   not happen on a real filesystem).
+- **`storage_balance`** (WP STORAGE-BALANCE-1, additive; older servers do
+  not send it) — see "Storage balance" below.
+
+### Storage balance (WP STORAGE-BALANCE-1)
+
+Where `total_bytes` comes from (`vault_api/storage_balance.py`, operator
+decision 2026-11-01). Computed from the same `SizeCache` snapshot, the
+`depot_app_map` and the stored completeness rows (`load_index`, current
+targets): no extra disk walk, no oracle traffic. All sizes in bytes.
+
+| Field | Meaning |
+|---|---|
+| `on_disk_bytes` | total of the size walk (= `total_bytes`) |
+| `planned_bytes` | `expected_bytes` of the current target manifest over every measured (app, depot) pair, each (depot, manifest) once |
+| `present_bytes` | the same over `present_bytes` (capped at expected) |
+| `measured_depots` | depots with at least one measured pair |
+| `old_builds_bytes` | per measured depot: on disk minus its present bytes, floored at 0 — older builds, damaged chunks, stored manifest copies, and current-build chunks downloaded since the last measurement (present bytes stay frozen until the next update check, up to one interval). An estimate: GC also keeps beta-branch chunk sets |
+| `unmeasured_bytes` / `unmeasured_depots` | mapped depot directories with no measured pair (tool/config packages, DLC/content packages, not-owned apps, a target nobody fetched yet) |
+| `unmapped_bytes` / `unmapped_depots` | depot directories with no mapping (the same set as `unmapped_depots`) |
+| `unexplained_bytes` | `on_disk - present - old_builds - unmeasured - unmapped`: should be 0; negative when present bytes exceed a depot's bytes on disk — the size count and the last check disagree (files changed in between, e.g. a delete or GC), or a depot measured against two manifests that share chunks |
+| `warning` / `warning_reason` | true when `old_builds + abs(unexplained)` is above 15 % of `on_disk` or above 50 GB (constants `WARN_FRACTION`, `WARN_BYTES`; GB = 2^30 bytes, the unit `zfs list` and the UIs print). The reason names the amount and the action: garbage collection reclaims old builds; Auto-GC only cleans a game after its own prefill, so a cache with many updated games keeps the warning until GC runs |
+
+The update check logs the balance as one INFO line after every run (after
+the completeness step, skipped on shutdown). It reads the shared `SizeCache`
+with `peek`: no walk (not even the background refresh of an expired
+snapshot) and no wait, so a run never blocks on the disk while it holds the
+run lock. An expired snapshot is used and its age is in the line; with no
+usable snapshot (none yet, or invalidated after a job, a delete or GC) it
+logs `storage balance: skipped, no current size snapshot ...` instead:
+
+```
+storage balance: on disk X GB, planned Y GB, present Z GB, old builds A GB, unmeasured B GB (n depots), unmapped C GB (m depots), unexplained D GB, sizes from a walk N min old
+```
+
+and once at WARNING (`storage balance warning: <reason>`) when the flag
+first turns on in this process (an INFO line when it clears again). A failure
+here is logged and never changes the check's outcome. The web UI shows the
+figures as a "Storage balance" card in Settings -> Expert settings.
 
 ## Per-game deletion (WP 1.6)
 

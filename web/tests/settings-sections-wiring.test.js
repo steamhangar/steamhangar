@@ -259,8 +259,8 @@ test("MUTATION TARGET: the normal page carries no expert row; the switch shows t
     assert.ok(expert.querySelectorAll("div").includes(field(s, key)), `${key} sits in the Expert section`);
   }
   const groups = expert.querySelectorAll("div.fcard").map((g) => g.getAttribute("data-group"));
-  assert.deepEqual(groups, ["bandwidth", "housekeeping", "debug"], "one field card per expert group");
-  assert.deepEqual(expert.querySelectorAll("h3").map((h) => h.textContent), ["Bandwidth & connections", "Housekeeping", "Debug"]);
+  assert.deepEqual(groups, ["bandwidth", "housekeeping", "debug", "storage-balance"], "one field card per expert group, then the read-only storage balance (WP STORAGE-BALANCE-1)");
+  assert.deepEqual(expert.querySelectorAll("h3").map((h) => h.textContent), ["Bandwidth & connections", "Housekeeping", "Debug", "Storage balance"]);
 
   const sw = q(s, "expert-switch");
   assert.equal(sw.getAttribute("role"), "switch");

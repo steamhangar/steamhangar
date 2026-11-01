@@ -15,13 +15,22 @@ collection" there, plans in ``vault_api/gc.py`` and executes in
 from __future__ import annotations
 
 import logging
+from dataclasses import asdict
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, Response, status
 from pydantic import BaseModel, ConfigDict, StrictBool
 
-from vault_api import cache_completeness, cache_repair, deletion, group_delete, jobs
+from vault_api import (
+    cache_completeness,
+    cache_repair,
+    deletion,
+    group_delete,
+    jobs,
+    storage_balance,
+)
 from vault_api.auth import require_api_key
-from vault_api.deps import DbOpener, db_opener, get_cache_root, get_size_cache
+from vault_api.config import Settings
+from vault_api.deps import DbOpener, db_opener, get_cache_root, get_settings, get_size_cache
 from vault_api.sizes import SizeCache, build_cache_summary
 
 logger = logging.getLogger(__name__)
@@ -43,6 +52,27 @@ class UnmappedDepotsOut(BaseModel):
     size_bytes: int
 
 
+class StorageBalanceOut(BaseModel):
+    """WP STORAGE-BALANCE-1: how ``total_bytes`` splits
+    (``vault_api.storage_balance``); all sizes in bytes."""
+
+    on_disk_bytes: int
+    planned_bytes: int
+    present_bytes: int
+    measured_depots: int
+    old_builds_bytes: int
+    unmeasured_bytes: int
+    unmeasured_depots: int
+    unmapped_bytes: int
+    unmapped_depots: int
+    #: Should be 0. Negative = present bytes above a depot's bytes on disk:
+    #: the size count and the last check disagree (files changed in between,
+    #: or a depot measured against two builds).
+    unexplained_bytes: int
+    warning: bool
+    warning_reason: str | None
+
+
 class CacheSummaryOut(BaseModel):
     #: Actual disk usage of depot/, each depot counted exactly once — may be
     #: LESS than the sum of every game's size_bytes on GET /v1/games, since
@@ -55,6 +85,9 @@ class CacheSummaryOut(BaseModel):
     #: Free space on the filesystem backing VAULT_CACHE_ROOT; null if it
     #: could not be determined (see sizes.free_disk_bytes).
     free_disk_bytes: int | None
+    #: WP STORAGE-BALANCE-1 (additive): where ``total_bytes`` comes from.
+    #: Older servers do not send it; clients treat it as optional.
+    storage_balance: StorageBalanceOut
 
 
 @router.get("/v1/cache/summary", response_model=CacheSummaryOut)
@@ -62,8 +95,10 @@ def get_cache_summary(
     open_db: DbOpener = Depends(db_opener),
     size_cache: SizeCache = Depends(get_size_cache),
     cache_root: str = Depends(get_cache_root),
+    settings: Settings = Depends(get_settings),
 ) -> CacheSummaryOut:
-    """Total usage, top consumers, unmapped depots, free space (plan §6)."""
+    """Total usage, top consumers, unmapped depots, free space (plan §6),
+    and the storage balance (WP STORAGE-BALANCE-1)."""
     # The snapshot is taken BEFORE the connection is opened (WP 1.6 carry-over
     # fix #2 from the WP 1.5 review): a call with no usable snapshot (first
     # call, or right after an invalidation) waits for a whole depot/ walk, and
@@ -74,6 +109,8 @@ def get_cache_summary(
         summary = build_cache_summary(
             conn, cache_root, snapshot, top_n=TOP_CONSUMERS_LIMIT
         )
+        # Same snapshot, stored rows only: no extra walk, no oracle traffic.
+        balance = storage_balance.compute_from_db(conn, settings, snapshot.depot_bytes)
 
     return CacheSummaryOut(
         total_bytes=summary.total_bytes,
@@ -86,6 +123,7 @@ def get_cache_summary(
             size_bytes=summary.unmapped_depots.size_bytes,
         ),
         free_disk_bytes=summary.free_disk_bytes,
+        storage_balance=StorageBalanceOut(**asdict(balance)),
     )
 
 
