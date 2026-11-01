@@ -491,15 +491,16 @@ their open boxes (items 2, 7 and 11) are in section 12. Item 13 stays here.
       Measurements (orchestrator, read-only `dev.sh diag`, every rate step
       only after the operator's yes): D7 `:443`, CAP-503-LOOP-1,
       HIT-PATH-1, failed-jobs measurement. Operator: the B boxes below.
-      - [x] D7 `:443` measurement and the `VAULT_TLS_CLIENT_MAX_CONNS`
-        default (closes the D7 box above). Measured 2026-11-01 on the
-        operator line (rc21.1, rate `16m`): two queued Steam client
-        downloads of uncached games, 12 min sampled every 15 s: 0
-        established `:443` sessions at vault-core, `:80` client sockets
-        max 15, upstream sockets max 14 (cap 16); 14,007 MISS, all 200,
-        `limit_conn` PASSED, 0x `113`, upstream connect p95 0.000 s (max
-        1.05 s), MISS 122 Mbit/s average (rate-bound). The client did not
-        use `:443`, so the caps never came near 64/256: defaults stay.
+      - [ ] D7 `:443` measurement and the `VAULT_TLS_CLIENT_MAX_CONNS`
+        default (closes the D7 box above). First run 2026-11-01 (rc21.1,
+        rate `16m`) measured a PREFILL burst, not a Steam client: the two
+        downloads were queued in the app (runner jobs #266 Breathedge,
+        #267), which the orchestrator misread as client downloads. 12 min
+        sampled every 15 s: 0 `:443` sessions at vault-core, upstream
+        sockets max 14 (cap 16), 14,007 MISS all 200, `limit_conn` PASSED,
+        0x `113`, upstream connect p95 0.000 s, 122 Mbit/s (rate-bound).
+        Still open: the same with a Steam client installing an uncached
+        game (the `:443` per-client cap is a client limit).
       - [x] **ANDROID-VERIFY-SPEED-1** (android; found 2026-11-01) the web's
         decided Verifying speed line "Verifying files, no download speed"
         (VERIFY_SPEED_TEXT, DOWNLOADS-1, operator 2026-10-16) was never ported
@@ -589,8 +590,8 @@ their open boxes (items 2, 7 and 11) are in section 12. Item 13 stays here.
         meter numbers before and after DOC-DIET-1.
       - [x] CAP-503-LOOP-1 measure whether the 503 retry loop still occurs
         at the current rate (2026-11-01, same run as D7: 0x 503 in 14,007
-        MISS at `16m`; lower rates stay unmeasured, the release notes say
-        so)
+        MISS of a prefill burst at `16m`; a Steam client burst and lower
+        rates stay unmeasured, the release notes say so)
       - [ ] HIT-PATH-1 measure server-to-client HIT throughput (iperf3,
         nginx counters, hit-path read)
       - [ ] NITS-AUDIT-1 small items (list in the roadmap; the GameHangar
@@ -1206,7 +1207,7 @@ is done, tick it HERE, not in the archive.
   systemd user service. Open decision: service + tray (reports
   without a logged-on user, sees all users' libraries, needs admin to
   install) versus tray-only (per user, no admin).
-- [x] (origin: item 13 D) **D7 CORE-FIX-4 — hard cap on concurrent upstream connections**
+- [ ] (origin: item 13 D) **D7 CORE-FIX-4 — hard cap on concurrent upstream connections**
   (user decision 2026-10-04, after the first Steam-client MISS test
   behind CGNAT; see the release-notes item in B). The ADR-0017 pool
   caps idle connections per listed edge (8 per group, at most 4
@@ -1229,9 +1230,10 @@ is done, tick it HERE, not in the archive.
   (`VAULT_TLS_CLIENT_MAX_CONNS` default 64, `VAULT_TLS_MAX_CONNS`
   default 256, ADR-0021 addendum 2026-10-09). **Measured 2026-10-10**
   (operator line, client on `:80`): 0x `113` errors, upstream connect
-  time ~0, 16-23 upstream sockets, no SYN floods. **Closed 2026-11-01**
-  (rc22 block): the `:443` measurement found no client `:443` sessions in
-  a MISS burst, `VAULT_TLS_CLIENT_MAX_CONNS` keeps its default 64. Related
+  time ~0, 16-23 upstream sockets, no SYN floods. **Still open**, so
+  the box stays unticked: the `:443` measurement with a Steam client and
+  the default of `VAULT_TLS_CLIENT_MAX_CONNS` (a 2026-11-01 run measured
+  only a prefill burst, see the rc22 block). Related
   open measurement: CAP-503-LOOP-1 (roadmap audit list).
 - [ ] (origin: item 13 D) **D8 SCHED-FEAT-1 — weekday schedules, several windows per day** (user request
   2026-10-04: "the night check is no use if I come home at 17:00 and

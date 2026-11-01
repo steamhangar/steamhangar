@@ -2040,6 +2040,18 @@ and VERIFY-COLD-1 is prose in the Sunday-test box of the rc19.3 block.
   same eviction and the same client. The two AIO runs differed by 1.4 %.
   Cause unknown (ZFS metadata or prefetch state, other host load). Repeat
   baselines in future tuning tests; one baseline is not enough.
+- **APP-DL-CARD-1 (android, operator 2026-11-01, screenshot):** the
+  Downloads page's active-job card ("Breathedge, job #266 ... 0 MB/s · 0
+  GB loaded so far", Pause/Cancel) looks unpolished next to the
+  throughput card; needs a design pass (layout, spacing, hierarchy).
+- **APP-DL-STATS-1 (android, operator 2026-11-01, screenshot):** while
+  the runner prefilled at 13.2 MB/s (live chart, "highest 19.0 MB/s"), the
+  same page showed the active card "0 MB/s · 0 GB loaded so far", "Avg
+  while loading —", "Peak 0 MB/s", Served 0 GB, From internet 0 GB, Hit
+  rate "—", although `server_traffic` held 4.2 GB `miss_bytes` in that
+  hour. Also "highest 19.0 MB/s" above "Limit 16 MB/s" needs an
+  explanation (MB vs MiB, sampling). Check web vs app first (twin), then
+  the API feeds behind the cards.
 - **OUTPUT-TRIM-TAP-1 (dev tooling, found 2026-11-01):** the DEV-MODS-1
   output-trim mod omitted only 596 of 13,520 lines of `dev.sh test-web`
   (node TAP) and gave no file hint, so the harness still persisted 528 KB.
