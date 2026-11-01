@@ -1,4 +1,18 @@
-# rc21 handover (updated 2026-10-18 evening)
+# rc21 handover (updated 2026-11-01)
+
+## Status 2026-11-01: rc21 tagged
+
+`v0.1.0-rc21` is tagged on 5d94d11 (main CI 41275492016, Publish
+41275885575 green; dev verify 627/0). Every rc21 package passed review and
+is on main. Rollout Antrag A-20261101-01 is in the inbox (update rc20.2 ->
+rc21, drop `VAULT_NGINX_AIO=threads`, `VAULT_AUTO_GC` back to execute,
+HELLDIVERS 2 verify with `removed=[]`; note `VAULT_AUTO_COMPLETE_CACHED`
+defaults to true, no effect while the prod schedule is off). After the
+rollout: run the Antrag's checks, then ask AUTO-VERIFY-FULL-1. Open
+decisions for the operator: SAMPLE-IP-1, ANDROID-ADD-DEVICE-1 (roadmap).
+Next version: rc22 (release hardening). The text below is the older
+2026-10-18 state.
+
 
 For the next rc21 session. Read this, then the rc21 block in
 `docs/PROJECT_PLAN.md` (every open box and nit is there), `docs/LEARNINGS.md`

@@ -4092,7 +4092,7 @@ below carry their own later dates, item 12 is the current one).
         (prefill.py:611, worker.py:326); runner_identity.py docstring
         "at most VAULT_PREFILL_TIMEOUT_SECONDS" is now up to 3x plus pauses;
         stub_prefill `lancache_failures.txt` counter never reset.
-      - [ ] close: release gate (roadmap "Release plan"), tag `v0.1.0-rc21`
+      - [x] close: release gate (roadmap "Release plan"), tag `v0.1.0-rc21` (2026-11-01: tag on 5d94d11, main CI 41275492016 and Publish 41275885575 green, verify 627/0; rollout Antrag A-20261101-01 filed; prod rollout check pending)
 
     - [ ] **rc22 — release hardening, no new features** (packages to be cut
       in the version's planning session)
