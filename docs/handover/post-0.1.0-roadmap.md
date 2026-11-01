@@ -1753,6 +1753,18 @@ verify-stack 10 h flake, Android follow-ups (PC remove twin, onboarding
 saves id; now ANDROID-GAPS-1 in the audit list), D7 measurement on `:443`
 (TLS cap TODO in WORKPACKAGES), failed jobs Subnautica/Timberborn/Hogwarts
 Legacy (measure live on the next run).
+**Failed-jobs measurement closed (2026-11-01, read-only prod DB):** the
+three `error` jobs (Hogwarts Legacy: 4 h timeout; Timberborn: 649 and
+Subnautica: 9955 "requests failed unexpectedly") all ran on 2026-10-04/05,
+before CORE-FIX-4 (pooled edge + cap). Every later prefill of the three
+ended `done` (last: Hogwarts and Timberborn 2026-10-31, Subnautica
+2026-11-01); no prefill job of any app ended `error` since 2026-10-16.
+**HIT-PATH-1 data point (2026-11-01, prod access log):** two clients, 38
+min, 106.7 GB all HIT, 18 active minutes: 790 Mbit/s average, p95 1078
+Mbit/s per minute (both clients together), request_time p95 0.42 s; 0x
+503, 58 MISS with connect time <= 0.04 s. Still missing for HIT-PATH-1:
+iperf3 LAN baseline and nginx counters during a hit. D7 `:443` and
+CAP-503-LOOP-1 need a MISS-heavy download over `:443` (operator).
 
 **rc19 Downloads block (Jan's yes, 2026-10-15):**
 - METRIC-AUDIT: header "Current speed" (22.3 MB/s) vs the active job's own

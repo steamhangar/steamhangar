@@ -538,7 +538,12 @@ their open boxes (items 2, 7 and 11) are in section 12. Item 13 stays here.
         `apk-cert-digest.sh pin`; mismatch fails, unset pin fails tag runs
         and warns elsewhere. Tests `api/tests/test_ci_sign_pin_1.py`;
         operator steps in app/README.md "Pinned release certificate".
-      - [ ] **RELEASE-NOTES-1** (docs) v0.1.0 release notes (B box).
+      - [x] **RELEASE-NOTES-1** (docs) v0.1.0 release notes (B box).
+        (Done 2026-11-01: `docs/release-notes/v0.1.0.md`, operator-facing
+        text above the generated notes and the Components block; env vars
+        and defaults checked against the code. Update its table and "Open
+        measurements" before the v0.1.0 tag if D7 / CAP-503-LOOP-1 /
+        HIT-PATH-1 close or change a default.)
       - [x] **DOC-DIET-1** (docs + agents, user decision 2026-11-01,
         Weg A; first rc22 package) every coder/reviewer start reads
         `PROJECT_PLAN.md` (292 KB) and `LEARNINGS.md` (87 KB), roughly
@@ -741,6 +746,15 @@ their open boxes (items 2, 7 and 11) are in section 12. Item 13 stays here.
         `release.components.server` as the same release (web
         `coreComparison` + Android `aboutCoreComparison`, own note). Not hit
         by rc22 (all three components rebuilt).
+      - [ ] nit (RELEASE-NOTES-1 review): the release notes use relative
+        links (`../adr/...`, `../../deploy/README.md#...`), which break once
+        pasted into the GitHub release body; switch them to absolute blob
+        URLs for the `v0.1.0` tag when the body is written.
+      - [ ] nit (RELEASE-NOTES-1 review): `deploy/README.md` table "Upstream
+        edge and connection cap" still says "Empty = legacy per-name mode
+        (rollback)"; since rc18 the rollback is `VAULT_UPSTREAM_EDGE=off` and
+        blank means unset (same section's Rollback paragraph, `.env.example`).
+        The item 13 B release-notes text below has the same stale wording.
       - [ ] remaining nits: MAP-DRIFT-1 fail-safe tests, claim-vs-move race
         test, aria-live on queue move (fixed in NITS-WEB-1:
         `downloads-queue-reorder.test.js`), D19WiringTest pin,
@@ -1030,7 +1044,7 @@ is done, tick it HERE, not in the archive.
 - [ ] (origin: item 13 B) Rollout gates (h) and (i) by the operator: re-measure with the
   DNS rewrite, scheduler on, stack in the operator's stack repo,
   SQLite dump in the backup job.
-- [ ] (origin: item 13 B) Release notes for `v0.1.0`: the DS-Lite/CGNAT behaviour, the
+- [ ] (origin: item 13 B) Release notes for `v0.1.0` (draft: `docs/release-notes/v0.1.0.md`, RELEASE-NOTES-1; tick when it is the body of the `v0.1.0` release): the DS-Lite/CGNAT behaviour, the
   `extra_hosts` requirement with a dedicated `VAULT_CORE_BIND`, the
   bind-mount precondition (`cache/depot` + `tmp`; since SEC-FIX-5 only
   `cache/depot` is 101:101, the rest root:root, migrated at start; a

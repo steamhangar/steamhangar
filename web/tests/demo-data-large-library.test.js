@@ -17,15 +17,22 @@ test("generateSyntheticGames(0) produces nothing", () => {
   assert.deepEqual(generateSyntheticGames(0), []);
 });
 
-/** Strip the one field `makeGame()` derives from `Date.now()`
- * (`last_prefill_at`, via `isoAgo()`) before a determinism comparison — that
- * field is deliberately wall-clock-based (same as every curated seed game
- * above), so two calls a few milliseconds apart can legitimately differ in
- * it by a millisecond; the actually-deterministic contract this test pins
- * is everything the generator computes from `i` alone (appid, name, status,
- * depots). */
+/** Strip every field `makeGame()` derives from `Date.now()` (via
+ * `isoAgo()`) before a determinism comparison: `last_prefill_at` and
+ * `_demoCompletenessCheckedAt`. Both are deliberately wall-clock-based (same
+ * as every curated seed game above), so two calls can legitimately differ in
+ * them: by a millisecond for `last_prefill_at`, by a whole second for the
+ * second-truncated `_demoCompletenessCheckedAt` when the calls straddle a
+ * second boundary (CI flake FLAKE-DEMO-1, rc22). The other `isoAgo()` fields of
+ * `makeGame()` (`last_manifest_check`, `installed_on[].reported_at`) only
+ * carry wall-clock values when a caller passes them, and the synthetic
+ * generator never does (null / []), so they stay in the comparison. The
+ * actually-deterministic contract this test pins is everything the
+ * generator computes from `i` alone (appid, name, status, depots,
+ * needs_force). If `makeGame()` gains another wall-clock default, add it
+ * here. */
 function withoutWallClockFields(games) {
-  return games.map(({ last_prefill_at, ...rest }) => rest);
+  return games.map(({ last_prefill_at, _demoCompletenessCheckedAt, ...rest }) => rest);
 }
 
 test("generateSyntheticGames is deterministic — same count, same output every call", () => {
@@ -91,7 +98,7 @@ test("generateSyntheticGames: needs_force is the exact inverse of 'cached' (idle
 });
 
 // N4 (Opus review nitpick, WP 4e.1 fix round): pin the exact SHAPE of the
-// one wall-clock-derived field withoutWallClockFields() strips above, so a
+// `last_prefill_at`, one of the two fields withoutWallClockFields() strips, so a
 // future change to makeGame()'s isoAgo() usage can't silently drift without
 // a named test noticing — a "done" game must carry a real ISO timestamp (it
 // really was prefilled, per the same S1 reasoning above), an "idle" one must

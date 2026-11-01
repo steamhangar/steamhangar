@@ -161,3 +161,11 @@ at the end, under a dated heading, one entry each with the WP that proved it.
   (10.0.0.5 vs 10.0.0.50); check every fixture that pairs an unrelated
   address with the cache IP (safe here: exact string or whole-line checks).
 - Before touching a UI string, check whether a golden renders it.
+
+### 2026-11-01 FLAKE-DEMO-1
+
+- A determinism test that compares two calls of a demo or fixture
+  generator must strip every field built from `Date.now()`; fields rounded
+  to the second are the worse case, because two calls on either side of a
+  second boundary differ by a whole second (`_demoCompletenessCheckedAt`,
+  CI run 41326822533).

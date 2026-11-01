@@ -221,3 +221,13 @@ at the end, under a dated heading, one entry each with the WP that proved it.
 - A carried nit that survives only as a label ("D19WiringTest pin") cannot
   be fixed with certainty later: when a nit is carried into the plan, keep
   at least one sentence that says what is wrong and where.
+
+### 2026-11-01 RELEASE-NOTES-1
+
+- Old checklist text in the plan (item 13 B) describes the state when it
+  was written: it still said "empty `VAULT_UPSTREAM_EDGE` = rollback",
+  which rc18 changed to `off`. Release notes and briefs must take defaults
+  and switches from the code (`vault-settings-lib.sh`, compose comments),
+  not from plan wording.
+- Text meant for a GitHub release body needs absolute links; relative repo
+  links only work in the repo view.
