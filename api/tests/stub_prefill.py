@@ -36,6 +36,9 @@ from pathlib import Path
 
 #: The stub reads this file (next to itself) to learn what to do.
 CONTROL_FILENAME = "stub_control.json"
+#: The stub's own counter of failed cache detections (``lancache_fail_runs``);
+#: the name is spelled out again inside ``_STUB_SOURCE``.
+LANCACHE_FAILURES_FILENAME = "lancache_failures.txt"
 
 #: Verbatim from a real SteamPrefill v3.7.1 run with an empty Config/ and
 #: stdin closed (see vault_api/prefill.py's module docstring).
@@ -293,6 +296,8 @@ def make_stub(
     (directory / CONTROL_FILENAME).write_text(
         json.dumps(control, indent=2), encoding="utf-8"
     )
+    # NITS-API-1: a fresh stub starts with no failed detections behind it.
+    (directory / LANCACHE_FAILURES_FILENAME).unlink(missing_ok=True)
 
     if os.name == "nt":
         launcher = directory / "SteamPrefill.cmd"
@@ -323,6 +328,9 @@ def set_mode(directory: Path, **updates: object) -> None:
             value = _encode_manifest_bins(value)  # type: ignore[arg-type]
         control[key] = value
     path.write_text(json.dumps(control, indent=2), encoding="utf-8")
+    if "lancache_fail_runs" in updates:
+        # NITS-API-1: a new failure budget counts from zero again.
+        (directory / LANCACHE_FAILURES_FILENAME).unlink(missing_ok=True)
 
 
 def read_runs(directory: Path) -> list[dict[str, object]]:

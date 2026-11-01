@@ -91,6 +91,11 @@ MAX_READ_BYTES = event_sweep.MAX_BATCH_BYTES
 #: ...and one refresh at most this many calls; a larger backlog is skipped to
 #: its tail (the persisted tiers keep it).
 MAX_READS_PER_REFRESH = 3
+#: Bytes before the cursor kept to notice a file that was truncated in place
+#: and regrew past the cursor between two tails (NITS-API-1). An event line is
+#: ~150 bytes and starts with its timestamp, so the mark spans at least one
+#: whole line incl. its time: regrown lines match it only by a full replay.
+MARK_BYTES = 512
 #: First read of a fresh tailer: at most this much of the file's end.
 MAX_BACKFILL_BYTES = 4 * 1024 * 1024
 
@@ -220,6 +225,9 @@ class LiveTier:
         self._path: str | None = None
         self._cursor: int | None = None
         self._ino: int | None = None
+        #: The bytes just before ``_cursor`` after the last tail (NITS-API-1):
+        #: if they changed, the file was truncated and regrew past the cursor.
+        self._mark: bytes | None = None
         self._last_poll: float | None = None
         self._last_tail: float | None = None
         #: Minutes starting at or after this epoch are fully in the ring.
@@ -265,6 +273,7 @@ class LiveTier:
         self._path = path
         self._cursor = None
         self._ino = None
+        self._mark = None
         self._covered_from = None
 
     def _tail(self, path: str, now: datetime, epoch: float, gap: bool = False) -> int:
@@ -301,6 +310,13 @@ class LiveTier:
                 hole = True
             elif self._cursor is not None and size < self._cursor:
                 self._cursor = 0  # truncated by the sweep or rotated
+                fresh = False
+                hole = True
+            elif self._cursor and self._mark and self._read_mark(fd) != self._mark:
+                # Truncated in place and regrown past the cursor between two
+                # tails (no idle gap, same inode, not smaller): the bytes
+                # before the cursor are new lines, so start over at the top.
+                self._cursor = 0
                 fresh = False
                 hole = True
             self._ino = info.st_ino
@@ -365,9 +381,20 @@ class LiveTier:
                 else:
                     self._covered_from = float(_floor(epoch, 60) + 60)
         finally:
-            os.close(fd)
+            try:
+                self._mark = self._read_mark(fd)
+            except OSError:
+                self._mark = None  # no check on the next tail
+            finally:
+                os.close(fd)
         self._prune(epoch)
         return folded
+
+    def _read_mark(self, fd: int) -> bytes:
+        """The up to ``MARK_BYTES`` bytes that end at the cursor."""
+        cursor = self._cursor or 0
+        start = max(0, cursor - MARK_BYTES)
+        return os.pread(fd, cursor - start, start)
 
     def _fold(self, raw: str, now: datetime, epoch: float) -> float | None:
         line, _reason = event_sweep.parse_line(raw)

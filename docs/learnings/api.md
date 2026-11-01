@@ -243,3 +243,11 @@ at the end, under a dated heading, one entry each with the WP that proved it.
   containing app = A) and the oracle list. A replace-step removal plus
   `skip_own_mapping` cannot be undone in the same job, so the protection
   sits in the replace step itself (MAP-LOSS-1).
+
+### 2026-11-01 NITS-API-1
+
+- A tail that resumes at a saved byte offset must also notice an in-place
+  truncate plus regrow past the cursor between two reads, not only a
+  shrink: `live_tier` now keeps up to 512 bytes before the cursor
+  (`MARK_BYTES`) and restarts at offset 0 with a hole when they changed.
+  Found by the regrow-without-idle-gap test (6 of 8 lines folded before).

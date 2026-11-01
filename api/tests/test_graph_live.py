@@ -249,6 +249,29 @@ def test_a_log_that_regrew_past_the_old_cursor_is_not_resumed_mid_line(tmp_path:
     assert total_bytes(tier.stitch(clock(), no_rows, never_runner)) == 88
 
 
+def test_a_log_that_regrew_past_the_cursor_without_an_idle_gap_restarts_at_the_top(tmp_path: Path) -> None:
+    """NITS-API-1: truncated in place and regrown past the cursor between two
+    tails while the watcher stays active (same inode, file not smaller, no
+    gap). The bytes before the cursor are new lines: read from the top, do
+    not resume at the old offset (which lost the first lines or tore one)."""
+    log = tmp_path / "event.log"
+    write_log(log, line(1, 100))
+    tier, clock = tier_at()
+    tier.touch(clock())
+    assert tier.refresh(str(log), clock()) == 1
+    clock.advance(3)  # within the watcher window: no idle gap
+    with open(log, "r+b") as handle:
+        handle.truncate(0)
+    append_log(log, *[line(1, 11 + i, now=clock()) for i in range(8)])  # past the old cursor
+    tier.touch(clock())
+    assert tier.refresh(str(log), clock()) == 8
+    assert total_bytes(tier.stitch(clock(), no_rows, never_runner)) == 100 + sum(11 + i for i in range(8))
+    clock.advance(3)
+    append_log(log, line(1, 7, now=clock()))
+    tier.touch(clock())
+    assert tier.refresh(str(log), clock()) == 1, "an unchanged file resumes at its cursor"
+
+
 def test_a_read_starting_mid_file_aligns_to_the_next_line(tmp_path: Path) -> None:
     log = tmp_path / "event.log"
     write_log(log, *[line(5, 1) for _ in range(300)])

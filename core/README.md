@@ -1678,6 +1678,11 @@ while sleep 5; do echo "$(date +%s.%N) $(curl -s -o /dev/null \
   -w '%{time_total} %{http_code}' http://<vault-core>/lancache-heartbeat)"; done
 ```
 
+`%N` (nanoseconds) is a GNU `date` extension; a `date` without it (macOS/BSD,
+older BusyBox) prints a non-number there, which the report counts as a
+malformed line. There use `$(date +%s)` instead (whole seconds are enough at a
+5 s interval).
+
 The report then adds a "Heartbeat (outside probe)" section (p50/p95/max,
 probes >= 1 s and >= 100 ms, non-200 or failed `000`, the slowest three).
 

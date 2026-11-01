@@ -517,3 +517,32 @@ def test_queue_mode_retries_in_the_runner_and_keeps_the_lease_alive(
     assert excerpt.count("[vault-api] Depot mapping updated") == 1
     assert len(stub_prefill.read_runs(bindir)) == 2
     assert _mapped(settings.db_path) == [441]
+
+
+def test_a_new_stub_or_failure_budget_resets_the_detection_counter(tmp_path: Path) -> None:
+    """NITS-API-1 (RUNNER-RETRY-1 review nit): ``lancache_failures.txt`` used to
+    survive ``make_stub``/``set_mode``, so a second scenario in the same
+    directory started with the first one's failures already spent."""
+    bindir = tmp_path / "bin"
+    executable = stub_prefill.make_stub(
+        bindir, cache_root=str(tmp_path / "cache"), depots_by_app={440: [441]},
+        summary_text=TABLE_UPDATED, lancache_fail_runs=1,
+    )
+    counter = bindir / stub_prefill.LANCACHE_FAILURES_FILENAME
+
+    def run() -> int | None:
+        return prefill.run_prefill(
+            appid=440, steamprefill_path=executable, timeout_seconds=60
+        ).exit_code
+
+    assert run() == 1 and counter.read_text() == "1"
+    assert run() == 0
+    stub_prefill.set_mode(bindir, lancache_fail_runs=1)
+    assert not counter.exists()
+    assert run() == 1
+    stub_prefill.make_stub(
+        bindir, cache_root=str(tmp_path / "cache"), depots_by_app={440: [441]},
+        summary_text=TABLE_UPDATED, lancache_fail_runs=1,
+    )
+    assert not counter.exists()
+    assert run() == 1

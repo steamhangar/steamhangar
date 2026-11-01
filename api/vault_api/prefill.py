@@ -976,6 +976,13 @@ def apply_observed_mapping(
       temp cache keeps every manifest it ever fetched, so a depot Steam really moved to another app
       stays mapped while its old ``.bin`` exists -- the fail-safe direction;
       ``DELETE /v1/mapping/{depotid}/{appid}`` remains the correction path.
+      The same holds for the other two sources: the app's own recorded
+      manifest keeps a moved-away depot until that row goes, and the oracle
+      list keeps an existing row of a content-package depot on the game
+      whenever the game's oracle answer lists that depot. Keep-only means GC keeps
+      more, never less, and such a row can leave an old completeness target
+      ("Update available" / "not verified") until the mapping is deleted
+      (NITS-API-1, MAP-LOSS-1 review).
     - **Additive across apps.** Only rows for *this* ``appid`` are touched. A
       depot in ``observed`` that another app also maps keeps that other
       mapping — that is plan §4's shared-depot case (redistributables), and

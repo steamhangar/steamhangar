@@ -640,6 +640,12 @@ their open boxes (items 2, 7 and 11) are in section 12. Item 13 stays here.
         (D19WiringTest pin fixed in NITS-APP-1: the loaded-body pins use the enclosing-composable generation and a
         bounded `LoadedDetailBody` body instead of a contains-scan to the end
         of the file)
+        (NITS-API-1 added the three api tests:
+        `test_map_drift_1.py` unreadable-dir and unusable-id cases,
+        `test_d20_queue_order.py` claim-vs-move race and loser path,
+        `test_graph_live.py` regrow without an idle gap, which found and
+        fixed a real resume-at-old-offset loss in `live_tier.py`; aria-live
+        and D19WiringTest stay with NITS-WEB-1/NITS-APP-1)
       - the open boxes of **B** above (signed APK, standard-user check,
         real-device checks, rollout gates (h) and (i), release notes) and
         the failed-jobs measurement (Subnautica, Timberborn, Hogwarts
@@ -1196,9 +1202,12 @@ is done, tick it HERE, not in the archive.
   - [ ] nit (MOBILE-1b review): real "Download app" button state is in
     no golden (pairing cases render the demo note); no real-device
     check of safe-area insets yet.
-  - [ ] nit (GROUP-VERIFIED-1 review): `routers/games.py:175-185`
+  - [ ] nit (GROUP-VERIFIED-1 review): ~~`routers/games.py:175-185`
     comment and api/README.md (~646, event-sweep section ~4470) still
-    describe the old `last_manifest_check` rule; flaky
+    describe the old `last_manifest_check` rule~~ (fixed in NITS-API-1:
+    `routers/games.py` GameSummary comment, api/README.md `/v1/games` row;
+    the job-outcome table and the event-sweep section already matched);
+    open (web, NITS-WEB-1): flaky
     `web/tests/clients-merged-card-wiring.test.js:103-108` (2 s wall
     clock under full-suite load: wait for the event or raise it).
   - [ ] nit (MOBILE-1b review): Library toolbar at 1000 px puts the
@@ -1209,9 +1218,11 @@ is done, tick it HERE, not in the archive.
     failing (one ERROR per expired read, bounded by request rate);
     theoretical waiter starvation after a failed walk; the Thread.start
     test patches `threading` process-wide
-  - [ ] nit (TP-REPORT-2 review): `parse_probe` accepts `nan`/`inf`/
+  - [x] nit (TP-REPORT-2 review): `parse_probe` accepts `nan`/`inf`/
     negative values (core/tools/throughput-report.py:327-342, 365);
     README probe example `date +%s.%N` needs a `%s` fallback.
+    (fixed in NITS-API-1: `test_parse_probe_rejects_nan_inf_and_negative`
+    in core/tests/test_throughput_report.py; core/README.md `%s` note)
 
 ### From rc21 ([archive](plan-archive/rc21.md))
 
@@ -1236,8 +1247,10 @@ is done, tick it HERE, not in the archive.
     `.pop.menu` min-width is 100% where the Library mockup shows 260px
     plus shadow; dead `.cl-list > p` rule; the Clients empty state repeats
     the "Add a device" accessible name.
-  - [ ] nit (UNMAPPED-FLAG-1, VERSION-HEALTH-1): `get_game` scans all of
-    `depot_manifests` for one appid (add `AND appid = ?`); library card
+  - [ ] nit (UNMAPPED-FLAG-1, VERSION-HEALTH-1): ~~`get_game` scans all of
+    `depot_manifests` for one appid (add `AND appid = ?`)~~ (fixed in
+    NITS-API-1: `unmapped_depot_counts(..., appid=)`,
+    `test_unmapped_counts_helper_narrows_to_one_app`); library card
     keeps the green check at 100% with unmapped depots and Android lacks
     the note (Android parity package); VERSION-HEALTH-1 chose the startup
     log line, `/v1/health` stays a fixed body (fingerprinting decision)
@@ -1264,8 +1277,9 @@ is done, tick it HERE, not in the archive.
     card yet; runner traffic counts as client traffic in the ring until
     a sweep extends the runner's address window on a new UTC day
     (relevant for NOW-LOADING-1).
-  - [ ] nit (RUNNER-SPLIT-1 review): redundant `when is not None` in
-    `_series_point` (traffic.py ~748); `/v1/throughput/live` still divides
+  - [ ] nit (RUNNER-SPLIT-1 review): ~~redundant `when is not None` in
+    `_series_point` (traffic.py ~748)~~ (fixed in NITS-API-1,
+    `routers/traffic.py`); `/v1/throughput/live` still divides
     its running 5/15/60 s point by the full bucket length (N1 fixed only
     for the series); a running ring bucket that only partly covers its
     bucket (api restarted mid-bucket) still reads too low; demo summary
@@ -1352,9 +1366,11 @@ is done, tick it HERE, not in the archive.
     ~918-921). The operator's screenshot (pill "Downloading", ACTIVE
     empty) was log flush (5 s, nginx.conf.template:671) plus window lag,
     on rc20.2 the swept 5-minute pill.
-  - [ ] nit (NOW-LOADING-1 review): `addrs_listed` ignores the
+  - [ ] nit (NOW-LOADING-1 review): ~~`addrs_listed` ignores the
     clients/runner scope (an address listed only under the runner card
-    counts as known on the client side); each loading poll reads all of
+    counts as known on the client side)~~ (fixed in NITS-API-1:
+    `test_an_address_listed_only_under_the_runner_is_not_a_known_client`);
+    each loading poll reads all of
     `agent_reports` at the 3 s live rate; device count counts addresses
     while rows group by agent ("2 devices loading", one row); demo job
     card shows 31.5 MB/s (swept window) next to a 6.4 MB/s runner row.
@@ -1362,9 +1378,15 @@ is done, tick it HERE, not in the archive.
     (the rc20.x box moves here)
   - [ ] nit (RUNNER-RETRY-1 review): `runner_mark.announce` runs once
     before attempt 1, a successful retry may run unmarked
-    (prefill.py:611, worker.py:326); runner_identity.py docstring
+    (prefill.py:611, worker.py:326; NITS-API-1 left it: a mark that was
+    sent covers the retries through its 7-day period, and the unmarked case
+    is a first announce that found no cache, where a re-announce before the
+    retry hits the 300 s negative cache, so it needs a decision on that
+    cache); ~~runner_identity.py docstring
     "at most VAULT_PREFILL_TIMEOUT_SECONDS" is now up to 3x plus pauses;
-    stub_prefill `lancache_failures.txt` counter never reset.
+    stub_prefill `lancache_failures.txt` counter never reset~~ (fixed in
+    NITS-API-1: runner_identity.py docstring,
+    `test_a_new_stub_or_failure_budget_resets_the_detection_counter`).
 
 ### From rc21.1 ([archive](plan-archive/rc21.1.md))
 
@@ -1405,8 +1427,9 @@ is done, tick it HERE, not in the archive.
     row (keep-only, GC keeps more) and can leave an old completeness target
     ("Update available"/"not verified") until DELETE /v1/mapping; the
     oracle list also keeps an existing package-depot row on the game
-    (docstring should say so); the kept-reason line names all three
-    sources at once.
+    (docstring should say so) (docstring fixed in NITS-API-1:
+    `apply_observed_mapping`, both points); the kept-reason line names all
+    three sources at once.
   - [ ] nit (MAP-ATTRIB-1 review): one oracle_branch_manifests query per
     restore candidate; the inlined `apps` INSERT duplicates upsert_mapping
     on purpose (it commits inside BEGIN IMMEDIATE).

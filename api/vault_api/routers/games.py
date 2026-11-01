@@ -175,14 +175,14 @@ class GameSummary(BaseModel):
     # as of <timestamp>", which is only honest once the timestamp is
     # visible. Same null-when-never / verbatim-string style as
     # last_prefill_at (see ``jobs.TIMESTAMP_FORMAT``) -- but written on a
-    # MUCH narrower set of outcomes: only a run whose parsed summary was
-    # ``Updated == 0 AND Up To Date > 0`` sets it (api/README.md's "Job
-    # outcome honesty" table has the full outcome matrix). In particular an
-    # ordinary run that actually changed depots (``Updated > 0``), an
-    # unparseable summary, an unowned-app run, a failed/cancelled/paused
-    # run, and vault-api's own crash-recovery path (``recover_stale_jobs``)
-    # all leave it untouched -- so a game can be ``status: "done"`` with
-    # this field still null.
+    # narrower set of outcomes: only a successful run whose parsed summary
+    # considered the app (``Updated > 0`` or ``Up To Date > 0``, incl. update
+    # runs and forced verifies; operator decision 2026-10-18, WP
+    # GROUP-VERIFIED-1) sets it (api/README.md's "Job outcome honesty" table
+    # has the full outcome matrix). An unparseable summary, an unowned-app
+    # run, a failed/cancelled/paused run, and vault-api's own crash-recovery
+    # path (``recover_stale_jobs``) all leave it untouched -- so a game can
+    # be ``status: "done"`` with this field still null.
     #
     # One place the two fields DIVERGE: ``DELETE /v1/cache/{appid}``
     # (``deletion.reset_app_after_deletion``) unconditionally nulls
@@ -840,7 +840,9 @@ def get_game(
 
     depot_bytes = size_cache.get(cache_root).depot_bytes
     with open_db() as conn:
-        detail_unmapped = cache_completeness.unmapped_depot_counts(conn, depot_bytes).get(appid, 0)
+        detail_unmapped = cache_completeness.unmapped_depot_counts(
+            conn, depot_bytes, appid=appid
+        ).get(appid, 0)
 
     depots = [
         DepotEntry(

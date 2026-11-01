@@ -53,7 +53,9 @@ UTC day of the period's first marker up to the end of the UTC day
   row was the runner's. The price: on the first day of a period, traffic the
   same address carried before the first marker counts as the runner's too.
 * **Why 7 days.** A nightly prefill re-marks every day; a job runs for at
-  most ``VAULT_PREFILL_TIMEOUT_SECONDS`` (default 4 h) after its marker.
+  most ``prefill.LANCACHE_RETRY_ATTEMPTS`` (3) times
+  ``VAULT_PREFILL_TIMEOUT_SECONDS`` (default 4 h each) plus the pauses
+  between the attempts after its marker (WP RUNNER-RETRY-1), far inside it.
   Seven days keeps the address flagged across a week without prefills, and
   stops flagging it a week after the runner moved to another address (a
   container re-created on a new bridge subnet, a changed bind address).
