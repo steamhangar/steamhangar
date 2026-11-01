@@ -55,15 +55,17 @@ from __future__ import annotations
 import logging
 import sqlite3
 import threading
+import time
 from contextlib import closing
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 from typing import Callable, Iterable
 from urllib.parse import urlsplit
 
-from vault_api import cache_completeness, jobs, oracle
+from vault_api import cache_completeness, jobs, oracle, storage_balance
 from vault_api.config import Settings
 from vault_api.db import get_connection
+from vault_api.sizes import SizeCache
 
 logger = logging.getLogger(__name__)
 
@@ -443,8 +445,13 @@ class UpdateCheckRunner:
         fetch: oracle.Fetcher | None = None,
         pause_seconds: float | None = None,
         clock: Callable[[], datetime] = _utc_now,
+        size_cache: SizeCache | None = None,
     ) -> None:
         self._db_path = db_path
+        #: WP STORAGE-BALANCE-1: the app-wide size cache, read once after each
+        #: run for the storage balance log line. ``None`` = no balance line.
+        self._size_cache = size_cache
+        self._balance_logger = storage_balance.BalanceLogger()
         self._fetch = fetch
         #: ``None`` = read ``INTER_REQUEST_PAUSE_SECONDS`` at run time.
         self._pause_seconds = pause_seconds
@@ -557,6 +564,7 @@ class UpdateCheckRunner:
                 completeness_count = self._evaluate_completeness(
                     conn, settings, appids, result
                 )
+                self._log_storage_balance(conn, settings, result)
                 finish_update_check(
                     conn,
                     finished_at=self._clock(),
@@ -605,6 +613,43 @@ class UpdateCheckRunner:
         except Exception:
             logger.exception("update check: cache completeness evaluation failed")
             return 0
+
+    def _log_storage_balance(
+        self,
+        conn: sqlite3.Connection,
+        settings: Settings,
+        result: UpdateCheckResult,
+    ) -> None:
+        """WP STORAGE-BALANCE-1: one INFO line with the storage balance
+        after the completeness step (WARNING when the threshold is first
+        crossed, ``storage_balance.BalanceLogger``).
+
+        Reads the shared ``SizeCache`` snapshot with ``peek``: never a walk
+        (not even the cache's background refresh of an expired snapshot) and
+        never a wait, so a run cannot block on the disk while it holds the
+        run lock. An expired snapshot is used and its age goes into the line
+        (its on-disk figures can be older than the present bytes just
+        measured); with no usable snapshot (none yet, or invalidated after a
+        job, a delete or GC) the line says so and nothing is computed. Only
+        stored rows: no oracle traffic. Skipped on shutdown and without a
+        size cache; its own failure is logged and never changes the check's
+        outcome.
+        """
+        if self._size_cache is None or result.aborted or self._stop.is_set():
+            return
+        try:
+            snapshot = self._size_cache.peek(settings.cache_root)
+            if snapshot is None:
+                logger.info(
+                    "storage balance: skipped, no current size snapshot (the "
+                    "next read of the sizes by the UI or the API makes one)"
+                )
+                return
+            balance = storage_balance.compute_from_db(conn, settings, snapshot.depot_bytes)
+            age = max(0.0, time.monotonic() - snapshot.computed_at)
+            self._balance_logger.log(balance, sizes_age_seconds=age)
+        except Exception:
+            logger.exception("update check: storage balance failed")
 
     def wait(self, timeout: float | None = None) -> bool:
         """Join the current run, if any. True when no run is left."""
