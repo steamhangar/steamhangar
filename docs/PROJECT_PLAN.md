@@ -4161,9 +4161,10 @@ below carry their own later dates, item 12 is the current one).
       - [ ] nit (PAUSE-ALL-GC-1 review): a paused GC also blocks
         miss-triggered prefills for its app (documented); a paused execute GC
         resumed after switching VAULT_AUTO_GC still executes (documented,
-        cancel instead); `WORDING.confirmGcNote` kept only for the Android
-        twin pin.
-      - [ ] **ANDROID-PAUSE-GC-1** (android; follow-up of PAUSE-ALL-GC-1)
+        cancel instead); GcFlowTest "an unrecognized job status keeps
+        polling" also asserts the known status "queued" (rename or use a second
+        unknown status).
+      - [x] **ANDROID-PAUSE-GC-1** (e793874; Android Pause all incl. queued GC, dialog/toast literals pinned, paused GC word and card note, dry-run label, GcFlow paused text; web `confirmGcNote` removed) (android; follow-up of PAUSE-ALL-GC-1)
         Android "Pause all" still skips queued GC jobs: BulkJobs.kt queued
         phase incl. GC, `gcRunning`/`gcQueued`, the three new web literals
         (`confirmGcRunning`, `confirmGcHeldOne`, `confirmGcHeldMany`) in the

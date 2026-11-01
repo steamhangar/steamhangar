@@ -1433,3 +1433,6 @@ These are not style preferences; each entry cost a review round to learn.
 - **Every additive per-job API field needs a demo value in the same
   package** (`demo-data-traffic.test.js` key parity); null/false keeps
   goldens unchanged.
+- **A Kotlin state that gains a defaulted field keeps old equality asserts
+  compiling while they silently assert the default**; once a status
+  becomes known, tests that used it as the "unknown" example must change.
