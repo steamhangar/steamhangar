@@ -2040,11 +2040,11 @@ and VERIFY-COLD-1 is prose in the Sunday-test box of the rc19.3 block.
   same eviction and the same client. The two AIO runs differed by 1.4 %.
   Cause unknown (ZFS metadata or prefetch state, other host load). Repeat
   baselines in future tuning tests; one baseline is not enough.
-- **APP-DL-CARD-1 (android, operator 2026-11-01, screenshot):** the
+- **APP-DL-CARD-1 (android, operator 2026-11-01, screenshot; rc23 by operator decision 2026-11-01):** the
   Downloads page's active-job card ("Breathedge, job #266 ... 0 MB/s · 0
   GB loaded so far", Pause/Cancel) looks unpolished next to the
   throughput card; needs a design pass (layout, spacing, hierarchy).
-- **APP-DL-STATS-1 (android, operator 2026-11-01, screenshot):** while
+- **APP-DL-STATS-1 (android, operator 2026-11-01, screenshot; rc23 by operator decision 2026-11-01):** while
   the runner prefilled at 13.2 MB/s (live chart, "highest 19.0 MB/s"), the
   same page showed the active card "0 MB/s · 0 GB loaded so far", "Avg
   while loading —", "Peak 0 MB/s", Served 0 GB, From internet 0 GB, Hit
