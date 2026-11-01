@@ -80,8 +80,9 @@ Antrag filed and the rollout on the operator's stack checked.
   via the live tier; decided Weg A). Details in `docs/PROJECT_PLAN.md`,
   rc21 block.
 - **Entry:** rc20 tagged; Sunday test result known (for the tuning item).
-- **Exit:** release gate; Android screenshot goldens refreshed, incl. a
-  night golden that really renders dark.
+- **Exit:** release gate; Android screenshot goldens refreshed (the night
+  golden equals the day golden by design, APP-NIGHT-GOLDEN-1 closed
+  2026-10-31).
 
 ### rc22: release hardening (no new features)
 
