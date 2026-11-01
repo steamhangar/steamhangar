@@ -451,6 +451,8 @@
          header). Verbatim port of web/js/views/downloads.js::buildJobCard's
          "held" mode note — same words on both frontends, on purpose. -->
     <string name="downloads_paused_hold_note">Paused — this does not hold the worker slot. vault-api released it immediately, so another queued job may already be running. Resume puts this job back at the front of the queue.</string>
+    <!-- WP ANDROID-PAUSE-GC-1: web downloads.js GC_HOLD_NOTE, pinned by PauseGcWebTwinTest. -->
+    <string name="downloads_paused_hold_note_gc">Paused before it started — nothing was deleted. This garbage-collection run waits until you resume it; Resume puts it back at the front of the queue.</string>
 
     <!-- Queue hint (WP D20), twin of web/js/views/downloads.js::fullRender's
          els.queueHint text: the base sentence differs on purpose (web drags a
@@ -622,6 +624,8 @@
         <item quantity="one">%1$s across %2$d chunk held back by the grace window.</item>
         <item quantity="other">%1$s across %2$d chunks held back by the grace window.</item>
     </plurals>
+    <!-- WP ANDROID-PAUSE-GC-1: web gc-flow.js GC_PAUSED_TEXT, pinned by PauseGcWebTwinTest. -->
+    <string name="detail_gc_paused">GC paused — resume it on the Downloads page.</string>
     <string name="detail_gc_cancelled">This garbage-collection job was cancelled — you can start a new check below.</string>
     <string name="detail_gc_error">Garbage collection failed: %1$s</string>
     <string name="detail_gc_log_heading">Job log (job #%1$d)</string>

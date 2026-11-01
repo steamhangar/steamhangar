@@ -70,6 +70,10 @@ data class JobCardModel(
     val statusWord: String,
     val mode: JobCardMode,
     val action: JobCardAction,
+    /** WP ANDROID-PAUSE-GC-1 (web `GC_HOLD_NOTE`): a HELD card of a GC job
+     * shows its own hold note. The API only pauses a GC job while it is
+     * queued, so it never started: no plan, no deletion, no slot released. */
+    val gcHold: Boolean = false,
 )
 
 /**
@@ -155,6 +159,7 @@ fun buildJobCardModel(
         statusWord = activeJobWord(job, gamesByAppid[job.appid]),
         mode = mode,
         action = action,
+        gcHold = mode == JobCardMode.HELD && job.type == "gc",
     )
 }
 

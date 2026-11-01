@@ -1310,9 +1310,13 @@ private fun GcSection(controller: DetailController, scope: CoroutineScope) {
             }
 
             is GcFlowState.RequestingDryRun, is GcFlowState.PollingDryRun ->
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    CircularProgressIndicator(modifier = Modifier.padding(end = 8.dp).size(16.dp))
-                    Text(stringResource(R.string.detail_action_gc_running), style = MaterialTheme.typography.bodyMedium)
+                if (state is GcFlowState.PollingDryRun && state.paused) {
+                    GcPausedText()
+                } else {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        CircularProgressIndicator(modifier = Modifier.padding(end = 8.dp).size(16.dp))
+                        Text(stringResource(R.string.detail_action_gc_running), style = MaterialTheme.typography.bodyMedium)
+                    }
                 }
 
             is GcFlowState.DryRunPlan, is GcFlowState.ConfirmExecute -> {
@@ -1336,9 +1340,13 @@ private fun GcSection(controller: DetailController, scope: CoroutineScope) {
             }
 
             is GcFlowState.RequestingExecute, is GcFlowState.PollingExecute ->
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    CircularProgressIndicator(modifier = Modifier.padding(end = 8.dp).size(16.dp))
-                    Text(stringResource(R.string.detail_action_gc_executing), style = MaterialTheme.typography.bodyMedium)
+                if (state is GcFlowState.PollingExecute && state.paused) {
+                    GcPausedText()
+                } else {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        CircularProgressIndicator(modifier = Modifier.padding(end = 8.dp).size(16.dp))
+                        Text(stringResource(R.string.detail_action_gc_executing), style = MaterialTheme.typography.bodyMedium)
+                    }
                 }
 
             is GcFlowState.ExecuteDone -> {
@@ -1360,6 +1368,17 @@ private fun GcSection(controller: DetailController, scope: CoroutineScope) {
             }
         }
     }
+}
+
+/** WP ANDROID-PAUSE-GC-1: the polled GC job is paused (web GC_PAUSED_TEXT);
+ * no spinner, since nothing moves until it is resumed on Downloads. */
+@Composable
+private fun GcPausedText() {
+    Text(
+        text = stringResource(R.string.detail_gc_paused),
+        style = MaterialTheme.typography.bodyMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
 }
 
 @Composable

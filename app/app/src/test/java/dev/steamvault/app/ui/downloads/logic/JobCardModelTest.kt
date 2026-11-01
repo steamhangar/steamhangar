@@ -113,6 +113,18 @@ class JobCardModelTest {
     }
 
     @Test
+    fun `a paused gc job's card reads Garbage collection paused with the gc hold note`() {
+        // WP ANDROID-PAUSE-GC-1: "Pause all" parks queued GC jobs.
+        val pausedGc = runningJob().copy(type = "gc", status = "paused")
+        val model = buildJobCardModel(pausedGc, games, JobCardMode.HELD)
+        assertTrue(model.gcHold)
+        assertEquals("Garbage collection paused", model.statusWord)
+        assertTrue(model.action.showResume)
+        assertFalse(buildJobCardModel(runningJob().copy(status = "paused"), games, JobCardMode.HELD).gcHold)
+        assertFalse(buildJobCardModel(runningJob().copy(type = "gc"), games, JobCardMode.ACTIVE).gcHold)
+    }
+
+    @Test
     fun `a paused job's action never reports pausing or cancelling from a stale running-only field`() {
         // stop_request only means anything while status == running (api/README.md
         // "Job control"); a paused row carrying a leftover stop_request must

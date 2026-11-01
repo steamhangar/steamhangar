@@ -192,8 +192,26 @@ class GcFlowTest {
 
     @Test
     fun `an unrecognized job status keeps polling rather than guessing`() {
-        assertEquals(GcFlowState.PollingDryRun(1), reduceGcFlow(GcFlowState.PollingDryRun(1), GcFlowEvent.PollResult(job(1, "paused"))))
-        assertEquals(GcFlowState.PollingExecute(1), reduceGcFlow(GcFlowState.PollingExecute(1), GcFlowEvent.PollResult(job(1, "paused"))))
+        assertEquals(GcFlowState.PollingDryRun(1), reduceGcFlow(GcFlowState.PollingDryRun(1), GcFlowEvent.PollResult(job(1, "frobnicated"))))
+        assertEquals(GcFlowState.PollingExecute(1), reduceGcFlow(GcFlowState.PollingExecute(1), GcFlowEvent.PollResult(job(1, "queued"))))
+    }
+
+    @Test
+    fun `a paused gc job keeps polling with the paused flag, and a resume clears it`() {
+        // WP ANDROID-PAUSE-GC-1: "Pause all" parks a queued GC job; the sheet's
+        // own request can dedupe into it.
+        var state: GcFlowState = GcFlowState.PollingDryRun(1)
+        state = reduceGcFlow(state, GcFlowEvent.PollResult(job(1, "paused")))
+        assertEquals(GcFlowState.PollingDryRun(1, paused = true), state)
+        state = reduceGcFlow(state, GcFlowEvent.PollResult(job(1, "running")))
+        assertEquals(GcFlowState.PollingDryRun(1, paused = false), state)
+        assertEquals(
+            GcFlowState.PollingExecute(2, paused = true),
+            reduceGcFlow(GcFlowState.PollingExecute(2), GcFlowEvent.PollResult(job(2, "paused"))),
+        )
+        // A paused job finishing later still reaches the plan.
+        val plan = reduceGcFlow(GcFlowState.PollingDryRun(1, paused = true), GcFlowEvent.PollResult(job(1, "done")))
+        assertTrue(plan is GcFlowState.DryRunPlan)
     }
 
     // ---- Reset ------------------------------------------------------------------------

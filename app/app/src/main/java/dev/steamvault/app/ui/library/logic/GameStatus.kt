@@ -145,10 +145,11 @@ fun gameDisplayName(game: GameSummary): String {
 /** Job statuses that occupy this app's card with a live indicator. Queued
  * jobs are deliberately excluded (mockup parity: a queued job shows in the
  * Downloads FIFO queue, WP 4b.5, not on the Library card). GC jobs are
- * excluded too: pause/resume and the download pill are prefill-only
- * concepts (api/README.md job control table: pause on a GC job is `409`),
- * so a GC job for this appid must never drive its library card into a
- * "running" download state. */
+ * excluded too: the download pill and its pause/resume are prefill-only
+ * concepts (a running GC job answers `409` to pause; a queued one can be
+ * parked by "Pause all" since WP ANDROID-PAUSE-GC-1 and is resumed from the
+ * Downloads screen), so a GC job for this appid must never drive its
+ * library card into a "running" or "paused" download state. */
 private val LIVE_JOB_STATUSES = setOf("running", "paused")
 
 /** Find the job (if any) that should drive this app's library card. */

@@ -18,6 +18,7 @@ import androidx.compose.ui.unit.dp
 import dev.steamvault.app.ui.downloads.logic.BulkKind
 import dev.steamvault.app.ui.downloads.logic.BulkWording
 import dev.steamvault.app.ui.downloads.logic.bulkBarState
+import dev.steamvault.app.ui.downloads.logic.confirmGcLines
 import dev.steamvault.app.ui.downloads.logic.pauseAllLabel
 import dev.steamvault.app.ui.downloads.logic.pauseConfirmTitle
 import dev.steamvault.app.ui.downloads.logic.resumeAllLabel
@@ -72,7 +73,10 @@ fun DownloadsBulkBar(controller: DownloadsController, scope: CoroutineScope) {
     }
 }
 
-/** Pause all's confirm dialog; "Keep downloading" is the dismiss action. */
+/** Pause all's confirm dialog; "Keep downloading" is the dismiss action.
+ * The GC note (WP ANDROID-PAUSE-GC-1, web `confirmGcLines`) says how many
+ * queued GC runs are held and that a running one finishes; it is one text
+ * joined by a space, like the web's single note paragraph. */
 @Composable
 fun PauseAllDialog(controller: DownloadsController, scope: CoroutineScope) {
     if (!controller.pauseAllConfirmOpen) return
@@ -83,7 +87,8 @@ fun PauseAllDialog(controller: DownloadsController, scope: CoroutineScope) {
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(BulkWording.CONFIRM_BODY)
-                if (bar.gcActive) Text(BulkWording.CONFIRM_GC_NOTE)
+                val gcLines = confirmGcLines(bar)
+                if (gcLines.isNotEmpty()) Text(gcLines.joinToString(" "))
             }
         },
         confirmButton = {

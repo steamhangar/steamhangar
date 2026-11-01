@@ -645,7 +645,9 @@ private fun JobCard(
 
             if (model.mode == JobCardMode.HELD) {
                 Text(
-                    text = stringResource(R.string.downloads_paused_hold_note),
+                    text = stringResource(
+                        if (model.gcHold) R.string.downloads_paused_hold_note_gc else R.string.downloads_paused_hold_note,
+                    ),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 6.dp),
