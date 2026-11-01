@@ -468,7 +468,8 @@ their open boxes (items 2, 7 and 11) are in section 12. Item 13 stays here.
       follow in rc23): APP-DL-STATS-1 (Downloads page values: active card,
       avg/peak, served/from internet while the runner loads; web vs app
       twin check first), APP-DL-CARD-1 (design pass of the active-job
-      card), OUTPUT-TRIM-TAP-1 (dev tooling); details in the roadmap
+      card), OUTPUT-TRIM-TAP-1 (dev tooling); candidate CAP-503-FIX-1
+      (open decision); details in the roadmap
     - v0.2.0 rename: D18 incl. logo, LAUNCHER-PREP-1
     - v0.3.0 privacy: D22 then LIBRARY-META-1d
     - v0.4.0 agents and devices: Weg B for agents with the installer (D6
@@ -496,7 +497,7 @@ their open boxes (items 2, 7 and 11) are in section 12. Item 13 stays here.
       Measurements (orchestrator, read-only `dev.sh diag`, every rate step
       only after the operator's yes): D7 `:443`, CAP-503-LOOP-1,
       HIT-PATH-1, failed-jobs measurement. Operator: the B boxes below.
-      - [ ] D7 `:443` measurement and the `VAULT_TLS_CLIENT_MAX_CONNS`
+      - [x] D7 `:443` measurement and the `VAULT_TLS_CLIENT_MAX_CONNS`
         default (closes the D7 box above). First run 2026-11-01 (rc21.1,
         rate `16m`) measured a PREFILL burst, not a Steam client: the two
         downloads were queued in the app (runner jobs #266 Breathedge,
@@ -504,8 +505,11 @@ their open boxes (items 2, 7 and 11) are in section 12. Item 13 stays here.
         sampled every 15 s: 0 `:443` sessions at vault-core, upstream
         sockets max 14 (cap 16), 14,007 MISS all 200, `limit_conn` PASSED,
         0x `113`, upstream connect p95 0.000 s, 122 Mbit/s (rate-bound).
-        Still open: the same with a Steam client installing an uncached
-        game (the `:443` per-client cap is a client limit).
+        Client run 2026-11-01 evening (Steam client on a PC installing an
+        uncached game, prefill runner busy at the same time), 12 min
+        sampled every 15 s: 0 `:443` sessions (max per client 0), `:80`
+        client sockets max 40, upstream sockets max 22. The client does
+        not use `:443` for content: `VAULT_TLS_CLIENT_MAX_CONNS` keeps 64.
       - [x] **ANDROID-VERIFY-SPEED-1** (android; found 2026-11-01) the web's
         decided Verifying speed line "Verifying files, no download speed"
         (VERIFY_SPEED_TEXT, DOWNLOADS-1, operator 2026-10-16) was never ported
@@ -594,9 +598,14 @@ their open boxes (items 2, 7 and 11) are in section 12. Item 13 stays here.
         Claude Code >= 2.1.287 in the devbox (Antrag). First use: token
         meter numbers before and after DOC-DIET-1.
       - [x] CAP-503-LOOP-1 measure whether the 503 retry loop still occurs
-        at the current rate (2026-11-01, same run as D7: 0x 503 in 14,007
-        MISS of a prefill burst at `16m`; a Steam client burst and lower
-        rates stay unmeasured, the release notes say so)
+        at the current rate. Answer: YES, under contention. Prefill alone
+        (2026-11-01): 0x 503 in 14,007 MISS at `16m`. Steam client and
+        runner at the same time (D7 client run): the cap of 16 saturates,
+        `limit_conn=REJECTED` 503s, the runner retried at up to ~37,000
+        503s per minute (~600/s) with ~550 200s, the PC got 6,688 503s in
+        the same minute (39 Mbit/s); once the runner was idle the PC alone
+        ran ~150 Mbit/s with 0x 503. No `113`. Measurement done; the fix
+        is CAP-503-FIX-1 (open decision, roadmap).
       - [ ] HIT-PATH-1 measure server-to-client HIT throughput (iperf3,
         nginx counters, hit-path read)
       - [ ] NITS-AUDIT-1 small items (list in the roadmap; the GameHangar
@@ -1212,7 +1221,7 @@ is done, tick it HERE, not in the archive.
   systemd user service. Open decision: service + tray (reports
   without a logged-on user, sees all users' libraries, needs admin to
   install) versus tray-only (per user, no admin).
-- [ ] (origin: item 13 D) **D7 CORE-FIX-4 — hard cap on concurrent upstream connections**
+- [x] (origin: item 13 D) **D7 CORE-FIX-4 — hard cap on concurrent upstream connections**
   (user decision 2026-10-04, after the first Steam-client MISS test
   behind CGNAT; see the release-notes item in B). The ADR-0017 pool
   caps idle connections per listed edge (8 per group, at most 4
@@ -1235,10 +1244,10 @@ is done, tick it HERE, not in the archive.
   (`VAULT_TLS_CLIENT_MAX_CONNS` default 64, `VAULT_TLS_MAX_CONNS`
   default 256, ADR-0021 addendum 2026-10-09). **Measured 2026-10-10**
   (operator line, client on `:80`): 0x `113` errors, upstream connect
-  time ~0, 16-23 upstream sockets, no SYN floods. **Still open**, so
-  the box stays unticked: the `:443` measurement with a Steam client and
-  the default of `VAULT_TLS_CLIENT_MAX_CONNS` (a 2026-11-01 run measured
-  only a prefill burst, see the rc22 block). Related
+  time ~0, 16-23 upstream sockets, no SYN floods. **Closed 2026-11-01**
+  (rc22 block): with a Steam client downloading, 0 `:443` sessions;
+  `VAULT_TLS_CLIENT_MAX_CONNS` keeps its default 64. The 503 retry loop
+  under client + runner contention is CAP-503-FIX-1. Related
   open measurement: CAP-503-LOOP-1 (roadmap audit list).
 - [ ] (origin: item 13 D) **D8 SCHED-FEAT-1 — weekday schedules, several windows per day** (user request
   2026-10-04: "the night check is no use if I come home at 17:00 and
