@@ -543,7 +543,8 @@ their open boxes (items 2, 7 and 11) are in section 12. Item 13 stays here.
         request and agent (`turn.step`, writes a file), output trimming for
         long test/verify/CI output (`tool.call` after `next`, full output
         kept as a file), read brake for whole-file reads of
-        `PROJECT_PLAN.md`/`LEARNINGS.md`/`WORKPACKAGES.md`, and
+        `WORKPACKAGES.md`, `docs/plan-archive/*`, `PROJECT_PLAN.md` above
+        100 KB and any file above 150 KB (Read and plain `cat`), and
         zero-token commands (`/ci`, `/antraege`, `/wp`). Each mod with
         `claude plugin test` tests and a clean `claude plugin validate`;
         no `$.process` call outside a fixed command list. The operator
@@ -590,6 +591,23 @@ their open boxes (items 2, 7 and 11) are in section 12. Item 13 stays here.
       - [ ] nit (ANDROID-VERIFY-SPEED-1 review): `FeedState` import out of
         order in `DownloadsStats.kt`; `VerifySpeedTest.poll(null)` uses
         `throughput!!` and needs a comment that refreshOnce is never called.
+      - [ ] DEV-MODS-1 live check once the operator loads the mods as
+        managed mods (Antrag after 1a): core accepts output-trim's rewritten
+        Bash result (`{ result, context }` and the `isError` branch); which
+        directory `CLAUDE_PLUGIN_DATA` really resolves to.
+        Also confirm the managed-mods install snippet in
+        `tools/claude-mods/README.md` (extraKnownMarketplaces + enabledPlugins
+        with allowManagedModsOnly) before it counts as documented.
+      - [ ] nit (DEV-MODS-1a review): token-meter rewrites the whole part file
+        per request (no `$.fs` append; consider partKb 1024); part size is
+        counted in UTF-16 units, not bytes; with HOME and CLAUDE_CONFIG_DIR
+        unset the log dir becomes a relative path (skip instead); the
+        `$.clock.now()` calls around `next()` sit outside the try/catch;
+        tools/README.md has no pointer to tools/claude-mods/ yet.
+      - [ ] nit (DEV-MODS-1b review): output-trim names kept files with
+        `Date.now()` (not `$.clock.now()`); read-back and SMALL_RANGE checks
+        match loosely (fail open); kept files are never pruned (max-age or
+        max-count prune later); no context assertion on the error branch.
       - [ ] remaining nits: MAP-DRIFT-1 fail-safe tests, claim-vs-move race
         test, aria-live on queue move, D19WiringTest pin,
         regrow-without-idle-gap test

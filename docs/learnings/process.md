@@ -196,3 +196,22 @@ at the end, under a dated heading, one entry each with the WP that proved it.
 - **`diag db` takes plain SELECT only (no WITH) and cuts long cells**: read
   a `log_excerpt` with `substr(log_excerpt, i, 180)` and
   `replace(..., char(10), ' | ')`.
+
+## 2026-11-01 — rc22 (DEV-MODS-1a, Claude Code mods, CC 2.1.316)
+- **`claude plugin validate` refuses a mod that passes `$` to a closure**:
+  `$` may only go to a function declared at the top of the module (or a
+  const bound to one, or an import). Helpers defined inside `register`
+  fail validation; hoist them and keep option values in module variables
+  set by `register`.
+- **Reading a `turn.step` stream in a test: iterate by hand.** A
+  `for await` over `$.turn.step(...)` drops the generator's return value
+  and `stream.result` is then undefined; loop on `stream.next()` and take
+  `value` of the `done` step.
+- **A mod test that pushes a multi-MiB string through a mocked `fs.write`
+  kills the test child** ("the file did not load ... ended without a
+  report"), so a size limit cannot be tested at its real value; make it an
+  option and test with a small one.
+- **In the test kit a plugin's `{ deny }` comes back from `$.tool.call` as
+  `{ deny }`** (not `isError`), and relative tool paths reach the `fs.stat`
+  hook already resolved against the session directory (the mod folder in
+  a test).

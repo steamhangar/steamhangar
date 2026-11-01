@@ -1,0 +1,20 @@
+{
+  "name": "token-meter",
+  "version": "0.1.0",
+  "author": { "name": "SteamHangar contributors" },
+  "description": "Logs token counts per model request and agent to a JSONL file; /tokens prints a zero-token summary.",
+  "userConfig": {
+    "logDir": {
+      "type": "string",
+      "title": "Log directory",
+      "description": "Absolute directory for the per-session JSONL files. Empty: the plugin data directory.",
+      "default": ""
+    },
+    "partKb": {
+      "type": "number",
+      "title": "Part size (KB)",
+      "description": "A session's log rolls over to a new part file before this size (1 to 3584; file reads stop at 4 MiB).",
+      "default": 3072
+    }
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "name": "steamhangar-dev-mods",
+  "owner": {
+    "name": "SteamHangar contributors"
+  },
+  "metadata": {
+    "description": "Claude Code mods for developing SteamHangar: token metering, read brakes, output trimming and zero-token commands (generic; host paths come in as plugin options)."
+  },
+  "plugins": [
+    {
+      "name": "token-meter",
+      "source": "./token-meter",
+      "description": "Logs token counts per model request and agent to a JSONL file; /tokens prints a zero-token summary."
+    },
+    {
+      "name": "read-brake",
+      "source": "./read-brake",
+      "description": "Denies whole-file reads of large planning docs and very large files; asks for grep plus a line range instead."
+    },
+    {
+      "name": "output-trim",
+      "source": "./output-trim",
+      "description": "Trims long Bash output to head, tail and failure lines; keeps the full output in a file."
+    },
+    {
+      "name": "dev-commands",
+      "source": "./dev-commands",
+      "description": "Zero-token slash commands: /ci, /antraege, /wp."
+    }
+  ]
+}

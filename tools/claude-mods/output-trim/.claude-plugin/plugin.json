@@ -1,0 +1,44 @@
+{
+  "name": "output-trim",
+  "version": "0.1.0",
+  "author": { "name": "SteamHangar contributors" },
+  "description": "Trims long Bash output to head, tail and failure lines; keeps the full output in a file.",
+  "userConfig": {
+    "outputDir": {
+      "type": "string",
+      "title": "Output directory",
+      "description": "Where full outputs are kept. Empty: the plugin data directory.",
+      "default": ""
+    },
+    "maxLines": {
+      "type": "number",
+      "title": "Line threshold",
+      "description": "Trim when the output has more lines than this.",
+      "default": 200
+    },
+    "maxBytes": {
+      "type": "number",
+      "title": "Byte threshold",
+      "description": "Trim when the output is larger than this many bytes.",
+      "default": 20480
+    },
+    "headLines": {
+      "type": "number",
+      "title": "Head lines",
+      "description": "Lines kept from the start.",
+      "default": 40
+    },
+    "tailLines": {
+      "type": "number",
+      "title": "Tail lines",
+      "description": "Lines kept from the end.",
+      "default": 80
+    },
+    "maxMatches": {
+      "type": "number",
+      "title": "Matching lines",
+      "description": "At most this many FAIL/ERROR/panic/Traceback lines from the omitted middle.",
+      "default": 30
+    }
+  }
+}
