@@ -180,3 +180,10 @@ at the end, under a dated heading, one entry each with the WP that proved it.
 - `TrafficPoll.range` has a private setter and `selectRange` clears data;
   an "answer for another range" test is easiest with a fetch returning a
   `ThroughputOut` whose range differs from the poll's.
+
+### 2026-11-01 NITS-APP-1 (CI)
+
+- JVM unit tests under `app/src/test` compile against android.jar: JDK
+  desktop APIs such as `javax.imageio` / `java.awt` are missing there.
+  Compare golden PNGs by bytes (`File.readBytes().contentEquals`) or put
+  image decoding in a Roborazzi test under `src/testDebug`.
