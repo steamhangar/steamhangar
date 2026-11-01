@@ -59,6 +59,7 @@ import {
   trimSeries,
 } from "../lib/traffic-view.js";
 import { UNKNOWN_APP_NAME } from "../lib/app-names.js";
+import { PRODUCT_NAME } from "../lib/product.js";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 
@@ -171,7 +172,7 @@ export function devicesLoading(throughput) {
   if (!row) {
     return {
       text: "no device loading",
-      title: "No machine other than this server loaded anything from the cache recently. The server's own prefill runner is not counted.",
+      title: `No machine other than this server loaded anything from the cache recently. ${PRODUCT_NAME}'s own prefill downloads are not counted.`,
     };
   }
   return { text: `${n} ${n === 1 ? "device" : "devices"} loading`, title: `${row.detail}. ${row.title}` };
@@ -182,6 +183,12 @@ export const LOADING_NOW_LABEL = "Loading now";
 export const LOADING_UNATTRIBUTED = "Unattributed traffic";
 export const LOADING_NEW_DEVICE = "New device";
 export const LOADING_NO_JOB = "No running job";
+/**
+ * WP RUNNER-NAME-1: the runner row is titled by the product
+ * (`PRODUCT_NAME`, not the server's "Prefill runner"), and its detail line
+ * starts with this, so it is clear that the server itself loads.
+ */
+export const LOADING_RUNNER_DETAIL = "this server";
 
 /** An app's name in a row, never a bare id (the Clients page's rule). */
 function appName(app) {
@@ -213,7 +220,8 @@ function cacheWord(row) {
  * window, from the same read of the ring as the big number, the pill and
  * the device count, so they agree:
  *
- *   - the prefill runner: its job's game ("No running job" when the runner
+ *   - the prefill runner, titled `PRODUCT_NAME` with "this server" first
+ *     in its detail (WP RUNNER-NAME-1): its job's game ("No running job" when the runner
  *     still has traffic in the window but no prefill job runs, e.g. right
  *     after a cancel), the phase in the pill's words ("Downloading" /
  *     "Verifying"), a pending stop request;
@@ -248,7 +256,7 @@ export function loadingNowModel(throughput) {
       parts.push(src.phase === "verify" ? PILL_VERIFYING : PILL_DOWNLOADING);
       if (job && job.stop_request === "cancel") parts.push("cancel requested");
       else if (job && job.stop_request === "pause") parts.push("pause requested");
-      rows.push({ key: "runner", kind: "runner", name: typeof src.name === "string" && src.name ? src.name : "Prefill runner", detail: parts.join(" · "), speed });
+      rows.push({ key: "runner", kind: "runner", name: PRODUCT_NAME, detail: [LOADING_RUNNER_DETAIL, ...parts].join(" · "), speed });
     } else if (src.kind === "client") {
       const known = src.known !== false;
       const addresses = Array.isArray(src.addresses) ? src.addresses : [];
@@ -273,14 +281,18 @@ function limitParts(rateCap) {
   return [m[1], { b: m[2] }, m[3] || ""];
 }
 
-/** The runner's share for the mini line, `null` when the server sent none. */
+/**
+ * The runner's share for the mini line, `null` when the server sent none.
+ * WP RUNNER-NAME-1: named by the product ("SteamHangar 23.0 GB of it").
+ */
 function runnerParts(summary) {
   const runner = summary && summary.prefill_runner;
   if (!runner || !Number.isFinite(runner.bytes_served) || runner.bytes_served <= 0) return null;
   const size = formatTrafficBytes(runner.bytes_served);
   if (!size) return null;
   const cached = Number.isFinite(runner.hit_bytes) && runner.hit_bytes > 0 ? formatTrafficBytes(runner.hit_bytes) : null;
-  return cached ? ["Prefill runner ", { b: size }, " of it, ", { b: cached }, " from the cache"] : ["Prefill runner ", { b: size }, " of it"];
+  const who = `${PRODUCT_NAME} `;
+  return cached ? [who, { b: size }, " of it, ", { b: cached }, " from the cache"] : [who, { b: size }, " of it"];
 }
 
 /** `title` + optional detail line as one tooltip. */

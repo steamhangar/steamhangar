@@ -100,8 +100,9 @@ class LoadingNowTest {
     fun `a downloading runner names its job's game and the pill's word`() {
         val row = rowsOf(listOf(runnerDl)).single()
         assertEquals("runner", row.kind)
-        assertEquals("Prefill runner", row.name)
-        assertEquals("No Man's Sky · job #200 · Downloading", row.detail)
+        // WP RUNNER-NAME-1: titled by the product, not the server's "Prefill runner".
+        assertEquals("SteamHangar", row.name)
+        assertEquals("this server · No Man's Sky · job #200 · Downloading", row.detail)
         assertEquals("30.0 MB/s", row.speed)
     }
 
@@ -119,10 +120,10 @@ class LoadingNowTest {
     fun `runner traffic without a running job says so (the cancel case)`() {
         val orphan = runnerDl.copy(job = null)
         val t = mergeNow(answer(listOf(orphan)))
-        assertEquals("No running job · No Man's Sky · Downloading", loadingNowModel(t)!!.rows.single().detail)
+        assertEquals("this server · No running job · No Man's Sky · Downloading", loadingNowModel(t)!!.rows.single().detail)
         // The pill still says Downloading: the row explains it.
         assertEquals("Downloading", heroStatus(t.current)!!.text)
-        assertEquals("No running job · Downloading", rowsOf(listOf(orphan.copy(apps = emptyList()))).single().detail)
+        assertEquals("this server · No running job · Downloading", rowsOf(listOf(orphan.copy(apps = emptyList()))).single().detail)
     }
 
     @Test
@@ -131,8 +132,9 @@ class LoadingNowTest {
         assertTrue(rowsOf(listOf(cancel)).single().detail.endsWith(" · cancel requested"))
         val pause = runnerDl.copy(job = runnerDl.job!!.copy(stop_request = "pause"))
         assertTrue(rowsOf(listOf(pause)).single().detail.endsWith(" · pause requested"))
-        // A runner row without a server name keeps the web's own word.
-        assertEquals("Prefill runner", rowsOf(listOf(runnerDl.copy(name = null))).single().name)
+        // WP RUNNER-NAME-1: the product's name, with or without a server name.
+        assertEquals("SteamHangar", rowsOf(listOf(runnerDl.copy(name = null))).single().name)
+        assertEquals("SteamHangar", rowsOf(listOf(runnerDl.copy(name = "Something else"))).single().name)
     }
 
     @Test
@@ -203,7 +205,7 @@ class LoadingNowTest {
         val stale = listOf(source("client", name = "Stale summary row"))
         val summary = answer(stale).copy(loading_sources = stale)
         val live = LiveOut(event_feed = feed, current = current(30 * mib, 30 * mib, 0.0), active_clients = 0, active_window_seconds = 17, loading_sources = listOf(runnerDl))
-        assertEquals(listOf("Prefill runner"), loadingNowModel(mergeLive(summary, live))!!.rows.map { it.name })
+        assertEquals(listOf("SteamHangar"), loadingNowModel(mergeLive(summary, live))!!.rows.map { it.name })
         // A live answer without rows (an older server) shows no block, not the summary's.
         assertNull(loadingNowModel(mergeLive(summary, live.copy(loading_sources = null))))
         // A live feed that is not ok: no rows either.
@@ -225,7 +227,7 @@ class LoadingNowTest {
              "unattributed_bytes_per_second":1.0,"phase":null,"job":null}]}"""
         val now = dev.steamvault.app.net.VaultJson.decodeFromString<ThroughputNowOut>(json)
         val rows = loadingNowModel(mergeNow(answer(now.loading_sources)))!!.rows
-        assertEquals("No Man's Sky · job #200 · Downloading · cancel requested", rows[0].detail)
+        assertEquals("this server · No Man's Sky · job #200 · Downloading · cancel requested", rows[0].detail)
         assertEquals("New device", rows[1].name)
         assertEquals("10.0.0.20 · content not linked to one game · from the cache", rows[1].detail)
     }

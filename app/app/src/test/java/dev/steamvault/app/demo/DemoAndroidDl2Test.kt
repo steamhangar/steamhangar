@@ -47,8 +47,8 @@ class DemoAndroidDl2Test {
         val t = mergeNow(demoThroughput("6h", snapshot(running = true), now))
         val rows = loadingNowModel(t)!!.rows
         assertEquals(listOf("runner", "client", "client"), rows.map { it.kind })
-        assertEquals("Prefill runner", rows[0].name)
-        assertEquals("Wrenfield Static · job #901 · Downloading", rows[0].detail)
+        assertEquals("SteamHangar", rows[0].name)
+        assertEquals("this server · Wrenfield Static · job #901 · Downloading", rows[0].detail)
         assertEquals("6.4 MB/s", rows[0].speed)
         assertEquals("demo-livingroom-pc", rows[1].name)
         assertEquals("Wrenfield Static · 81% from the cache", rows[1].detail)

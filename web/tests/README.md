@@ -4014,3 +4014,24 @@ is on screen; a live job is not pre-expanded in History),
 `game-detail-sheet-repair.test.js` 5 (builder and wiring pins). Updated
 pins: the damaged note text in `downloads-incomplete-wiring.test.js` and
 `game-detail-sheet-completeness.test.js`, the Maintenance call shape.
+
+## WP RUNNER-NAME-1 (2026-11-01) — the prefill runner is named by the product (web)
+
+The labels that name the server's own prefill downloads read
+`PRODUCT_NAME` from `js/lib/product.js` ("SteamHangar"; the rename to
+GameHangar, roadmap D18, changes them by changing only that constant):
+the Downloads "Loading now" runner row (title `PRODUCT_NAME`, detail
+starting with "this server"), the mini line ("SteamHangar 23.0 GB of it,
+..."), the tile details and tooltips that used to say "prefill runner"
+(`currentDetail`, `runnerDetail`, `hitRateDetail`, the tile titles, the
+"no device loading" caption title) and the Clients runner card's title
+(`clientTitle`; `clientName` keeps the server's `display_name` rule, which
+the Android twin pins). The server still sends "Prefill runner"; the demo
+keeps that. Other product strings (page title, sidebar brand) are D18's.
+
+Tests: `product-name.test.js` 2 (the constant; the three label sources
+import it and spell neither the name nor "prefill runner" in code).
+Updated pins: `now-loading.test.js`, `runner-split.test.js`,
+`downloads-components.test.js`, `downloads-stats-wiring.test.js`,
+`traffic-view.test.js`, `clients-page.test.js` (+ `clientTitle`),
+`clients-view-wiring.test.js`.

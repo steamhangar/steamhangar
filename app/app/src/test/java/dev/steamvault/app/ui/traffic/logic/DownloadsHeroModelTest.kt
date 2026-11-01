@@ -82,7 +82,7 @@ class DownloadsHeroModelTest {
         )
         assertEquals(listOf("average", "peak", "runner"), f.mini.map { it.key })
         assertEquals(
-            listOf(HeroPart("Prefill runner "), HeroPart("20.0 GB", bold = true), HeroPart(" of it, "), HeroPart("5.0 GB", bold = true), HeroPart(" from the cache")),
+            listOf(HeroPart("SteamHangar "), HeroPart("20.0 GB", bold = true), HeroPart(" of it, "), HeroPart("5.0 GB", bold = true), HeroPart(" from the cache")),
             f.mini[2].parts,
         )
         assertEquals(

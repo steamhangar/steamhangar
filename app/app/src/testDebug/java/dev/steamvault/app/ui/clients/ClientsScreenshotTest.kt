@@ -197,7 +197,8 @@ class ClientsScreenshotTest {
         composeRule.onNode(hasContentDescription("Downloading")).assertExists()
         // WP ANDROID-DL-2 (NOW-LOADING-1): the "Loading now" rows name the
         // runner's job, the online PC and the loading address.
-        composeRule.onNode(hasText("Wrenfield Static · job #901 · Downloading"), useUnmergedTree = true).assertExists()
+        // WP RUNNER-NAME-1: the runner row's detail starts with "this server".
+        composeRule.onNode(hasText("this server · Wrenfield Static · job #901 · Downloading"), useUnmergedTree = true).assertExists()
         composeRule.onNode(hasText("demo-livingroom-pc"), useUnmergedTree = true).assertExists()
         composeRule.onNode(hasText("10.0.0.61"), useUnmergedTree = true).assertExists()
         assertTrue(composeRule.onAllNodes(hasContentDescription("Not available", substring = true)).fetchSemanticsNodes().isEmpty())

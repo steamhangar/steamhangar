@@ -129,8 +129,8 @@ test("MUTATION TARGET: header tiles — ok shows every figure; stale dashes only
   );
   assert.equal(ok.clients.detail, "machines with cache traffic in the last 15 min");
   assert.match(ok.clients.title, /3 machines loaded something in the last 24 hours/);
-  assert.equal(ok.current.detail, "all traffic incl. prefill runner, 5-10 min window · 10.0 MB/s by the prefill runner");
-  assert.equal(ok["hit-rate"].detail, "clients only, runner excluded");
+  assert.equal(ok.current.detail, "all traffic incl. SteamHangar, 5-10 min window · 10.0 MB/s by SteamHangar");
+  assert.equal(ok["hit-rate"].detail, "clients only, SteamHangar excluded");
   const stale = Object.fromEntries(headerTiles(throughput("stale")).map((t) => [t.key, t.value]));
   assert.equal(stale.current, DASH);
   assert.equal(stale.clients, DASH);
@@ -173,16 +173,16 @@ test("MUTATION TARGET: D15-RUNNER — saved, hit rate and active clients say the
     summary: { ...base.summary, prefill_runner: { bytes_served: 4 * GIB, hit_bytes: 3 * GIB, miss_bytes: GIB, requests: 9, hits: 6, misses: 3, errors: 0 } },
   });
   const tiles = Object.fromEntries(headerTiles(withRunner).map((t) => [t.key, t]));
-  assert.equal(tiles.loaded.detail, "4.0 GB by the prefill runner, 3.0 GB of that from the cache");
-  assert.match(tiles.loaded.title, /only when the prefill runner had no cache hits/);
-  assert.equal(tiles["hit-rate"].detail, "clients only, runner excluded");
+  assert.equal(tiles.loaded.detail, "4.0 GB by SteamHangar, 3.0 GB of that from the cache");
+  assert.match(tiles.loaded.title, /only when SteamHangar's own prefill downloads had no cache hits/);
+  assert.equal(tiles["hit-rate"].detail, "clients only, SteamHangar excluded");
   const rated = headerTiles(throughput("ok", { summary: { ...base.summary, prefill_runner: { ...withRunner.summary.prefill_runner, byte_hit_rate: 0.75 } } }));
-  assert.equal(rated.find((t) => t.key === "hit-rate").detail, "clients only, runner excluded (runner: 75%)");
+  assert.equal(rated.find((t) => t.key === "hit-rate").detail, "clients only, SteamHangar excluded (SteamHangar: 75%)");
   assert.equal(JOB_SPEED_NOTE, "Exclusive depots only: bytes on depots that belong to this game alone, from every address.");
   assert.match(tiles.loaded.title, /prefill downloads included/);
   assert.match(tiles.saved.title, /prefill downloads are not counted/);
   assert.match(tiles["hit-rate"].title, /prefill downloads are not counted/);
-  assert.match(tiles.clients.title, /prefill runner is not counted/);
+  assert.match(tiles.clients.title, /SteamHangar's own prefill downloads are not counted/);
   assert.doesNotMatch(tiles.clients.title, /count as one of them/);
   // Older server (no prefill_runner) or an idle runner: no detail line.
   assert.equal(Object.fromEntries(headerTiles(base).map((t) => [t.key, t])).loaded.detail, null);

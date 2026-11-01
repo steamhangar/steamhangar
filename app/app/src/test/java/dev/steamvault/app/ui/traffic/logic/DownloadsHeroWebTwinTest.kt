@@ -89,7 +89,9 @@ class DownloadsHeroWebTwinTest {
                 "return `\${Math.round((hit / total) * 100)}% $LOADING_FROM_CACHE`;",
                 "if (job && job.stop_request === \"cancel\") parts.push(\"$LOADING_CANCEL_REQUESTED\");",
                 "else if (job && job.stop_request === \"pause\") parts.push(\"$LOADING_PAUSE_REQUESTED\");",
-                "src.name : \"$LOADING_RUNNER_NAME\", detail: parts.join(\" · \"), speed });",
+                // WP RUNNER-NAME-1: the row is titled by the product, "this server" first.
+                "export const LOADING_RUNNER_DETAIL = \"$LOADING_RUNNER_DETAIL\";",
+                "rows.push({ key: \"runner\", kind: \"runner\", name: PRODUCT_NAME, detail: [LOADING_RUNNER_DETAIL, ...parts].join(\" · \"), speed });",
                 "name: LOADING_UNATTRIBUTED, detail: \"$LOADING_UNATTRIBUTED_DETAIL\", speed });",
             ),
         )
@@ -144,7 +146,9 @@ class DownloadsHeroWebTwinTest {
                 "text: \"no device loading\",",
                 "return { text: `\${n} \${n === 1 ? \"device\" : \"devices\"} loading`, title: `\${row.detail}. \${row.title}` };",
                 "const m = /^(Limit )(\\S+ \\S+?)(,.*)?$/.exec(rateCap);",
-                "return cached ? [\"Prefill runner \", { b: size }, \" of it, \", { b: cached }, \" from the cache\"] : [\"Prefill runner \", { b: size }, \" of it\"];",
+                // WP RUNNER-NAME-1: the mini line is named by the product.
+                "const who = `\${PRODUCT_NAME} `;",
+                "return cached ? [who, { b: size }, \" of it, \", { b: cached }, \" from the cache\"] : [who, { b: size }, \" of it\"];",
                 "if (devices) caption.push(...(caption.length ? [\" · \"] : []), devices.text);",
                 "{ key: \"average\", parts: [\"Avg while loading \", { b: byKey.get(\"average\").value }], title: byKey.get(\"average\").title },",
                 "{ key: \"peak\", parts: [\"Peak \", { b: byKey.get(\"peak\").value }], title: byKey.get(\"peak\").title },",

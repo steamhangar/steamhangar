@@ -16,7 +16,9 @@ import {
   NO_CLIENTS_TEXT,
   appLabel,
   clientKindText,
+  clientCardModel,
   clientName,
+  clientTitle,
   clientsSummaryText,
   connectionChip,
   installedText,
@@ -96,6 +98,13 @@ test("MUTATION TARGET: D15-RUNNER — the runner is titled by the server and des
     display_name: "Prefill runner",
   });
   assert.equal(clientName(runner), "Prefill runner");
+  // WP RUNNER-NAME-1: the card shows the product's name; clientName keeps
+  // the server's rule (twin-pinned), clientTitle overrides it for the runner only.
+  assert.equal(clientTitle(runner), "SteamHangar");
+  assert.equal(clientTitle({ ...runner, display_name: "Anything else" }), "SteamHangar");
+  assert.equal(clientCardModel(runner, { range: "7d" }).name, "SteamHangar");
+  const pc = agent();
+  assert.equal(clientTitle(pc), clientName(pc), "every other client keeps clientName");
   assert.equal(clientKindText(runner), "This server's prefill downloads · 172.18.0.1");
   assert.equal(clientKindText({ ...runner, addresses: [] }), "This server's prefill downloads");
   assert.equal(installedText(runner), null);
