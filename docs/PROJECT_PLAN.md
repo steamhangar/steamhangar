@@ -493,7 +493,7 @@ their open boxes (items 2, 7 and 11) are in section 12. Item 13 stays here.
       HIT-PATH-1, failed-jobs measurement. Operator: the B boxes below.
       - [ ] D7 `:443` measurement and the `VAULT_TLS_CLIENT_MAX_CONNS`
         default (closes the D7 box above)
-      - [ ] **ANDROID-VERIFY-SPEED-1** (android; found 2026-11-01) the web's
+      - [x] **ANDROID-VERIFY-SPEED-1** (android; found 2026-11-01) the web's
         decided Verifying speed line "Verifying files, no download speed"
         (VERIFY_SPEED_TEXT, DOWNLOADS-1, operator 2026-10-16) was never ported
         to Android; port it with a twin pin.
@@ -587,6 +587,9 @@ their open boxes (items 2, 7 and 11) are in section 12. Item 13 stays here.
         WORKPACKAGES.md:1120 cites an old plan line range. Core plan is
         85.8 KB, not 70: section 12 keeps every open item's full text and
         shrinks as rc22 ticks them (orchestrator choice, Weg B).
+      - [ ] nit (ANDROID-VERIFY-SPEED-1 review): `FeedState` import out of
+        order in `DownloadsStats.kt`; `VerifySpeedTest.poll(null)` uses
+        `throughput!!` and needs a comment that refreshOnce is never called.
       - [ ] remaining nits: MAP-DRIFT-1 fail-safe tests, claim-vs-move race
         test, aria-live on queue move, D19WiringTest pin,
         regrow-without-idle-gap test

@@ -169,3 +169,14 @@ at the end, under a dated heading, one entry each with the WP that proved it.
 - **A Kotlin state that gains a defaulted field keeps old equality asserts
   compiling while they silently assert the default**; once a status
   becomes known, tests that used it as the "unknown" example must change.
+
+### 2026-11-01 ANDROID-VERIFY-SPEED-1
+
+- A web string port can depend on the web caller, not only on the shared
+  function: `paintJobSpeeds` calls `jobSpeedText` for every card (no entry,
+  state "disabled" without statistics) while Android `jobSpeedLines` only
+  walked `throughput.jobs`. Twin-pin the call site in `web/js/views/*.js`
+  too, not only the helper.
+- `TrafficPoll.range` has a private setter and `selectRange` clears data;
+  an "answer for another range" test is easiest with a fetch returning a
+  `ThroughputOut` whose range differs from the poll's.

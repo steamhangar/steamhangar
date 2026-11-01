@@ -78,6 +78,7 @@ import dev.steamvault.app.ui.traffic.logic.LIVE_SUMMARY_MS
 import dev.steamvault.app.ui.traffic.logic.LIVE_SUMMARY_RANGE
 import dev.steamvault.app.ui.traffic.logic.SERIES_END_TEXT
 import dev.steamvault.app.ui.traffic.logic.STATS_RANGES
+import dev.steamvault.app.ui.traffic.logic.FeedState
 import dev.steamvault.app.ui.traffic.logic.feedState
 import dev.steamvault.app.ui.traffic.logic.graphGeometryToShow
 import dev.steamvault.app.ui.traffic.logic.headerTiles
@@ -170,6 +171,11 @@ data class JobSpeedLine(val text: String, val note: String)
  * WP JOB-SIZE-1 (web `paintJobSpeeds`): one EMA step of [smoother] per new
  * answer (identity-guarded, so a recomposition is no sample), the smoothed
  * rate feeds the ETA, and no ETA on a card in [verifyingJobIds].
+ *
+ * WP ANDROID-VERIFY-SPEED-1 (web DOWNLOADS-1 "a Verifying card says so,
+ * with or without statistics"): every id in [verifyingJobIds] gets a line,
+ * also without an answer, for another range, or when `jobs[]` does not
+ * list it -- then [jobSpeedText] says `VERIFY_SPEED_TEXT`.
  */
 fun jobSpeedLines(
     poll: TrafficPoll<StatsAnswer>,
@@ -177,20 +183,30 @@ fun jobSpeedLines(
     smoother: EtaSmoother? = null,
     nowMs: Long = System.currentTimeMillis(),
 ): Map<Int, JobSpeedLine> {
-    val t = poll.data?.throughput ?: return emptyMap()
-    if (t.range != poll.range) return emptyMap()
-    smoother?.observe(t)
-    val state = feedState(t.event_feed)
-    return t.jobs.mapNotNull { entry ->
-        val text = jobSpeedText(
-            entry,
-            state,
-            verifying = entry.job_id in verifyingJobIds,
-            nowMs = nowMs,
-            etaRate = if (smoother != null) smoother.rate(entry.job_id) else entry.eta_bytes_per_second,
-        )
-        text?.let { entry.job_id to JobSpeedLine(it, jobSpeedNote(entry)) }
-    }.toMap()
+    val t = poll.data?.throughput
+    val fresh = t != null && t.range == poll.range
+    val lines = mutableMapOf<Int, JobSpeedLine>()
+    if (fresh && t != null) {
+        smoother?.observe(t)
+        val state = feedState(t.event_feed)
+        for (entry in t.jobs) {
+            val text = jobSpeedText(
+                entry,
+                state,
+                verifying = entry.job_id in verifyingJobIds,
+                nowMs = nowMs,
+                etaRate = if (smoother != null) smoother.rate(entry.job_id) else entry.eta_bytes_per_second,
+            ) ?: continue
+            lines[entry.job_id] = JobSpeedLine(text, jobSpeedNote(entry))
+        }
+    }
+    // Verifying cards the answer does not cover (web: entry undefined, state "disabled").
+    for (jobId in verifyingJobIds) {
+        if (jobId in lines) continue
+        val text = jobSpeedText(null, FeedState.DISABLED, verifying = true, nowMs = nowMs) ?: continue
+        lines[jobId] = JobSpeedLine(text, jobSpeedNote(null))
+    }
+    return lines
 }
 
 /**
