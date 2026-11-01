@@ -4095,7 +4095,9 @@ below carry their own later dates, item 12 is the current one).
       - [x] close: release gate (roadmap "Release plan"), tag `v0.1.0-rc21` (2026-11-01: tag on 5d94d11, main CI 41275492016 and Publish 41275885575 green, verify 627/0; rollout Antrag A-20261101-01 filed; prod rollout check pending)
 
     - [ ] **rc21.1 — mapping and name fixes from the prod rollout** (operator
-      decision 2026-11-01: patch, not rc22; measure together on prod first)
+      decision 2026-11-01: patch, not rc22, with every item below incl.
+      PAUSE-ALL-GC-1, JOB-SIZE-1 and RUNNER-NAME-1; `dev.sh diag db` requested
+      in Antrag A-20261101-02)
       - [ ] **MAP-ATTRIB-1** (api) a prefill maps every depot whose directory
         changed during its run to the running app (`prefill.py`
         `diff_depots` / `apply_observed_mapping`, ~884-990), so traffic a PC
@@ -4131,18 +4133,20 @@ below carry their own later dates, item 12 is the current one).
         job 260 (execute, 4.94 GB freed: old builds only). Until the fix: GC
         for 3624140 stays safe (keep set includes every owner's recorded
         manifest), but no Wanderburg verify.
-      - [ ] **PAUSE-ALL-GC-1** (api + web; scope pending operator) "Pause
+      - [ ] **PAUSE-ALL-GC-1** (api + web) "Pause
         all" pauses prefill jobs only; queued GC jobs answer 409 and run at
         once (prod 2026-11-01: GC jobs 256-258 ran at 06:48:13 right after
         "Pause all", looking like a cleared queue). With Auto-GC on execute,
         "Pause all" must also hold queued GC jobs. Also: a dry-run GC job
         reads "Garbage collected" in History although nothing was deleted.
-      - [ ] **JOB-SIZE-1** (api + web; scope pending operator) a first
+      - [ ] **JOB-SIZE-1** (api + web) a first
         download says "Speed not measured yet: the server does not know this
         game's depots yet" (prod: Subnautica job 254); use the D19 depot
         preview (expected depots and size from the oracle) for the job card.
-      - [ ] **RUNNER-NAME-1** (web + android; open decision) the operator
-        wants the "Prefill runner" row renamed so it is clear who loads.
+      - [ ] **RUNNER-NAME-1** (web + android) the "Prefill runner" row and
+        captions read the product name from one constant (operator decision
+        2026-11-01: today "SteamHangar", "GameHangar" with D18), so it is
+        clear who loads.
       - [ ] close: release gate, tag `v0.1.0-rc21.1`
 
     - [ ] **rc22 — release hardening, no new features** (packages to be cut
