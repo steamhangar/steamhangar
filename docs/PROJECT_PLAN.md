@@ -4242,16 +4242,31 @@ below carry their own later dates, item 12 is the current one).
         it" could read "By SteamHangar: ..."; KDoc line widths in
         ClientsPage.kt / DownloadsHero.kt; web/tests/now-loading.test.js:47
         uses 192.168.1.50 (SAMPLE-IP-1).
-      - [ ] **ANDROID-RC21-1-TWINS** (android; follow-ups of rc21.1 web
+      - [x] **ANDROID-RC21-1-TWINS** (1878935 + fixup 40c5731; Storage balance expert card, first-download size and ETA with EMA keyed by jobs-list identity, cleared on screen start) (android; follow-ups of rc21.1 web
         packages) STORAGE-BALANCE-1 expert card from `storage_balance`
         (hidden when absent); JOB-SIZE-1 job card "of ~X (expected size)" and
         the ETA with the same hide rules and EMA, the new JobThroughputOut
         fields incl. `eta_bytes_per_second` / `eta_speed_source`.
+      - [ ] **WEB-ETA-EMA-1** (web; ANDROID-RC21-1-TWINS review should-fix,
+        before the rc21.1 tag) `downloads.js:1983` steps the ETA smoother with
+        the object `mergeLive` returns on every 3 s live tick while its jobs
+        are the cached 30 s summary's, so the default range takes ~10 EMA steps
+        per real sample (almost no smoothing). Key the step on the jobs list
+        identity like Android, and clear the smoother on view mount (JOB-SIZE-1
+        nit); add the missing test.
+      - [ ] nit (ANDROID-RC21-1-TWINS review): StorageBalanceCardTest uses
+        contains-style pins (use assertCalledFrom like D15dWiringTest);
+        `smoother.observe` runs as a composition side effect (idempotent); a
+        malformed `storage_balance` fails the whole summary decode on Android.
       - [ ] close: release gate, tag `v0.1.0-rc21.1`
 
     - [ ] **rc22 — release hardening, no new features** (packages to be cut
       in the version's planning session)
       - D7 `:443` measurement and the `VAULT_TLS_CLIENT_MAX_CONNS`
+      - [ ] **ANDROID-VERIFY-SPEED-1** (android; found 2026-11-01) the web's
+        decided Verifying speed line "Verifying files, no download speed"
+        (VERIFY_SPEED_TEXT, DOWNLOADS-1, operator 2026-10-16) was never ported
+        to Android; port it with a twin pin.
         default (closes the D7 box above)
       - [ ] CAP-503-LOOP-1 measure whether the 503 retry loop still occurs
         at the current rate
