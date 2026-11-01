@@ -28,6 +28,7 @@
  */
 
 import { formatAgo, formatBytesGB } from "./format.js";
+import { PRODUCT_NAME } from "./product.js";
 
 /** The four ranges every traffic endpoint and the jobs filter accept. */
 export const RANGES = Object.freeze(["24h", "7d", "30d", "all"]);
@@ -255,8 +256,8 @@ export function headerTiles(throughput, rateCap = null) {
       "Current speed",
       formatSpeed(current),
       throughput.live
-        ? "Everything the cache served over the last 15-20 seconds (all traffic, the server's own prefill runner included), read live from the cache's event log."
-        : "Everything the cache served over the last 5-10 minutes (all traffic, the server's own prefill runner included), measured when the server last read the cache's event log.",
+        ? `Everything the cache served over the last 15-20 seconds (all traffic, ${PRODUCT_NAME}'s own prefill downloads included), read live from the cache's event log.`
+        : `Everything the cache served over the last 5-10 minutes (all traffic, ${PRODUCT_NAME}'s own prefill downloads included), measured when the server last read the cache's event log.`,
       currentDetail(throughput),
       rateCap,
     ),
@@ -276,7 +277,7 @@ export function headerTiles(throughput, rateCap = null) {
       "loaded",
       "Served (cache + prefill)",
       formatTrafficBytes(summary.bytes_served),
-      `Everything the cache served ${phrase}, the server's own prefill downloads included. "Loaded from the internet" plus "Saved by the cache" adds up to this only when the prefill runner had no cache hits (see the line below).`,
+      `Everything the cache served ${phrase}, the server's own prefill downloads included. "Loaded from the internet" plus "Saved by the cache" adds up to this only when ${PRODUCT_NAME}'s own prefill downloads had no cache hits (see the line below).`,
       runnerDetail(summary),
     ),
     tile(
@@ -303,7 +304,7 @@ export function headerTiles(throughput, rateCap = null) {
       "clients",
       "Loading now",
       Number.isInteger(throughput.active_clients_now) ? String(throughput.active_clients_now) : null,
-      `${windowSeconds ? `Machines the cache served in the last ${windowSeconds} seconds (the window of "Current speed").` : `Machines with cache traffic in the last ${windowMinutes} minutes.`} The server's own prefill runner is not counted.${inRange === null ? "" : ` ${inRange} machines loaded something ${phrase}.`}`,
+      `${windowSeconds ? `Machines the cache served in the last ${windowSeconds} seconds (the window of "Current speed").` : `Machines with cache traffic in the last ${windowMinutes} minutes.`} ${PRODUCT_NAME}'s own prefill downloads are not counted.${inRange === null ? "" : ` ${inRange} machines loaded something ${phrase}.`}`,
       windowSeconds ? `machines the cache served in the last ${windowSeconds} s` : `machines with cache traffic in the last ${windowMinutes} min`,
     ),
   ];
@@ -330,7 +331,7 @@ export function clientDownloadingRow(throughput) {
   return {
     label: "Client downloading",
     detail: seconds ? `${machines} served by the cache in the last ${seconds} s` : `${machines} with cache traffic in the last ${minutes} min`,
-    title: "Machines other than this server that loaded something from the cache recently. The server's own prefill runner is not counted.",
+    title: `Machines other than this server that loaded something from the cache recently. ${PRODUCT_NAME}'s own prefill downloads are not counted.`,
   };
 }
 
@@ -420,24 +421,28 @@ export function rateCapLine(settings, schedule, nowMs) {
     : `${limit}, in force now (outside the ${span})${pending}`;
 }
 
-/** Detail line of "Current speed": scope and window, plus the runner's part. */
+/**
+ * Detail line of "Current speed": scope and window, plus the runner's part.
+ * WP RUNNER-NAME-1: the runner is named by the product (`PRODUCT_NAME`).
+ */
 function currentDetail(throughput) {
   const liveSeconds = throughput.live && throughput.current ? throughput.current.window_seconds : null;
   if (Number.isInteger(liveSeconds) && liveSeconds > 0) {
-    const liveScope = `all traffic incl. prefill runner, last ${liveSeconds} s`;
+    const liveScope = `all traffic incl. ${PRODUCT_NAME}, last ${liveSeconds} s`;
     const liveRunner = formatSpeed(throughput.current.runner_bytes_per_second);
-    return liveRunner ? `${liveScope} · ${liveRunner} by the prefill runner` : liveScope;
+    return liveRunner ? `${liveScope} · ${liveRunner} by ${PRODUCT_NAME}` : liveScope;
   }
-  const scope = "all traffic incl. prefill runner, 5-10 min window";
+  const scope = `all traffic incl. ${PRODUCT_NAME}, 5-10 min window`;
   const runner = throughput.current ? formatSpeed(throughput.current.runner_bytes_per_second) : null;
-  return runner ? `${scope} · ${runner} by the prefill runner` : scope;
+  return runner ? `${scope} · ${runner} by ${PRODUCT_NAME}` : scope;
 }
 
-/** Detail line of "Hit rate": the scope, and the runner's own rate. */
+/** Detail line of "Hit rate": the scope, and the runner's own rate (WP RUNNER-NAME-1: by product name). */
 function hitRateDetail(summary) {
   const runner = summary.prefill_runner;
   const rate = runner ? formatRate(runner.byte_hit_rate) : null;
-  return rate ? `clients only, runner excluded (runner: ${rate})` : "clients only, runner excluded";
+  const scope = `clients only, ${PRODUCT_NAME} excluded`;
+  return rate ? `${scope} (${PRODUCT_NAME}: ${rate})` : scope;
 }
 
 /** Tooltip of a job card's speed line. */
@@ -460,7 +465,8 @@ export function internetBytes(summary) {
 }
 
 /**
- * WP D15-RUNNER: "of which X by the prefill runner" under "Loaded"; `null`
+ * WP D15-RUNNER: "of which X by the prefill runner" under "Loaded" (WP
+ * RUNNER-NAME-1: "X by SteamHangar", the product's name); `null`
  * when the server sent no runner figures (older vault-api) or the runner
  * loaded nothing in the range.
  * @param {object} summary
@@ -472,7 +478,7 @@ export function runnerDetail(summary) {
   const size = formatTrafficBytes(runner.bytes_served);
   if (!size) return null;
   const cached = Number.isFinite(runner.hit_bytes) && runner.hit_bytes > 0 ? formatTrafficBytes(runner.hit_bytes) : null;
-  return cached ? `${size} by the prefill runner, ${cached} of that from the cache` : `${size} by the prefill runner`;
+  return cached ? `${size} by ${PRODUCT_NAME}, ${cached} of that from the cache` : `${size} by ${PRODUCT_NAME}`;
 }
 
 /** The bucket a series point covers, for the graph's label. */

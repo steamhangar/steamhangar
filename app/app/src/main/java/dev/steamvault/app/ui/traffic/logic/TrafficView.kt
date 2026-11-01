@@ -1,5 +1,6 @@
 package dev.steamvault.app.ui.traffic.logic
 
+import dev.steamvault.app.PRODUCT_NAME
 import dev.steamvault.app.net.model.CurrentOut
 import dev.steamvault.app.net.model.EventFeedOut
 import dev.steamvault.app.net.model.JobSummary
@@ -274,23 +275,25 @@ fun headerTiles(throughput: ThroughputOut?, rateCap: String? = null): List<StatT
 fun activeWindowSeconds(throughput: ThroughputOut?): Int? =
     throughput?.active_window_seconds?.takeIf { it > 0 }
 
-/** Detail line of "Current speed": scope and window, plus the runner's part. */
+/** Detail line of "Current speed": scope and window, plus the runner's part.
+ * WP RUNNER-NAME-1: the runner is named by the product ([PRODUCT_NAME]). */
 fun currentDetail(throughput: ThroughputOut): String {
     val liveSeconds = if (throughput.live) throughput.current?.window_seconds else null
     if (liveSeconds != null && liveSeconds > 0) {
-        val liveScope = "all traffic incl. prefill runner, last $liveSeconds s"
+        val liveScope = "all traffic incl. $PRODUCT_NAME, last $liveSeconds s"
         val liveRunner = formatSpeed(throughput.current?.runner_bytes_per_second)
-        return if (liveRunner != null) "$liveScope · $liveRunner by the prefill runner" else liveScope
+        return if (liveRunner != null) "$liveScope · $liveRunner by $PRODUCT_NAME" else liveScope
     }
-    val scope = "all traffic incl. prefill runner, 5-10 min window"
+    val scope = "all traffic incl. $PRODUCT_NAME, 5-10 min window"
     val runner = formatSpeed(throughput.current?.runner_bytes_per_second)
-    return if (runner != null) "$scope · $runner by the prefill runner" else scope
+    return if (runner != null) "$scope · $runner by $PRODUCT_NAME" else scope
 }
 
-/** Detail line of "Hit rate": the scope, and the runner's own rate. */
+/** Detail line of "Hit rate": the scope, and the runner's own rate (WP RUNNER-NAME-1: by product name). */
 fun hitRateDetail(summary: SummaryOut?): String {
     val rate = formatRate(summary?.prefill_runner?.byte_hit_rate)
-    return if (rate != null) "clients only, runner excluded (runner: $rate)" else "clients only, runner excluded"
+    val scope = "clients only, $PRODUCT_NAME excluded"
+    return if (rate != null) "$scope ($PRODUCT_NAME: $rate)" else scope
 }
 
 /**
@@ -306,7 +309,8 @@ fun internetBytes(summary: SummaryOut?): Long? {
 }
 
 /**
- * WP D15-RUNNER: "X by the prefill runner" under "Loaded"; `null` when the
+ * WP D15-RUNNER: "X by the prefill runner" under "Loaded" (WP RUNNER-NAME-1:
+ * "X by SteamHangar", [PRODUCT_NAME]); `null` when the
  * server sent no runner figures (older vault-api) or the runner loaded
  * nothing in the range.
  */
@@ -316,7 +320,7 @@ fun runnerDetail(summary: SummaryOut?): String? {
     val size = formatTrafficBytes(bytes) ?: return null
     val hitBytes = summary?.prefill_runner?.hit_bytes ?: 0L
     val cached = if (hitBytes > 0) formatTrafficBytes(hitBytes) else null
-    return if (cached != null) "$size by the prefill runner, $cached of that from the cache" else "$size by the prefill runner"
+    return if (cached != null) "$size by $PRODUCT_NAME, $cached of that from the cache" else "$size by $PRODUCT_NAME"
 }
 
 /** The bucket a series point covers, for the graph's label. */

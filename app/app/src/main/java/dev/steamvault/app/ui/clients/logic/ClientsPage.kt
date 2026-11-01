@@ -1,5 +1,6 @@
 package dev.steamvault.app.ui.clients.logic
 
+import dev.steamvault.app.PRODUCT_NAME
 import dev.steamvault.app.net.model.ClientActivityOut
 import dev.steamvault.app.net.model.ClientsOverviewOut
 import dev.steamvault.app.net.model.LoadingAppOut
@@ -36,8 +37,9 @@ import dev.steamvault.app.ui.traffic.logic.formatTrafficBytes
  *  - An address client is "No agent · seen in the cache log" and nothing
  *    more: no line may claim the address is a PC, a person or a console.
  *  - The prefill runner is the server itself downloading; its title is the
- *    server's `display_name` ("Prefill runner") and the line under it says
- *    so. It is not an agentless machine, so it does not raise the agentless
+ *    product's name ([clientTitle], WP RUNNER-NAME-1: [PRODUCT_NAME], not
+ *    the server's `display_name` "Prefill runner") and the line under it
+ *    says it is this server's prefill downloads. It is not an agentless machine, so it does not raise the agentless
  *    note. It cannot be renamed (the server sends no `name_addr`).
  *  - "Installed" exists for agent clients only (`installed_app_count`).
  *  - A `null` the server sent (feed not `ok`) shows the dash; a real zero
@@ -72,6 +74,14 @@ fun clientName(client: ClientActivityOut): String {
     val key = client.key
     return if (key.startsWith("addr:")) key.removePrefix("addr:") else key.ifEmpty { DASH }
 }
+
+/**
+ * WP RUNNER-NAME-1 (web `clientTitle`): the title a card shows. The prefill
+ * runner is the server itself, so it is titled [PRODUCT_NAME], whatever
+ * `display_name` the server sent ("Prefill runner"; the runner cannot be
+ * renamed); every other client keeps [clientName].
+ */
+fun clientTitle(client: ClientActivityOut): String = if (isRunnerClient(client)) PRODUCT_NAME else clientName(client)
 
 /** The line under the title: what kind of client this is and its addresses. */
 fun clientKindText(client: ClientActivityOut): String {

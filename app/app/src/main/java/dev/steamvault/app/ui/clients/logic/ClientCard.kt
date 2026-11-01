@@ -351,7 +351,7 @@ fun clientCardView(
             isRunnerClient(client) -> ClientKind.RUNNER
             else -> ClientKind.ADDRESS
         },
-        name = clientName(client),
+        name = clientTitle(client),
         meta = clientKindText(client),
         pill = connectionPill(client),
         outdatedText = outdated?.let { outdatedAgentText(it) },

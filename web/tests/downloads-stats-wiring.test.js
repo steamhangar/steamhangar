@@ -179,7 +179,7 @@ test("MUTATION TARGET: feed ok — big speed, pill, caption, mini line, four til
   assert.equal(q(s, "stats-caption").querySelector("b").textContent, "8 MB/s", "the limit value in bold");
   assert.equal(q(s, "stats-mini").textContent, "Avg while loading 50.0 MB/sPeak 100 MB/s");
   assert.deepEqual(tiles(s), ["Served=60.0GB", "From internet=10.0GB", "Saved by cache=50.0GB", "Hit rate=83%"]);
-  assert.match(tile(s, "hit-rate").title, /clients only, runner excluded/, "the scope stays in the tooltip");
+  assert.match(tile(s, "hit-rate").title, /clients only, SteamHangar excluded/, "the scope stays in the tooltip");
   assert.equal(tile(s, "hit-rate").querySelector(".meter i").style.getPropertyValue("width"), "83%");
   assert.equal(tile(s, "loaded").querySelector(".n").textContent, "cache + prefill");
   assert.equal(q(s, "stats-note").hidden, true);

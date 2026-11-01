@@ -145,7 +145,8 @@ test("the prefill runner mini line stays correct: X of it, Y from the cache", ()
   const model = heroModel({ throughput: mergeNow(answer(current(20 * MIB, 20 * MIB, 20 * MIB, 0), { runnerSummary: runner })) });
   const line = model.figures.mini.find((m) => m.key === "runner");
   const text = line.parts.map((p) => (typeof p === "string" ? p : p.b)).join("");
-  assert.equal(text, "Prefill runner 23.0 GB of it, 23.0 GB from the cache");
+  // WP RUNNER-NAME-1: named by the product.
+  assert.equal(text, "SteamHangar 23.0 GB of it, 23.0 GB from the cache");
 });
 
 // ---------------------------------------------------------------------
