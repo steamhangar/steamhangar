@@ -220,7 +220,7 @@ Copy `.env.example` to `.env` and adjust:
 | `VAULT_RELAY_EXPOSE_PLAYTIME`   | no       | `false`      | Strict boolean. Privacy gate for the Steam Web API relay: off = `GET /v1/steam/owned-games` omits `playtime_forever`. Env-only. See "The privacy gate" (WP 4h.0, ADR-0010) |
 | `VAULT_RELAY_EXPOSE_LAST_PLAYED` | no      | `false`      | Strict boolean. Same gate for `rtime_last_played`, independent of the playtime switch. Env-only. See "The privacy gate" |
 | `VAULT_LIBRARY_META` | no | `false` | Strict boolean. Nightly fill of app metadata (categories, genres, rating, release year) from the manifest oracle for the `GET /v1/games` filter/sort parameters (WP D23). Needs `VAULT_MANIFEST_ORACLE` on and a schedule window; no new host. Env-only |
-| `VAULT_DEPOT_PREVIEW` | no | `false` | Strict boolean. Opening the card of a never-downloaded game sends that one app id to the manifest oracle (same host as the update check, no new host) for its expected depots and size, cached 24 h per app (WP D19-1a, `GET /v1/oracle/{appid}/preview`). Needs `VAULT_MANIFEST_ORACLE` on; off by default because it reveals what is browsed. Env-only |
+| `VAULT_DEPOT_PREVIEW` | no | `false` | Strict boolean. Opening the card of a never-downloaded game, or a running first download of one (WP JOB-SIZE-1, same gates, TTL and rate limit), sends that one app id to the manifest oracle (same host as the update check, no new host) for its expected depots and size, cached 24 h per app (WP D19-1a, `GET /v1/oracle/{appid}/preview`). Needs `VAULT_MANIFEST_ORACLE` on; off by default because it reveals what is browsed. Env-only |
 | `VAULT_STORE_DETAILS` | no | `false` | Strict boolean. Opening a game card sends that one app id to `store.steampowered.com` (Valve, new host baked into the proxy; `appdetails` and `appreviews`, anonymous) for a short description, genres, developers, release date, modes and the overall review rating, cached 24 h per app (WP D19-1c, `GET /v1/store/{appid}/details`). Independent of `VAULT_MANIFEST_ORACLE`. Texts are stored as sanitised plain text. Env-only |
 | `VAULT_SETTINGS_READONLY`       | no       | `false`      | Strict boolean. Operator hard-lock: on = `PATCH /v1/settings` answers `403` (`GET` still works; the `/v1/steam/key` routes are not covered). Env-only by construction. See "`VAULT_SETTINGS_READONLY` — the operator hard-lock" |
 | `VAULT_WEB_DIR`                 | no       | the repo's `web/` directory (resolved relative to the package) outside the image; the image sets `/app/web` (api/Dockerfile) | Directory the web UI's static files are served from. Blank = the default. Env-only. See "Web UI static serving" |
@@ -4859,7 +4859,11 @@ before it was recorded, so "all" starts there.
  "jobs": [{"job_id": 812, "appid": 440, "name": "Some Game",
            "started_at": "2026-10-13T19:55:00Z", "bytes_per_second": 31457280.0,
            "bytes_since_start": 9437184000, "exclusive_depots": 2,
-           "mapped_depots": 2}]}
+           "mapped_depots": 2, "expected": false, "expected_depots": 0,
+           "expected_size_bytes": null, "expected_download_bytes": null,
+           "miss_bytes_per_second": 31457280.0, "remaining_bytes": null,
+           "remaining_source": null, "eta_bytes_per_second": null,
+           "eta_speed_source": null}]}
 ```
 
 - **`current`** is the average over the previous 5-minute bucket plus the
@@ -4956,6 +4960,36 @@ before it was recorded, so "all" starts there.
   `mapped_depots` > 0 means every depot is shared (no per-app speed is
   attributable), while both 0 means no mapping yet.
   `bytes_since_start` is bucket-aligned (5-minute buckets within 48 h).
+- **First download (WP JOB-SIZE-1, additive).** With both 0 the server
+  asks the D19 depot preview (same gate as the card open:
+  `VAULT_DEPOT_PREVIEW` AND the oracle; same TTL, dedupe and rate limit; the
+  same single app id). When it is `ready`, `expected` is `true`, the speed
+  and `bytes_since_start` count the PREFILL RUNNER's bytes on the preview's
+  public-branch depots that no app has mapped (`expected_depots` of them; a
+  household PC loading the same game is not job progress), and
+  `expected_size_bytes` / `expected_download_bytes` carry the oracle's
+  totals of exactly those depots. It is an estimate:
+  `depot_app_map` is never written from it, and the next poll after the
+  run's own mapping drops back to the mapped depots. Preview off, failed,
+  pending or without an attributable depot: `expected` `false`, today's
+  null speeds.
+- **ETA inputs (WP JOB-SIZE-1, additive).** `miss_bytes_per_second` is the
+  prefill runner's MISS bytes/s on the same depots and window (0 for a
+  Verify or cache-only read). `remaining_bytes` (runner traffic only) has
+  two sources: `preview` = `expected_download_bytes` minus the runner's
+  bytes so far, HIT or MISS, i.e. chunks still to REQUEST (each chunk is
+  requested once); `completeness` = a mapped game's stored completeness
+  figure over its exclusive depots (expected minus present, current target
+  manifests) minus the runner's MISS bytes since the later of the check and
+  the job's start, i.e. bytes still to FETCH from the internet; null when
+  unknown. `eta_bytes_per_second` is the matching divisor: the live tier's
+  runner speed (`now.current`, ~15-20 s; total for `preview`, MISS for
+  `completeness`) for the running prefill job, `eta_speed_source` `live`;
+  without the live tier the job's swept figure, `window`, but only once
+  that window starts at or after the job's start (an older window dilutes
+  the speed). The web smooths it over polls and shows
+  `remaining_bytes / eta_bytes_per_second` as "about N min left", hidden on
+  a Verifying card, in a job's first 20 s, at 0 speed and above 24 h.
 
 ### `GET /v1/throughput/live`
 

@@ -328,6 +328,17 @@ export function demoThroughput(range, runningJobs, nowMs = Date.now(), sinceMs =
     bytes_since_start: Math.round(8.8 * GIB),
     exclusive_depots: 1,
     mapped_depots: 1,
+    // WP JOB-SIZE-1: a mapped job, no preview, no remainder (so no ETA and
+    // no "of ~X"): the demo card reads as before and no golden changes.
+    expected: false,
+    expected_depots: 0,
+    expected_size_bytes: null,
+    expected_download_bytes: null,
+    miss_bytes_per_second: 25.2 * MIB,
+    remaining_bytes: null,
+    remaining_source: null,
+    eta_bytes_per_second: null,
+    eta_speed_source: null,
   }));
   return {
     event_feed: f,
