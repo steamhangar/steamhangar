@@ -4204,6 +4204,13 @@ below carry their own later dates, item 12 is the current one).
         not-owned apps, e.g. 378640-378649, 370000-370003, 2506210-2506280,
         436780, 1716750, 228980), plus 3 unmapped depots with 38.7 GB of
         latest manifests; old-build orphans not yet sized.
+        Implementation note (review 2026-11-01): "unexplained" is 0 by
+        construction (every depot dir in exactly one class) and can only go
+        negative; the warning therefore counts old builds + |unexplained|
+        (> 15 % of on disk or > 50 GiB) and will stay on on prod until GC has
+        reclaimed old builds (Auto-GC cleans a game only after its own
+        prefill). The balance line reads the size snapshot non-blocking
+        (`SizeCache.peek`) and is skipped when the snapshot was invalidated.
       - [ ] **MAP-LOSS-1** (api; finding 2026-11-01, MAP-ATTRIB-1 review) an
         app's OWN depot loses its mapping row although its own recorded
         manifest and the oracle name it (prod: Enshrouded 1203621, The
