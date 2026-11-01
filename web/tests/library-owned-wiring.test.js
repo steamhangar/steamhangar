@@ -191,6 +191,12 @@ test("MUTATION PIN (no relay polling): poll ticks never re-fetch the owned list;
   server.steamid = STEAMID;
   const s = await openLibrary();
   await until(() => cardAppids(s).length === 5, "merged grid");
+  // NITS-WEB-1: the grid can be complete from the previous test's owned list
+  // before this open's relay call went out; let the open's load finish first.
+  for (let n = -1; n !== count("/v1/steam/owned-games"); ) {
+    n = count("/v1/steam/owned-games");
+    await tick(50);
+  }
   const afterOpen = count("/v1/steam/owned-games");
   const gamesBefore = count("/v1/games");
   for (let i = 0; i < 4; i++) {

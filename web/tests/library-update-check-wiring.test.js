@@ -333,7 +333,9 @@ test("oracle off: button visible but disabled, the line says why", async () => {
   server.enabled = false;
   server.statusQueue = [IDLE];
   const s = await openLibrary();
-  await until(() => updBtn(s).hidden === false, "button shown");
+  // NITS-WEB-1: wait for THIS test's status answer (the line names it), not
+  // just a shown button: the previous test's state also shows the button.
+  await until(() => updBtn(s).hidden === false && /manifest oracle is disabled/.test(updLine(s).textContent), "button shown, oracle-off line");
   assert.equal(updBtn(s).disabled, true);
   assert.match(updLine(s).textContent, /manifest oracle is disabled/);
   server.enabled = true;

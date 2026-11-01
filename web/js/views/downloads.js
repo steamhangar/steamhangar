@@ -1174,6 +1174,7 @@ async function moveQueued(jobId, toIndex, { refocus = false } = {}) {
   state.jobs = withQueuePositions(before, next);
   fullRender();
   if (refocus) focusGrip(jobId);
+  announceQueueMove(jobId, next.indexOf(jobId), next.length);
 
   reorder.holds += 1;
   let ok = false;
@@ -1189,9 +1190,26 @@ async function moveQueued(jobId, toIndex, { refocus = false } = {}) {
   if (!ok) {
     fullRender();
     if (refocus) focusGrip(jobId);
+    const back = partitionJobs(state.jobs).queued.map((j) => j.id);
+    announceQueueMove(jobId, back.indexOf(jobId), back.length, { undone: true });
   }
   store.refreshNow();
   return ok;
+}
+
+/** NITS-WEB-1: say where a moved queue row is now ("Emberreach moved to
+ * position 1 of 3."), or, after a refused move, where it is back. The
+ * toast says why a move failed; this line only says where the row is. */
+function announceQueueMove(jobId, index, total, { undone = false } = {}) {
+  if (!mounted() || !els.queueLive) return;
+  const job = state.jobs.find((j) => j.id === jobId);
+  if (!job || index < 0) {
+    els.queueLive.textContent = "";
+    return;
+  }
+  const title = nameFor(job.appid, gamesByAppidMap());
+  const where = `position ${index + 1} of ${total}`;
+  els.queueLive.textContent = undone ? `${title} is back at ${where}.` : `${title} moved to ${where}.`;
 }
 
 /** Pointer drag of a queue row by its grip. The row follows the pointer in
@@ -2116,8 +2134,19 @@ function buildSection() {
   queueBody.dataset.role = "queue-list";
   const queueHint = hintMessage("");
   queueHint.hidden = true;
+  // NITS-WEB-1 (aria-live on queue move): a screen reader hears where a
+  // moved row landed. Built once per mount and never hidden, so a text
+  // change is announced (WEB-FEAT-1 rule); sr-only keeps it out of the
+  // layout (absolute, so it takes no grid row or gap in the block).
+  const queueLive = el("span", "sr-only");
+  queueLive.dataset.role = "queue-live";
+  queueLive.setAttribute("role", "status");
+  queueLive.setAttribute("aria-live", "polite");
   const col1 = el("div", "col");
-  col1.append(block("dl-active", activeHead.head, activeBody), block("dl-queue", queueHead.head, queueBody, queueHint));
+  col1.append(
+    block("dl-active", activeHead.head, activeBody),
+    block("dl-queue", queueHead.head, queueBody, queueHint, queueLive),
+  );
 
   // Column 2: Updates available and Incomplete (WP UPD-6, CACHE-COMPLETE-1c),
   // each hidden until it has a game; the column is left out when both are.
@@ -2191,6 +2220,7 @@ function buildSection() {
     queueCount,
     queueBody,
     queueHint,
+    queueLive,
     historyBody,
     historyDeleteBtn,
     attnCol,

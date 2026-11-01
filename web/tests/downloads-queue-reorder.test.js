@@ -141,6 +141,7 @@ const press = (el, key) => {
   el.dispatchEvent(ev);
   return ev;
 };
+const rowTitle = (section, id) => /^Reorder (.*), position /.exec(gripOf(section, id).getAttribute("aria-label"))[1];
 const toastText = () => shell["toast-text"].textContent;
 
 // ---- pure helpers ------------------------------------------------------
@@ -247,6 +248,50 @@ test("ArrowUp on a grip sends the move, reorders at once and keeps focus on that
     assert.deepEqual(rowIds(section), [1, 3, 2]);
     // Booleans only: a failing assert.equal on DOM nodes prints the whole tree.
     assert.equal(dom.document.activeElement === gripOf(section, 3), true, "keyboard focus follows the moved row");
+  } finally {
+    releaseGates();
+  }
+});
+
+test("MUTATION TARGET -- a keyboard move is announced in a polite live region (NITS-WEB-1)", async () => {
+  reset();
+  try {
+    await serve([1, 2, 3]);
+    const section = renderDownloads();
+    const live = section.querySelector('.dl-queue [data-role="queue-live"]');
+    assert.equal(live !== null, true, "the live region sits in the queue block");
+    assert.equal(live.getAttribute("aria-live"), "polite");
+    assert.equal(live.getAttribute("role"), "status");
+    assert.equal(live.classList.contains("sr-only"), true, "visually hidden, never [hidden]");
+    assert.equal(live.hidden === true, false);
+    assert.equal(live.textContent, "");
+
+    // The announcement names the row the way the row itself reads (its
+    // title can still be the loading placeholder in this harness).
+    const title = rowTitle(section, 3);
+    press(gripOf(section, 3), "ArrowUp");
+    assert.equal(live.textContent, `${title} moved to position 2 of 3.`, "announced with the optimistic order");
+    await settle();
+    assert.equal(
+      section.querySelector('[data-role="queue-live"]') === live,
+      true,
+      "the same node survives the repaint, so the change is announced",
+    );
+  } finally {
+    releaseGates();
+  }
+});
+
+test("a refused move announces where the row is back", async () => {
+  reset();
+  try {
+    await serve([1, 2, 3]);
+    const section = renderDownloads();
+    moveError = { status: 409, detail: "Job 3 is running, only a queued job can be moved" };
+    const title = rowTitle(section, 3);
+    press(gripOf(section, 3), "Home");
+    await settle();
+    assert.equal(section.querySelector('[data-role="queue-live"]').textContent, `${title} is back at position 3 of 3.`);
   } finally {
     releaseGates();
   }

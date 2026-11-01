@@ -247,3 +247,20 @@ at the end, under a dated heading, one entry each with the WP that proved it.
 - Never overlay a control on a QR code: the corners hold the finder
   patterns and the quiet zone is only ~16-20 px at 164 px. Put the control
   beside the code.
+
+### 2026-11-01 NITS-WEB-1
+
+- Android twin pins can freeze a whole web call line (CacheRepairWebTwinTest
+  pins the repair `request("POST", ...)` text in api.js). To add an option
+  without breaking it, route the call through a wrapper whose method is
+  also named `request` (`untimed.request(...)`).
+- A test wait must check for this test's own answer (text or count only
+  that answer produces), not a state an earlier test may have left; one
+  extra microtask in api.js made two such tests fail every time.
+- `mock.timers.enable({apis:['setTimeout']})` plus a fetch fake that rejects
+  on `signal` abort tests 20 s / 5 min client deadlines in milliseconds; a
+  fake that ignores the signal shows a call has no timeout.
+- Grep the whole repo for a symbol before assigning an audit item to a
+  platform: `isVaultReturnTo` exists only in Android.
+- `node --test web/tests` (bare directory) fails on Node 22; use
+  `node --test "web/tests/*.test.js"`.

@@ -313,8 +313,17 @@ test("MUTATION TARGET: an agent whose version differs from the server's shows th
   const tile = s.querySelector('[data-tile="agents"]');
   assert.equal(text(tile, '[data-role="agents-outdated"]'), "1 outdated");
   assert.match(tile.className, /\bhi\b/);
-  const src = readFileSync(new URL("../js/views/clients.js", import.meta.url), "utf8");
-  assert.match(src, /openAddDeviceSheet\(\{ tab: null \}\)/, "opens the dialog without a preselected tab");
+  // NITS-WEB-1 (rc20 review nit): behaviour, not a source regex. The button
+  // opens "Add a device" with no tab selected (the card does not know the
+  // device's operating system); the default open would select "Phone".
+  btn.dispatchEvent({ type: "click" });
+  const pairTabs = ["phone", "browser", "windows", "linux"].map((id) => dom.document.body.querySelector(`[data-role="tab-${id}"]`));
+  assert.equal(pairTabs.every((t) => t !== null), true, "the Add a device tabs are in the document");
+  assert.deepEqual(
+    pairTabs.map((t) => t.getAttribute("aria-selected")),
+    ["false", "false", "false", "false"],
+    "opens the dialog without a preselected tab",
+  );
 });
 
 test("an agent with the server's version shows no warning and a calm 0 tile (CLIENTS-3)", async () => {
