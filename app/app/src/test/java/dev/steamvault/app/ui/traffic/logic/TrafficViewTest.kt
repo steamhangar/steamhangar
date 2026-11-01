@@ -161,7 +161,7 @@ class TrafficViewTest {
         assertEquals(listOf("40.0 MB/s", "20.0 MB/s", "60.0 MB/s", "5.0 GB", "0 GB", "80%", "4.0 GB", "2"), tiles.map { it.value })
         assertEquals("machines with cache traffic in the last 15 min", tiles.last().detail)
         assertEquals("all traffic incl. SteamHangar, 5-10 min window", tiles.first().detail)
-        assertEquals("clients only, SteamHangar excluded", tiles.first { it.key == "hit-rate" }.detail)
+        assertEquals("clients only, own prefill excluded", tiles.first { it.key == "hit-rate" }.detail)
     }
 
     @Test
@@ -174,7 +174,7 @@ class TrafficViewTest {
         )
         val tiles = headerTiles(t)!!.associateBy { it.key }
         assertEquals("all traffic incl. SteamHangar, 5-10 min window · 10.0 MB/s by SteamHangar", tiles.getValue("current").detail)
-        assertEquals("clients only, SteamHangar excluded (SteamHangar: 75%)", tiles.getValue("hit-rate").detail)
+        assertEquals("clients only, own prefill excluded (SteamHangar: 75%)", tiles.getValue("hit-rate").detail)
         assertEquals("machines with cache traffic in the last 20 min", tiles.getValue("clients").detail)
         assertEquals("4.0 GB by SteamHangar, 3.0 GB of that from the cache", tiles.getValue("loaded").detail)
     }

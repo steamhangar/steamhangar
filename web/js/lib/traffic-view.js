@@ -277,28 +277,28 @@ export function headerTiles(throughput, rateCap = null) {
       "loaded",
       "Served (cache + prefill)",
       formatTrafficBytes(summary.bytes_served),
-      `Everything the cache served ${phrase}, the server's own prefill downloads included. "Loaded from the internet" plus "Saved by the cache" adds up to this only when ${PRODUCT_NAME}'s own prefill downloads had no cache hits (see the line below).`,
+      `Everything the cache served ${phrase}, ${PRODUCT_NAME}'s own prefill downloads included. "Loaded from the internet" plus "Saved by the cache" adds up to this only when ${PRODUCT_NAME}'s own prefill downloads had no cache hits (see the line below).`,
       runnerDetail(summary),
     ),
     tile(
       "internet",
       "Loaded from the internet",
       formatTrafficBytes(internetBytes(summary)),
-      `Bytes ${phrase} that were not in the cache and came from the internet, the server's own prefill downloads included.`,
+      `Bytes ${phrase} that were not in the cache and came from the internet, ${PRODUCT_NAME}'s own prefill downloads included.`,
     ),
     tile(
       "hit-rate",
       "Hit rate",
       // Bytes, not requests: the same base as "Saved by the cache" next to it.
       formatRate(summary.byte_hit_rate),
-      `Share of the bytes your machines loaded ${phrase} that came from the cache. The server's own prefill downloads are not counted.`,
+      `Share of the bytes your machines loaded ${phrase} that came from the cache. ${PRODUCT_NAME}'s own prefill downloads are not counted.`,
       hitRateDetail(summary),
     ),
     tile(
       "saved",
       "Saved by the cache",
       formatTrafficBytes(summary.hit_bytes),
-      `Bytes your machines loaded ${phrase} from the cache's disk instead of the internet. The server's own prefill downloads are not counted.`,
+      `Bytes your machines loaded ${phrase} from the cache's disk instead of the internet. ${PRODUCT_NAME}'s own prefill downloads are not counted.`,
     ),
     tile(
       "clients",
@@ -441,7 +441,7 @@ function currentDetail(throughput) {
 function hitRateDetail(summary) {
   const runner = summary.prefill_runner;
   const rate = runner ? formatRate(runner.byte_hit_rate) : null;
-  const scope = `clients only, ${PRODUCT_NAME} excluded`;
+  const scope = "clients only, own prefill excluded";
   return rate ? `${scope} (${PRODUCT_NAME}: ${rate})` : scope;
 }
 
@@ -449,7 +449,7 @@ function hitRateDetail(summary) {
 export const JOB_SPEED_NOTE = "Exclusive depots only: bytes on depots that belong to this game alone, from every address.";
 /** WP JOB-SIZE-1: the tooltip while a first download counts expected depots. */
 export const JOB_SPEED_EXPECTED_NOTE =
-  "Expected depots: the server has not mapped this game yet, so the speed and size count the prefill runner's bytes on the depots the oracle expects (an estimate until the download ends).";
+  `Expected depots: the server has not mapped this game yet, so the speed and size count ${PRODUCT_NAME}'s own prefill bytes on the depots the oracle expects (an estimate until the download ends).`;
 
 /**
  * The tooltip of a job's speed line (WP JOB-SIZE-1).

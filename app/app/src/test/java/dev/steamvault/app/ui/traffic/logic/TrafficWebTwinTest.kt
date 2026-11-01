@@ -101,7 +101,7 @@ class TrafficWebTwinTest {
                 "`\${scope} · \${runner} by \${PRODUCT_NAME}`",
                 "`all traffic incl. \${PRODUCT_NAME}, 5-10 min window`",
                 "`\${liveScope} · \${liveRunner} by \${PRODUCT_NAME}`",
-                "const scope = `clients only, \${PRODUCT_NAME} excluded`;",
+                "const scope = \"clients only, own prefill excluded\";",
                 "`\${scope} (\${PRODUCT_NAME}: \${rate})`",
                 "machines with cache traffic in the last \${windowMinutes} min",
                 // WP LOADING-NOW-1 (ANDROID-DL-1): a live count's window in seconds.

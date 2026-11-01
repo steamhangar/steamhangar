@@ -292,7 +292,7 @@ fun currentDetail(throughput: ThroughputOut): String {
 /** Detail line of "Hit rate": the scope, and the runner's own rate (WP RUNNER-NAME-1: by product name). */
 fun hitRateDetail(summary: SummaryOut?): String {
     val rate = formatRate(summary?.prefill_runner?.byte_hit_rate)
-    val scope = "clients only, $PRODUCT_NAME excluded"
+    val scope = "clients only, own prefill excluded"
     return if (rate != null) "$scope ($PRODUCT_NAME: $rate)" else scope
 }
 
