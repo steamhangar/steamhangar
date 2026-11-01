@@ -119,7 +119,7 @@ server=${UPSTREAM_DNS_2}
 # well-known abuse vector (DNS amplification/reflection attacks against
 # third parties, using this homelab's bandwidth). WP 1.9's Compose file
 # MUST publish port 53 on a specific LAN-only host IP/interface, e.g.
-# `"192.168.1.50:53:53/udp"` (and the matching /tcp line), NEVER a bare
+# `"10.0.0.50:53:53/udp"` (and the matching /tcp line), NEVER a bare
 # `"53:53/udp"` (which Docker maps to 0.0.0.0 on the host, i.e. every
 # interface including any WAN one) -- this is a hard requirement, not a
 # style preference, and must be called out explicitly in WP 1.9's own

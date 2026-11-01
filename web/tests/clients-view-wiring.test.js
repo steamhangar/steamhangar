@@ -48,7 +48,7 @@ function feed(state) {
   return { enabled: state !== "disabled", state, last_sweep_at: state === "disabled" ? null : iso(40 * 60_000), sweep_interval_minutes: 5, traffic_since: null };
 }
 const AGENT = {
-  key: "agent:gaming-pc", kind: "agent", client_id: "gaming-pc", addresses: ["192.168.1.42"], connected: true,
+  key: "agent:gaming-pc", kind: "agent", client_id: "gaming-pc", addresses: ["10.0.0.42"], connected: true,
   agent_presence: "online", cache_active: true, last_active: iso(2 * 60_000), last_seen_in_cache_log: iso(2 * 60_000),
   last_reported_at: iso(5 * 60_000), installed_appids: [440, 570], installed_app_count: 2,
   stats: { bytes_served: GIB, hit_bytes: 0.75 * GIB, miss_bytes: 0.25 * GIB, requests: 4, hits: 3, misses: 1, hit_rate: 0.75 },
@@ -57,7 +57,7 @@ const AGENT = {
   recent_unattributed_bytes: 0,
 };
 const ADDR = {
-  ...AGENT, key: "addr:192.168.1.77", kind: "address", client_id: null, addresses: ["192.168.1.77"], connected: false,
+  ...AGENT, key: "addr:10.0.0.77", kind: "address", client_id: null, addresses: ["10.0.0.77"], connected: false,
   agent_presence: null, cache_active: false, last_reported_at: null, installed_appids: null, installed_app_count: null,
   loading_now: { loading: false, bytes_per_second: 0, apps: [], unattributed_bytes_per_second: 0 }, recent_apps: [],
 };
@@ -163,7 +163,7 @@ test("MUTATION TARGET: one card per client; the agent's lines, and the address n
   const a = card(s, "agent:gaming-pc");
   assert.equal(text(a, ".nm"), "gaming-pc");
   assert.equal(text(a, '[data-role="connection"]'), "Online");
-  assert.equal(text(a, '[data-role="client-kind"]'), "vault-agent · 192.168.1.42");
+  assert.equal(text(a, '[data-role="client-kind"]'), "vault-agent · 10.0.0.42");
   const now = a.querySelector('[data-role="loading-now"]');
   assert.equal(now.className, "now", "loading: the solid now box");
   assert.equal(text(now, "b"), "Some Game");
@@ -171,8 +171,8 @@ test("MUTATION TARGET: one card per client; the agent's lines, and the address n
   assert.deepEqual(stats(a), ["installed=2 games", "loaded=1.0 GB", "hitrate=75 %"]);
   assert.deepEqual(chips(a), ["Some Game1.0 GB"]);
   assert.equal(text(a, '[data-role="last-active"]'), "Last active 2 min ago");
-  const b = card(s, "addr:192.168.1.77");
-  assert.equal(text(b, ".nm"), "192.168.1.77");
+  const b = card(s, "addr:10.0.0.77");
+  assert.equal(text(b, ".nm"), "10.0.0.77");
   assert.equal(text(b, '[data-role="connection"]'), "Offline");
   assert.equal(text(b, '[data-role="client-kind"]'), "No agent · seen in the cache log");
   assert.deepEqual(stats(b), ["loaded=1.0 GB", "hitrate=75 %", "unlinked=0 GB"], "an address: no installed figure, the unlinked bytes instead");
@@ -308,8 +308,8 @@ test("MUTATION TARGET: an agent whose version differs from the server's shows th
   const btn = a.querySelector('[data-role="update-command"]');
   assert.equal(btn.textContent, "Show update command");
   assert.equal(btn.getAttribute("aria-label"), "Show update command for gaming-pc");
-  assert.equal(card(s, "addr:192.168.1.77").querySelector('[data-role="agent-outdated"]'), null, "an address never warns");
-  assert.equal(card(s, "addr:192.168.1.77").querySelector('[data-role="outdated-pill"]'), null);
+  assert.equal(card(s, "addr:10.0.0.77").querySelector('[data-role="agent-outdated"]'), null, "an address never warns");
+  assert.equal(card(s, "addr:10.0.0.77").querySelector('[data-role="outdated-pill"]'), null);
   const tile = s.querySelector('[data-tile="agents"]');
   assert.equal(text(tile, '[data-role="agents-outdated"]'), "1 outdated");
   assert.match(tile.className, /\bhi\b/);
@@ -404,7 +404,7 @@ test("device card carries the three zones and the footer (CLIENTS-4)", async () 
   assert.ok(c.querySelector(".ch .ico"), "icon tile in the identity zone");
   assert.ok(c.querySelector(".now"), "loading box while loading");
   assert.equal(c.querySelector(".now.idle"), null);
-  assert.ok(card(s, "addr:192.168.1.77").querySelector(".now.idle"), "the idle card gets the dashed box");
+  assert.ok(card(s, "addr:10.0.0.77").querySelector(".now.idle"), "the idle card gets the dashed box");
   assert.ok(c.querySelector('.cf [data-role="last-active"]'), "last-active text in the footer");
   assert.equal(c.querySelector(".cf .acts"), null, "no name_addr and no agent row: no actions (rename/remove wiring tests cover them)");
 });

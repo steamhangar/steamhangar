@@ -760,7 +760,7 @@ class VaultApiClientTest {
         // also the first test that observes defaultOkHttpClient()'s own
         // copy of these flags rather than always overriding it.
         val client = VaultApiClient(
-            profile = SystemVpnProfile("http://192.168.1.50:8080"),
+            profile = SystemVpnProfile("http://10.0.0.50:8080"),
             apiKeyProvider = { "unused" },
         )
 

@@ -23,7 +23,7 @@ private const val VALID_STEAM_ID = "76561198042117903"
 private const val TEST_STATE = "test-state-1"
 
 /** WP D11: the vault base URL every login in this file starts from. */
-private const val VAULT = "http://192.168.1.50:8080"
+private const val VAULT = "http://10.0.0.50:8080"
 
 private fun callbackUrl(
     steamId: String = VALID_STEAM_ID,
@@ -33,7 +33,7 @@ private fun callbackUrl(
      * pre-4b.7 callback, or a provider that dropped the query string). */
     state: String? = TEST_STATE,
     /** WP D11: the signed return_to is the vault's hand-off page. */
-    returnToBase: String = "http://192.168.1.50:8080/auth/steam/app-return",
+    returnToBase: String = "http://10.0.0.50:8080/auth/steam/app-return",
 ): String {
     fun enc(s: String) = java.net.URLEncoder.encode(s, "UTF-8")
     val claimedId = "https://steamcommunity.com/openid/id/$steamId"
@@ -300,7 +300,7 @@ class SteamIdentityRepositoryTest {
     fun `signOut clears only Steam identity fields, leaving the vault connection intact`() = runTest {
         val store = InMemoryCredentialStore().apply {
             setApiKey("vault-key")
-            setBaseUrl("http://192.168.1.50:8080")
+            setBaseUrl("http://10.0.0.50:8080")
             setProfileKind(ProfileKind.SYSTEM_VPN)
         }
         val (repo, _, _) = repo(store = store)
@@ -314,7 +314,7 @@ class SteamIdentityRepositoryTest {
         assertFalse(state.isSignedIn)
         assertNull(state.personaName)
         assertEquals("vault-key", store.getApiKey())
-        assertEquals("http://192.168.1.50:8080", store.getBaseUrl())
+        assertEquals("http://10.0.0.50:8080", store.getBaseUrl())
         assertEquals(ProfileKind.SYSTEM_VPN, store.getProfileKind())
     }
 
@@ -392,10 +392,10 @@ class SteamIdentityRepositoryTest {
     fun `MUTATION PIN -- buildLoginUrl sends Steam the vault return page and the vault origin as realm`() {
         val (repo, verifier, _) = repo()
 
-        repo.buildLoginUrl("http://192.168.1.50:8080")
+        repo.buildLoginUrl("http://10.0.0.50:8080")
 
-        assertEquals("http://192.168.1.50:8080/auth/steam/app-return?state=test-state-1", verifier.lastReturnTo)
-        assertEquals("http://192.168.1.50:8080/", verifier.lastRealm)
+        assertEquals("http://10.0.0.50:8080/auth/steam/app-return?state=test-state-1", verifier.lastReturnTo)
+        assertEquals("http://10.0.0.50:8080/", verifier.lastRealm)
     }
 
     @Test

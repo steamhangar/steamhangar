@@ -16,7 +16,7 @@ The line format (vault-core, core/README.md "Cache-event log")
 --------------------------------------------------------------
 Tab-separated, ``escape=default``, exactly **9** fields, version-prefixed::
 
-    v1  2026-08-09T14:03:11+02:00  192.168.1.42  MISS  70403 \
+    v1  2026-08-09T14:03:11+02:00  10.0.0.42  MISS  70403 \
         /depot/70403/chunk/773d1005…  999232  lancache.steamcontent.com  200
 
 1. ``v1`` — format version

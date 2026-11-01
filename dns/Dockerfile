@@ -13,7 +13,7 @@
 # Reachable from the internet it becomes an open resolver, i.e. a DNS
 # amplification/reflection weapon pointed at third parties from this homelab's
 # IP. Port 53 must be published on a specific LAN host IP
-# ("192.168.1.50:53:53/udp"), NEVER a bare "53:53/udp" (= 0.0.0.0 = every
+# ("10.0.0.50:53:53/udp"), NEVER a bare "53:53/udp" (= 0.0.0.0 = every
 # interface). deploy/compose.yaml defaults this to 127.0.0.1 for exactly that
 # reason: a misconfigured deployment must fail closed (nothing can reach it),
 # never open.
@@ -67,7 +67,7 @@ EXPOSE 53/udp 53/tcp
 # The synthetic subdomain exists only for this probe -- the wildcard covers it.
 # Exact-line, fixed-string match (review N4): a bare `grep -q "$CACHE_IP"`
 # treated the dots as regex wildcards and matched any longer address with the
-# same prefix (192.168.1.5 inside 192.168.1.50), so a wrong answer could read
+# same prefix (10.0.0.5 inside 10.0.0.50), so a wrong answer could read
 # as healthy. busybox nslookup prints each A answer as "Address: <ip>".
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
     CMD nslookup -type=a healthcheck.steamcontent.com 127.0.0.1 2>/dev/null | grep -qxF -- "Address: $CACHE_IP" || exit 1

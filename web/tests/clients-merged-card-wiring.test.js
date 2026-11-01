@@ -38,23 +38,23 @@ const iso = (msAgo) => new Date(Date.now() - msAgo).toISOString().replace(/\.\d{
 const feed = { enabled: true, state: "ok", last_sweep_at: iso(60_000), sweep_interval_minutes: 5, traffic_since: null };
 
 const ovAgent = (id, extra = {}) => ({
-  key: `agent:${id}`, kind: "agent", client_id: id, addresses: ["192.168.1.42"], connected: true, agent_presence: "online",
+  key: `agent:${id}`, kind: "agent", client_id: id, addresses: ["10.0.0.42"], connected: true, agent_presence: "online",
   cache_active: true, last_active: iso(2 * 60_000), last_seen_in_cache_log: iso(2 * 60_000), last_reported_at: iso(5 * 60_000),
   installed_appids: [1, 2], installed_app_count: 2,
   stats: { bytes_served: 1024 ** 3, hit_bytes: 0, miss_bytes: 0, requests: 4, hits: 3, misses: 1, hit_rate: 0.75 },
   loading_now: { loading: false, bytes_per_second: 0, apps: [], unattributed_bytes_per_second: 0 },
-  recent_apps: [], recent_unattributed_bytes: 0, name: null, name_addr: "192.168.1.42", display_name: id, ...extra,
+  recent_apps: [], recent_unattributed_bytes: 0, name: null, name_addr: "10.0.0.42", display_name: id, ...extra,
 });
 const ovAddr = {
-  ...ovAgent("x"), key: "addr:192.168.1.77", kind: "address", client_id: null, addresses: ["192.168.1.77"], connected: false,
-  agent_presence: null, last_reported_at: null, installed_appids: null, installed_app_count: null, name_addr: "192.168.1.77",
-  display_name: "192.168.1.77",
+  ...ovAgent("x"), key: "addr:10.0.0.77", kind: "address", client_id: null, addresses: ["10.0.0.77"], connected: false,
+  agent_presence: null, last_reported_at: null, installed_appids: null, installed_app_count: null, name_addr: "10.0.0.77",
+  display_name: "10.0.0.77",
 };
 const agentRow = (id, extra = {}) => ({
-  client_id: id, first_seen: iso(86_400_000), last_reported_at: iso(5 * 60_000), app_count: 2, source_addrs: ["192.168.1.42"],
+  client_id: id, first_seen: iso(86_400_000), last_reported_at: iso(5 * 60_000), app_count: 2, source_addrs: ["10.0.0.42"],
   peer_addrs: [], reported_addrs: [], cache_hits: 3, cache_misses: 1, bytes_served: 1, last_seen_in_cache_log: iso(60_000),
   bypass_suspected: false, agent_version: "0.1.0", report_interval_seconds: 1800, presence: "online", offline_after: iso(-60_000),
-  name: null, name_addr: "192.168.1.42", display_name: id, ...extra,
+  name: null, name_addr: "10.0.0.42", display_name: id, ...extra,
 });
 
 const server = { overview: [], agents: [], overviewStatus: 200, deletes: [], deleteStatus: 204, agentGate: null, staleAgents: [], overviewCalls: 0 };
@@ -145,11 +145,11 @@ beforeEach(() => {
 test("MUTATION TARGET: a PC that is client and agent shows once, with the agent's presence line", async () => {
   const s = await mount();
   await until(() => keys(s).length === 2, "two cards");
-  assert.deepEqual(keys(s), ["agent:desk-pc", "addr:192.168.1.77"]);
+  assert.deepEqual(keys(s), ["agent:desk-pc", "addr:10.0.0.77"]);
   const a = card(s, "agent:desk-pc");
   assert.match(text(a, '[data-role="agent-presence"]'), /^last seen 5 min ago · agent 0\.1\.0$/);
   assert.equal(text(a, '[data-role="connection"]'), "Online", "presence pill (CLIENTS-4)");
-  assert.equal(card(s, "addr:192.168.1.77").querySelector('[data-role="agent-presence"]'), null, "an address has no agent line");
+  assert.equal(card(s, "addr:10.0.0.77").querySelector('[data-role="agent-presence"]'), null, "an address has no agent line");
   assert.equal(text(s, '[data-role="clients-sub"]'), "2 clients · 1 connected");
 });
 
@@ -201,7 +201,7 @@ test("MUTATION TARGET: a bypass-suspected agent says so on its card, with the ca
   assert.match(text(hint, "p"), /does not necessarily mean anything is wrong/);
   assert.match(a.className, /\bwarn\b/, "the card border warns");
   assert.equal(a.querySelector('[data-role="agent-presence"]'), null, "the bypass row replaces the healthy one");
-  assert.equal(card(s, "addr:192.168.1.77").querySelector('[data-role="bypass"]'), null);
+  assert.equal(card(s, "addr:10.0.0.77").querySelector('[data-role="bypass"]'), null);
 });
 
 test("MUTATION TARGET: Remove on a card opens the shared confirm, sends one DELETE and drops the card", async () => {
@@ -210,14 +210,14 @@ test("MUTATION TARGET: Remove on a card opens the shared confirm, sends one DELE
   const btn = card(s, "agent:desk-pc").querySelector('[data-role="remove-pc"]');
   assert.equal(btn.textContent, "Remove agent");
   assert.equal(btn.getAttribute("aria-label"), "Remove agent desk-pc");
-  assert.equal(card(s, "addr:192.168.1.77").querySelector('[data-role="remove-pc"]'), null, "address cards have no Remove");
+  assert.equal(card(s, "addr:10.0.0.77").querySelector('[data-role="remove-pc"]'), null, "address cards have no Remove");
   click(btn);
   assert.equal(confirmIsOpen(), true);
   assert.equal(text(confirmEl(), "h3"), "Remove desk-pc?");
   click(confirmEl().querySelector('[data-role="remove-confirm-yes"]'));
   await until(() => !confirmIsOpen() && keys(s).length === 1, "card dropped after the refresh");
   assert.deepEqual(server.deletes, ["desk-pc"]);
-  assert.deepEqual(keys(s), ["addr:192.168.1.77"]);
+  assert.deepEqual(keys(s), ["addr:10.0.0.77"]);
   // The page hides a removed id (module state, up to 30 s) until the store's
   // agent snapshot no longer lists it, and only clears that while the page
   // is mounted. Ending before that tick left "desk-pc" hidden for the next
@@ -268,11 +268,11 @@ test("MUTATION TARGET: after Remove, an overview answer that lands before the ag
   click(confirmEl().querySelector('[data-role="remove-confirm-yes"]'));
   await until(() => server.overviewCalls > before, "overview refetched");
   await tick(60); // the overview answer (without gone-pc) is painted; the agent GET is still held
-  assert.deepEqual(keys(s), ["addr:192.168.1.77"], "no agent-only card from the stale snapshot");
+  assert.deepEqual(keys(s), ["addr:10.0.0.77"], "no agent-only card from the stale snapshot");
   assert.equal(stale.length, 1, "precondition: the held answer still lists gone-pc");
   release();
   await tick(60);
-  assert.deepEqual(keys(s), ["addr:192.168.1.77"]);
+  assert.deepEqual(keys(s), ["addr:10.0.0.77"]);
 });
 
 test("a Remove error is cleared when the confirm opens again", async () => {

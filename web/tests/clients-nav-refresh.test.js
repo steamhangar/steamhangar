@@ -42,8 +42,8 @@ const feed = { enabled: true, state: "ok", last_sweep_at: iso(60_000), sweep_int
 
 function pc(loading) {
   return {
-    key: "addr:192.168.1.50", kind: "address", client_id: null, addresses: ["192.168.1.50"], connected: true,
-    name: null, name_addr: "192.168.1.50", display_name: "192.168.1.50",
+    key: "addr:10.0.0.50", kind: "address", client_id: null, addresses: ["10.0.0.50"], connected: true,
+    name: null, name_addr: "10.0.0.50", display_name: "10.0.0.50",
     agent_presence: null, cache_active: loading, last_active: iso(60_000), last_seen_in_cache_log: iso(60_000),
     last_reported_at: null, installed_appids: null, installed_app_count: null,
     stats: { bytes_served: MIB, hit_bytes: MIB, miss_bytes: 0, requests: 1, hits: 1, misses: 0, hit_rate: 1 },

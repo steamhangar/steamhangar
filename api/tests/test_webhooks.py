@@ -301,7 +301,7 @@ def test_bypass_event_payload_shape(tmp_path: Path, receiver: _Receiver) -> None
             notifier,
             event=webhooks.WEBHOOK_EVENT_BYPASS_SUSPECTED,
             client_id="steam-deck-01",
-            addresses=["192.168.1.55"],
+            addresses=["10.0.0.55"],
             last_seen=None,
         )
         assert _wait_until(lambda: len(receiver.requests) == 1)
@@ -313,7 +313,7 @@ def test_bypass_event_payload_shape(tmp_path: Path, receiver: _Receiver) -> None
     assert body["vault_name"] == "homelab"
     assert body["payload"] == {
         "client_id": "steam-deck-01",
-        "address": ["192.168.1.55"],
+        "address": ["10.0.0.55"],
         "last_seen": None,
     }
 
@@ -547,7 +547,7 @@ def _seed_suspected_client(
     conn.execute(
         "INSERT INTO agent_reports (client_id, reported_at, appids, source_addr) "
         "VALUES (?, ?, ?, ?)",
-        (client_id, to_utc_iso(moment), "[440, 730]", "192.168.1.55"),
+        (client_id, to_utc_iso(moment), "[440, 730]", "10.0.0.55"),
     )
     conn.execute(
         """
@@ -568,12 +568,12 @@ def _refresh_agent_report(conn, client_id: str, *, moment: datetime) -> None:
     conn.execute(
         "INSERT INTO agent_reports (client_id, reported_at, appids, source_addr) "
         "VALUES (?, ?, ?, ?)",
-        (client_id, to_utc_iso(moment), "[440, 730]", "192.168.1.55"),
+        (client_id, to_utc_iso(moment), "[440, 730]", "10.0.0.55"),
     )
     conn.commit()
 
 
-def _mark_seen_in_cache(conn, addr: str = "192.168.1.55", *, moment: datetime) -> None:
+def _mark_seen_in_cache(conn, addr: str = "10.0.0.55", *, moment: datetime) -> None:
     """Cache-log presence returns for ``addr`` at ``moment`` -- what flips a
     suspected client back to not-suspected (disqualification #6)."""
     stamp = to_utc_iso(moment)

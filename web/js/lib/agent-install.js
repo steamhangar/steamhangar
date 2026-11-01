@@ -148,7 +148,7 @@ export function releaseAssets(version) {
  */
 export function validateAgentServerUrl(text) {
   const raw = typeof text === "string" ? text.trim() : "";
-  if (!raw) return { ok: false, message: "Enter the vault-api address, e.g. http://192.168.1.20:8080." };
+  if (!raw) return { ok: false, message: "Enter the vault-api address, e.g. http://10.0.0.20:8080." };
   let url;
   try {
     url = new URL(raw);

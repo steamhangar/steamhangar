@@ -381,7 +381,7 @@ vault-core's, regardless of which container SteamPrefill runs in. Candidate
 resolver rewrites the zone for the CONTAINER too (not a given — see the
 earlier DNS section). If it doesn't, this is exactly where prefill jobs
 silently fill nothing. (The third, LAN-address probe from the pre-split
-version of this section — `http://192.168.1.50/lancache-heartbeat` —
+version of this section — `http://10.0.0.50/lancache-heartbeat` —
 is illustrative of your own dedicated `VAULT_CORE_BIND` value, not something
 reproducible on a throwaway dev host with no such address; the mechanism is
 identical to the fixed-literal probe just re-measured above once you
@@ -430,7 +430,7 @@ it):
    services:
      vault-runner:
        extra_hosts:
-         - "lancache.steamcontent.com:192.168.1.50"   # vault-core's own address
+         - "lancache.steamcontent.com:10.0.0.50"   # vault-core's own address
    ```
    **The value must be a plain private IPv4 address, not a hostname** —
    SteamPrefill's own resolution step requires an RFC1918-or-loopback IPv4
@@ -449,7 +449,7 @@ it):
    services:
      vault-runner:
        dns:
-         - 192.168.1.50   # your AdGuard Home / Pi-hole / vault-dns address
+         - 10.0.0.50   # your AdGuard Home / Pi-hole / vault-dns address
    ```
    **This option broke prefills before WP CORE-FIX-3, and still does unless
    port 443 reaches vault-core.** With the rewrite, *every*
@@ -487,9 +487,9 @@ configuration decision in this project.
 2. **Bundled `vault-dns`** — for LANs with no DNS server of their own:
    ```bash
    # in .env:
-   #   CACHE_IP=192.168.1.50        <- the LAN IP of THIS host
-   #   VAULT_DNS_BIND=192.168.1.50  <- publish :53 on that LAN IP only
-   #   VAULT_TLS_BIND=192.168.1.50  <- publish the HTTPS passthrough there (see below)
+   #   CACHE_IP=10.0.0.50        <- the LAN IP of THIS host
+   #   VAULT_DNS_BIND=10.0.0.50  <- publish :53 on that LAN IP only
+   #   VAULT_TLS_BIND=10.0.0.50  <- publish the HTTPS passthrough there (see below)
    docker compose --profile dns up -d
    ```
    Then point your router's DHCP-advertised DNS server at that address.
@@ -564,14 +564,14 @@ web UI), give SteamHangar **its own address** instead
 
 ```bash
 # IP alias on the existing NIC (persist it the way your distro does)
-sudo ip addr add 192.168.1.50/24 dev eth0
+sudo ip addr add 10.0.0.50/24 dev eth0
 
 # deploy/.env
-VAULT_CORE_BIND=192.168.1.50
-VAULT_TLS_BIND=192.168.1.50     # port 443, the HTTPS passthrough (next section)
+VAULT_CORE_BIND=10.0.0.50
+VAULT_TLS_BIND=10.0.0.50     # port 443, the HTTPS passthrough (next section)
 ```
 
-…then point your DNS rewrite (or `CACHE_IP`) at `192.168.1.50`. A macvlan
+…then point your DNS rewrite (or `CACHE_IP`) at `10.0.0.50`. A macvlan
 network or a dedicated VLAN interface works equally well.
 
 ---
@@ -608,14 +608,14 @@ rewrite answers for `*.steamcontent.com`, normally the same as
 
 ```bash
 # deploy/.env -- the same dedicated address the DNS rewrite points at
-VAULT_CORE_BIND=192.168.1.50
-VAULT_TLS_BIND=192.168.1.50
+VAULT_CORE_BIND=10.0.0.50
+VAULT_TLS_BIND=10.0.0.50
 ```
 
 | `VAULT_TLS_BIND` | Port 443 is published on |
 |---|---|
 | unset or blank (default) | `127.0.0.1:<random port>`: not reachable from the LAN, never clashes with a host service |
-| `192.168.1.50` | `192.168.1.50:443` |
+| `10.0.0.50` | `10.0.0.50:443` |
 | `0.0.0.0` | every interface, only because you wrote it |
 
 It does **not** follow `VAULT_CORE_BIND` on purpose. Unset, that variable
@@ -665,10 +665,10 @@ real CDN name:
 ```bash
 # Valve's own certificate, through the cache: expect "SSL certificate verify ok"
 # and a subject of CN=cache2-ams1.steamcontent.com
-curl -sv -o /dev/null --resolve cache2-ams1.steamcontent.com:443:192.168.1.50 \
+curl -sv -o /dev/null --resolve cache2-ams1.steamcontent.com:443:10.0.0.50 \
      https://cache2-ams1.steamcontent.com/ 2>&1 | grep -E 'subject:|verify ok'
 # anything else is closed: expect a TLS error, no certificate
-curl -sv -o /dev/null --resolve example.com:443:192.168.1.50 https://example.com/
+curl -sv -o /dev/null --resolve example.com:443:10.0.0.50 https://example.com/
 # vault-core logs one line per connection
 docker compose logs vault-core | grep ' tls client='
 ```
@@ -1333,7 +1333,7 @@ writes **one line per depot request**, so a large prefill can churn through
 Since WP D15a every vault-core access-log line ends with `client=<address>`,
 the client's IP address as vault-core sees it (the Docker bridge gateway for
 requests from the host itself), so `docker logs vault-core | grep
-'client=192.168.1.42'` shows one device's requests. It is kept as long as the
+'client=10.0.0.42'` shows one device's requests. It is kept as long as the
 rotation above keeps the log; there is no switch to turn it off.
 
 `vault-dns` deliberately does **not** log queries. It is your LAN's forwarding
@@ -1799,7 +1799,7 @@ What this deployment assumes, stated plainly so it can be checked:
 - **vault-dns is an open resolver if you publish it wrong.** It forwards
   arbitrary queries upstream with no source-address ACL, which is fine on a
   trusted LAN and a DNS amplification/reflection weapon on the internet.
-  Publish it on one specific LAN IP (`VAULT_DNS_BIND=192.168.1.50`), never on
+  Publish it on one specific LAN IP (`VAULT_DNS_BIND=10.0.0.50`), never on
   `0.0.0.0`. If you leave the variable unset it publishes on `127.0.0.1`, i.e.
   it fails *closed* — visibly broken rather than invisibly dangerous.
 - **A host firewall does not protect published ports.** Docker writes its

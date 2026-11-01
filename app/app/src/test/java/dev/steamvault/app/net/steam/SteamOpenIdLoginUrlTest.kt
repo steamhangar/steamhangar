@@ -26,12 +26,12 @@ class SteamOpenIdLoginUrlTest {
         val expected = "https://steamcommunity.com/openid/login" +
             "?openid.ns=http%3A%2F%2Fspecs.openid.net%2Fauth%2F2.0" +
             "&openid.mode=checkid_setup" +
-            "&openid.return_to=http%3A%2F%2F192.168.1.50%3A8080%2Fauth%2Fsteam%2Fapp-return%3Fstate%3Dabc" +
-            "&openid.realm=http%3A%2F%2F192.168.1.50%3A8080%2F" +
+            "&openid.return_to=http%3A%2F%2F10.0.0.50%3A8080%2Fauth%2Fsteam%2Fapp-return%3Fstate%3Dabc" +
+            "&openid.realm=http%3A%2F%2F10.0.0.50%3A8080%2F" +
             "&openid.identity=http%3A%2F%2Fspecs.openid.net%2Fauth%2F2.0%2Fidentifier_select" +
             "&openid.claimed_id=http%3A%2F%2Fspecs.openid.net%2Fauth%2F2.0%2Fidentifier_select"
 
-        val target = SteamOpenIdReturnUrl.forVault("http://192.168.1.50:8080", "abc")!!
+        val target = SteamOpenIdReturnUrl.forVault("http://10.0.0.50:8080", "abc")!!
         assertEquals(expected, SteamOpenIdLoginUrl.build(target.returnTo, target.realm))
     }
 

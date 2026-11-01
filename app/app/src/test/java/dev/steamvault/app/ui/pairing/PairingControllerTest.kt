@@ -42,10 +42,10 @@ class PairingControllerTest {
     @Test
     fun `MUTATION PIN -- an already configured different vault shows the replace notice naming it`() {
         val controller = PairingController(clock = { now })
-        controller.offer(link, existingBaseUrl = "http://192.168.1.50:8080", hasExistingKey = true)
+        controller.offer(link, existingBaseUrl = "http://10.0.0.50:8080", hasExistingKey = true)
         val state = confirmState(controller)
         assertEquals(PairingReplaceNotice.REPLACES_OTHER_VAULT, state.notice)
-        assertEquals("192.168.1.50:8080", state.existingHost)
+        assertEquals("10.0.0.50:8080", state.existingHost)
     }
 
     @Test

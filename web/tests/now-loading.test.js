@@ -43,9 +43,9 @@ beforeEach(() => resetDemoData());
 function source(kind, fields = {}) {
   return {
     kind,
-    key: kind === "runner" ? "runner" : kind === "unattributed" ? "unattributed" : "addr:192.168.1.50",
-    name: kind === "runner" ? "Prefill runner" : kind === "unattributed" ? null : "192.168.1.50",
-    addresses: kind === "unattributed" ? [] : ["192.168.1.50"],
+    key: kind === "runner" ? "runner" : kind === "unattributed" ? "unattributed" : "addr:10.0.0.50",
+    name: kind === "runner" ? "Prefill runner" : kind === "unattributed" ? null : "10.0.0.50",
+    addresses: kind === "unattributed" ? [] : ["10.0.0.50"],
     known: true,
     bytes_per_second: 10 * MIB,
     hit_bytes_per_second: 0,
@@ -139,12 +139,12 @@ test("a pending cancel is shown on the runner row", () => {
 
 test("two devices with their games, named as on the Clients page", () => {
   const pc = source("client", {
-    key: "agent:pc-one", name: "Gaming PC", addresses: ["192.168.1.20"],
+    key: "agent:pc-one", name: "Gaming PC", addresses: ["10.0.0.20"],
     bytes_per_second: 12 * MIB, hit_bytes_per_second: 12 * MIB, miss_bytes_per_second: 0,
     apps: [{ appid: 1, name: "Game One", bytes_per_second: 8 * MIB }, { appid: 2, name: "Game Two", bytes_per_second: 4 * MIB }],
   });
   const laptop = source("client", {
-    key: "addr:192.168.1.21", name: "Laptop", addresses: ["192.168.1.21"],
+    key: "addr:10.0.0.21", name: "Laptop", addresses: ["10.0.0.21"],
     bytes_per_second: 4 * MIB, hit_bytes_per_second: 1 * MIB, miss_bytes_per_second: 3 * MIB,
     apps: [{ appid: 3, name: null, bytes_per_second: 4 * MIB }],
   });
@@ -165,11 +165,11 @@ test("a device loading only from the internet, and one without a linked game", (
 test("an unknown address is a New device with its address", () => {
   const [row] = rowsOf([source("client", { known: false, apps: [{ appid: 9, name: "Game Nine", bytes_per_second: 1 }] })]);
   assert.equal(row.name, LOADING_NEW_DEVICE);
-  assert.equal(row.detail, "192.168.1.50 · Game Nine · from the internet");
+  assert.equal(row.detail, "10.0.0.50 · Game Nine · from the internet");
   // Missing `known` (never false) keeps the server's name.
   const plain = source("client");
   delete plain.known;
-  assert.equal(rowsOf([plain])[0].name, "192.168.1.50");
+  assert.equal(rowsOf([plain])[0].name, "10.0.0.50");
 });
 
 test("traffic no device explains reads Unattributed traffic", () => {

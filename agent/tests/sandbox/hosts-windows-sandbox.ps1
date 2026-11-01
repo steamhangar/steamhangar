@@ -48,7 +48,7 @@ $ErrorActionPreference = "Continue"
 
 $me   = "$env:USERDOMAIN\$env:USERNAME"
 $real = "$env:SystemRoot\System32\drivers\etc\hosts"
-$CacheIP = "192.168.1.50"
+$CacheIP = "10.0.0.50"
 $CacheHost = "lancache.steamcontent.com"
 
 $script:fails = 0

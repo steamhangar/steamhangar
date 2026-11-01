@@ -44,7 +44,7 @@ const agent = (extra = {}) => ({
   key: "agent:gaming-pc",
   kind: "agent",
   client_id: "gaming-pc",
-  addresses: ["192.168.1.42"],
+  addresses: ["10.0.0.42"],
   connected: true,
   agent_presence: "online",
   cache_active: true,
@@ -59,10 +59,10 @@ const agent = (extra = {}) => ({
 });
 const address = (extra = {}) =>
   agent({
-    key: "addr:192.168.1.77",
+    key: "addr:10.0.0.77",
     kind: "address",
     client_id: null,
-    addresses: ["192.168.1.77"],
+    addresses: ["10.0.0.77"],
     agent_presence: null,
     installed_appids: null,
     installed_app_count: null,
@@ -71,15 +71,15 @@ const address = (extra = {}) =>
 
 test("names: an agent by its client_id, an address client by its address (no invented name)", () => {
   assert.equal(clientName(agent()), "gaming-pc");
-  assert.equal(clientName(address()), "192.168.1.77");
-  assert.equal(clientName(address({ addresses: [] })), "192.168.1.77", "falls back to the key");
+  assert.equal(clientName(address()), "10.0.0.77");
+  assert.equal(clientName(address({ addresses: [] })), "10.0.0.77", "falls back to the key");
 });
 
 test("MUTATION TARGET: an address client is 'No agent · seen in the cache log' and never called a PC", () => {
   const text = clientKindText(address());
   assert.equal(text, "No agent · seen in the cache log");
   assert.doesNotMatch(text, /\bPC\b|computer|console|phone|runner/i);
-  assert.equal(clientKindText(agent()), "vault-agent · 192.168.1.42");
+  assert.equal(clientKindText(agent()), "vault-agent · 10.0.0.42");
   assert.equal(clientKindText(agent({ addresses: [] })), "vault-agent · no address in the cache log");
   assert.doesNotMatch(AGENTLESS_NOTE, /runner|prefill/i);
 });

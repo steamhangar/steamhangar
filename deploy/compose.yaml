@@ -284,8 +284,8 @@ services:
       # If something else on this host already owns port 80, do NOT move
       # SteamHangar to another port -- give it its own address instead (§10):
       #   * an IP alias on the existing NIC:
-      #       ip addr add 192.168.1.50/24 dev eth0
-      #       VAULT_CORE_BIND=192.168.1.50   in .env
+      #       ip addr add 10.0.0.50/24 dev eth0
+      #       VAULT_CORE_BIND=10.0.0.50   in .env
       #   * or a macvlan / dedicated VLAN interface for the container.
       # Then point your DNS rewrite (or vault-dns's CACHE_IP) at that address.
       #
@@ -297,7 +297,7 @@ services:
       - "${VAULT_CORE_BIND:-0.0.0.0}:${VAULT_CORE_PORT:-80}:80"
       # Port 443, the HTTPS passthrough (WP CORE-FIX-3, ADR-0020). Published
       # on the LAN ONLY when VAULT_TLS_BIND is set, and only on that address:
-      #   VAULT_TLS_BIND=192.168.1.50   -> 192.168.1.50:443  (set it to the
+      #   VAULT_TLS_BIND=10.0.0.50      -> 10.0.0.50:443     (set it to the
       #                                    same address as VAULT_CORE_BIND)
       #   unset or blank                -> 127.0.0.1:<random port>, i.e.
       #                                    not reachable from the LAN and
@@ -1258,8 +1258,8 @@ services:
       #
       # Publish it on ONE specific LAN address. In production that looks like:
       #
-      #     - "192.168.1.50:53:53/udp"
-      #     - "192.168.1.50:53:53/tcp"
+      #     - "10.0.0.50:53:53/udp"
+      #     - "10.0.0.50:53:53/tcp"
       #
       # NEVER like this:
       #

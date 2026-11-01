@@ -4908,7 +4908,7 @@ before it was recorded, so "all" starts there.
     "unattributed_bytes_per_second": 0.0, "phase": "download",
     "job": {"job_id": 200, "appid": 275850, "name": "No Man's Sky", "stop_request": null}},
    {"kind": "client", "key": "agent:gaming-pc", "name": "Gaming PC",
-    "addresses": ["192.168.1.20"], "known": true, "bytes_per_second": 12582912.0,
+    "addresses": ["10.0.0.20"], "known": true, "bytes_per_second": 12582912.0,
     "hit_bytes_per_second": 12582912.0, "miss_bytes_per_second": 0.0,
     "apps": [...], "unattributed_bytes_per_second": 0.0, "phase": null, "job": null},
    {"kind": "unattributed", "key": "unattributed", "name": null, "addresses": [], ...}]
@@ -5064,7 +5064,7 @@ sweep. Calling the endpoint arms the live watcher.
  "range_start": "2026-10-07T21:00:00Z", "active_window_minutes": 15,
  "clients": [
   {"key": "agent:gaming-pc", "kind": "agent", "client_id": "gaming-pc",
-   "addresses": ["192.168.1.42"], "connected": true,
+   "addresses": ["10.0.0.42"], "connected": true,
    "agent_presence": "online", "cache_active": true,
    "last_active": "2026-10-13T20:07:58Z",
    "last_seen_in_cache_log": "2026-10-13T20:07:58Z",
@@ -5081,8 +5081,8 @@ sweep. Calling the endpoint arms the live watcher.
                     "bytes_served": 1073741824,
                     "last_seen": "2026-10-13T20:07:58Z"}],
    "recent_unattributed_bytes": 0},
-  {"key": "addr:192.168.1.77", "kind": "address", "client_id": null,
-   "addresses": ["192.168.1.77"], "connected": false,
+  {"key": "addr:10.0.0.77", "kind": "address", "client_id": null,
+   "addresses": ["10.0.0.77"], "connected": false,
    "agent_presence": null, "cache_active": false,
    "last_active": "2026-10-11T18:00:12Z", ..., "installed_appids": null,
    "installed_app_count": null, ...}]}
@@ -5347,7 +5347,7 @@ Example `client.bypass_suspected` payload:
   "timestamp": "2026-08-09T09:00:00Z",
   "payload": {
     "client_id": "steam-deck-01",
-    "address": ["192.168.1.55"],
+    "address": ["10.0.0.55"],
     "last_seen": null
   }
 }
@@ -5361,7 +5361,7 @@ Example `client.bypass_resolved` payload (same shape, `last_seen` now populated)
   "timestamp": "2026-08-09T15:00:00Z",
   "payload": {
     "client_id": "steam-deck-01",
-    "address": ["192.168.1.55"],
+    "address": ["10.0.0.55"],
     "last_seen": "2026-08-09T14:58:03Z"
   }
 }

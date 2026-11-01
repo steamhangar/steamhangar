@@ -526,8 +526,11 @@ their open boxes (items 2, 7 and 11) are in section 12. Item 13 stays here.
         the "now loading" device count counts agents like its rows;
         LIVE-DIVISOR-1 Weg A: the live rate of a partly covered bucket
         divides by the covered seconds. RETRY-REANNOUNCE-1 stays (Weg B).
-      - [ ] **SAMPLE-IP-1** (tests/examples; user decision 2026-11-01,
+      - [x] **SAMPLE-IP-1** (tests/examples; user decision 2026-11-01,
         Weg A) sweep the generic `192.168.1.x` examples to `10.0.0.x`.
+        (Done: 57 files; kept on purpose: archive, dated verification
+        records, the roadmap finding and the learning that names the real
+        subnet.)
       - [x] **CI-SIGN-PIN-1** (ci; CI-FIX-3 follow-up) pin the APK signing
         certificate fingerprint in CI. `publish.yml`'s verify step compares
         the release APK's certificate SHA-256 with `app/signing-cert.sha256`
@@ -1380,7 +1383,7 @@ is done, tick it HERE, not in the archive.
       in rc20-visual-check.md so the device check does not flag them:
       Filters only with metadata, store details first on Overview
       (CARD-LAYOUT-1 pin); `strings.xml:210` hint `http://192.168.1.50:8080`
-      belongs to SAMPLE-IP-1. (NITS-APP-1 check: `DETAIL_TABS_TAG` is used
+      belongs to SAMPLE-IP-1 (fixed in SAMPLE-IP-1: now `10.0.0.50`). (NITS-APP-1 check: `DETAIL_TABS_TAG` is used
       by `DetailSheetScreenshotTest`; the deviations are already listed in
       rc20-visual-check.md "Android rc21: accepted deviations"; still open:
       `groupCompletenessLine` on Overview, the hint via SAMPLE-IP-1)
@@ -1495,7 +1498,7 @@ is done, tick it HERE, not in the archive.
   - [ ] nit (RUNNER-NAME-1 review): mini line "SteamHangar 25.6 GB of
     it" could read "By SteamHangar: ..."; KDoc line widths in
     ClientsPage.kt / DownloadsHero.kt; web/tests/now-loading.test.js:47
-    uses 192.168.1.50 (SAMPLE-IP-1).
+    uses 192.168.1.50 (SAMPLE-IP-1; fixed in SAMPLE-IP-1: now `10.0.0.50`).
   - [ ] nit (ANDROID-RC21-1-TWINS review): StorageBalanceCardTest uses
     contains-style pins (use assertCalledFrom like D15dWiringTest);
     `smoother.observe` runs as a composition side effect (idempotent); a

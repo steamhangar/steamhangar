@@ -16,7 +16,7 @@ const overviewAgent = (id, extra = {}) => ({
   key: `agent:${id}`,
   kind: "agent",
   client_id: id,
-  addresses: ["192.168.1.42"],
+  addresses: ["10.0.0.42"],
   connected: true,
   agent_presence: "online",
   stats: { bytes_served: 5 },
@@ -38,7 +38,7 @@ const agentRow = (id, extra = {}) => ({
   client_id: id,
   last_reported_at: "2026-10-16T10:00:00Z",
   app_count: 3,
-  source_addrs: ["192.168.1.42"],
+  source_addrs: ["10.0.0.42"],
   presence: "online",
   agent_version: "0.1.0",
   bypass_suspected: false,
@@ -58,7 +58,7 @@ test("both: the agent row rides on the overview card, which keeps its traffic fi
 });
 
 test("client only: addresses and the runner pass through with agent null", () => {
-  const out = mergeAgentData([overviewAddr("192.168.1.77"), { key: "runner", kind: "runner", client_id: null, addresses: [] }], [agentRow("desk-pc")]);
+  const out = mergeAgentData([overviewAddr("10.0.0.77"), { key: "runner", kind: "runner", client_id: null, addresses: [] }], [agentRow("desk-pc")]);
   assert.equal(out.filter((c) => c.kind !== "agent").every((c) => c.agent === null), true);
   assert.equal(out.length, 3, "the agent PC without an overview row is added once");
 });
@@ -99,10 +99,10 @@ test("agent only: a presence the server did not send is 'unknown' (connected nul
 
 test("MUTATION TARGET: an address row never joins an agent card, even on the agent's own address", () => {
   const out = mergeAgentData(
-    [overviewAgent("desk-pc", { addresses: [] }), overviewAddr("192.168.1.42")],
-    [agentRow("desk-pc", { source_addrs: ["192.168.1.42"] })],
+    [overviewAgent("desk-pc", { addresses: [] }), overviewAddr("10.0.0.42")],
+    [agentRow("desk-pc", { source_addrs: ["10.0.0.42"] })],
   );
-  assert.deepEqual(out.map((c) => c.key), ["agent:desk-pc", "addr:192.168.1.42"]);
+  assert.deepEqual(out.map((c) => c.key), ["agent:desk-pc", "addr:10.0.0.42"]);
   assert.equal(out[1].agent, null);
 });
 

@@ -57,9 +57,9 @@ class PairingLinkTest {
 
     @Test
     fun `an http LAN address with a port is accepted and flagged as cleartext`() {
-        val request = valid(link(url = enc("http://192.168.1.50:8080")))
-        assertEquals("http://192.168.1.50:8080", request.baseUrl)
-        assertEquals("192.168.1.50:8080", request.displayHost)
+        val request = valid(link(url = enc("http://10.0.0.50:8080")))
+        assertEquals("http://10.0.0.50:8080", request.baseUrl)
+        assertEquals("10.0.0.50:8080", request.displayHost)
         assertTrue(request.usesCleartext)
     }
 

@@ -73,7 +73,7 @@ class OnboardingControllerTest {
     @Test
     fun `start resets to step 1 and seeds fields from the credential store`() {
         val store = InMemoryCredentialStore().apply {
-            setBaseUrl("http://192.168.1.50:8080")
+            setBaseUrl("http://10.0.0.50:8080")
             setProfileKind(ProfileKind.PUBLIC_DOMAIN)
         }
         val (controller, _, _) = controller(store = store)
@@ -82,7 +82,7 @@ class OnboardingControllerTest {
 
         assertEquals(OnboardingStep.CONNECT, controller.step)
         assertEquals(OnboardingMode.RECONNECT, controller.mode)
-        assertEquals("http://192.168.1.50:8080", controller.baseUrlText)
+        assertEquals("http://10.0.0.50:8080", controller.baseUrlText)
         assertEquals(ConnectivityProfileChoice.PUBLIC_DOMAIN, controller.profileChoice)
         assertEquals("", controller.apiKeyText) // never pre-filled -- a secret is not re-shown
         assertFalse(controller.tested)
@@ -111,7 +111,7 @@ class OnboardingControllerTest {
     fun `buildSteamLoginUrl clears any previous login error and delegates to the repository`() {
         val (controller, _, identity) = controller()
         controller.start(OnboardingMode.FIRST_RUN)
-        controller.baseUrlText = "http://192.168.1.50:8080"
+        controller.baseUrlText = "http://10.0.0.50:8080"
 
         val url = controller.buildSteamLoginUrl()
 
@@ -124,11 +124,11 @@ class OnboardingControllerTest {
     fun `MUTATION PIN -- buildSteamLoginUrl hands step 1's trimmed vault URL to the repository (WP D11)`() {
         val (controller, _, identity) = controller()
         controller.start(OnboardingMode.FIRST_RUN)
-        controller.baseUrlText = "  http://192.168.1.50:8080  "
+        controller.baseUrlText = "  http://10.0.0.50:8080  "
 
         controller.buildSteamLoginUrl()
 
-        assertEquals("http://192.168.1.50:8080", identity.lastVaultBaseUrl)
+        assertEquals("http://10.0.0.50:8080", identity.lastVaultBaseUrl)
     }
 
     @Test
@@ -183,13 +183,13 @@ class OnboardingControllerTest {
     fun `finish persists base URL, profile kind, and API key -- and nothing Steam-related`() {
         val (controller, store, _) = controller()
         controller.start(OnboardingMode.FIRST_RUN)
-        controller.baseUrlText = " http://192.168.1.50:8080 "
+        controller.baseUrlText = " http://10.0.0.50:8080 "
         controller.apiKeyText = " secret-key "
         controller.profileChoice = ConnectivityProfileChoice.SYSTEM_VPN
 
         controller.finish()
 
-        assertEquals("http://192.168.1.50:8080", store.getBaseUrl())
+        assertEquals("http://10.0.0.50:8080", store.getBaseUrl())
         assertEquals("secret-key", store.getApiKey())
         assertEquals(ProfileKind.SYSTEM_VPN, store.getProfileKind())
     }
@@ -205,11 +205,11 @@ class OnboardingControllerTest {
         assertEquals("invalid-url", controller.verifyConnection(ConnectivityProfileChoice.SYSTEM_VPN, "not a url", "k"))
         assertEquals(
             "invalid-url",
-            controller.verifyConnection(ConnectivityProfileChoice.PUBLIC_DOMAIN, "http://192.168.1.50:8080", "k"),
+            controller.verifyConnection(ConnectivityProfileChoice.PUBLIC_DOMAIN, "http://10.0.0.50:8080", "k"),
         )
         assertEquals(
             "enter-key-first",
-            controller.verifyConnection(ConnectivityProfileChoice.SYSTEM_VPN, "http://192.168.1.50:8080", "   "),
+            controller.verifyConnection(ConnectivityProfileChoice.SYSTEM_VPN, "http://10.0.0.50:8080", "   "),
         )
 
         assertEquals("typed-by-user", controller.baseUrlText)
@@ -280,7 +280,7 @@ class OnboardingControllerTest {
     @Test
     fun `pairing over an existing connection replaces all three stored fields`() {
         val store = InMemoryCredentialStore().apply {
-            setBaseUrl("http://192.168.1.50:8080")
+            setBaseUrl("http://10.0.0.50:8080")
             setProfileKind(ProfileKind.SYSTEM_VPN)
             setApiKey("old-key")
         }

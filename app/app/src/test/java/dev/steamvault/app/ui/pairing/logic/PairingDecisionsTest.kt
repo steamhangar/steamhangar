@@ -31,7 +31,7 @@ class PairingDecisionsTest {
     fun `a stored URL without a key is not a working connection, so nothing is replaced`() {
         assertEquals(
             PairingReplaceNotice.NONE,
-            replaceNoticeFor("http://192.168.1.50:8080", hasExistingKey = false, request = request("https://hangar.example.org")),
+            replaceNoticeFor("http://10.0.0.50:8080", hasExistingKey = false, request = request("https://hangar.example.org")),
         )
     }
 
@@ -39,7 +39,7 @@ class PairingDecisionsTest {
     fun `MUTATION PIN -- an already configured different vault gets the replace notice`() {
         assertEquals(
             PairingReplaceNotice.REPLACES_OTHER_VAULT,
-            replaceNoticeFor("http://192.168.1.50:8080", hasExistingKey = true, request = request("https://hangar.example.org")),
+            replaceNoticeFor("http://10.0.0.50:8080", hasExistingKey = true, request = request("https://hangar.example.org")),
         )
     }
 
@@ -75,7 +75,7 @@ class PairingDecisionsTest {
     @Test
     fun `the existing host for the notice is host and non-default port, or the raw text`() {
         val new = request("https://other.example")
-        assertEquals("192.168.1.50:8080", existingDisplayHost("http://192.168.1.50:8080", new))
+        assertEquals("10.0.0.50:8080", existingDisplayHost("http://10.0.0.50:8080", new))
         assertEquals("hangar.example.org", existingDisplayHost("https://hangar.example.org/", new))
         assertEquals("not a url", existingDisplayHost(" not a url ", new))
         assertNull(existingDisplayHost(null, new))
@@ -96,7 +96,7 @@ class PairingDecisionsTest {
     @Test
     fun `https pairs with the TLS-only profile, http with the LAN profile`() {
         assertEquals(ConnectivityProfileChoice.PUBLIC_DOMAIN, pairingProfileChoice(request("https://hangar.example.org")))
-        assertEquals(ConnectivityProfileChoice.SYSTEM_VPN, pairingProfileChoice(request("http://192.168.1.50:8080")))
+        assertEquals(ConnectivityProfileChoice.SYSTEM_VPN, pairingProfileChoice(request("http://10.0.0.50:8080")))
     }
 
     // ---- continuation -------------------------------------------------------------

@@ -44,9 +44,9 @@ class PairingLinkContractTest {
     fun `a token_urlsafe key, the format the deploy docs generate, passes through unchanged`() {
         // python -c "import secrets; print(secrets.token_urlsafe(36))" -- synthetic sample of that alphabet.
         val key = "q8Zr-1_bVn3kXw0PpLm2Aa9-ZZ_yTt7RrUu4Ee5Oo6Ii8Hh"
-        val result = PairingLink.parse("steamhangar://pair?v=1&url=http%3A%2F%2F192.168.1.50%3A8080&key=$key")
+        val result = PairingLink.parse("steamhangar://pair?v=1&url=http%3A%2F%2F10.0.0.50%3A8080&key=$key")
         assertEquals(key, (result as PairingParseResult.Valid).request.apiKey)
-        assertEquals("http://192.168.1.50:8080", result.request.baseUrl)
+        assertEquals("http://10.0.0.50:8080", result.request.baseUrl)
     }
 
     // ---- AndroidManifest.xml: the filter that makes the camera app open us ----

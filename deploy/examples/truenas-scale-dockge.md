@@ -5,7 +5,7 @@ through [Dockge](https://github.com/louislam/dockge) instead of the SCALE
 Apps UI. This is one way to do it, not the only way -- adapt paths and pool
 names to your own system. Every address below is an
 [RFC 1918](https://en.wikipedia.org/wiki/Private_network) example
-(`192.168.1.0/24`), not a real deployment's configuration.
+(`10.0.0.0/24`), not a real deployment's configuration.
 
 Read [`deploy/README.md`](../README.md) first -- this document only adds the
 TrueNAS/Dockge-specific parts: where the stack lives, how to give the cache
@@ -271,12 +271,12 @@ this by moving `VAULT_CORE_PORT`, that just makes a cache nothing uses).
 Give SteamHangar its own IP address on the NIC instead, via the SCALE UI:
 
 1. **Network > Interfaces > (your NIC) > Edit > Aliases > Add** -- add an
-   alias IP in your LAN's range, e.g. `192.168.1.50/24`, distinct from the
+   alias IP in your LAN's range, e.g. `10.0.0.50/24`, distinct from the
    TrueNAS host's primary address.
 2. In the stack's `.env`:
    ```bash
-   VAULT_CORE_BIND=192.168.1.50
-   VAULT_TLS_BIND=192.168.1.50
+   VAULT_CORE_BIND=10.0.0.50
+   VAULT_TLS_BIND=10.0.0.50
    ```
    `deploy/compose.yaml` already publishes `vault-core` as
    `${VAULT_CORE_BIND:-0.0.0.0}:${VAULT_CORE_PORT:-80}:80` -- this is an
@@ -287,7 +287,7 @@ Give SteamHangar its own IP address on the NIC instead, via the SCALE UI:
    the HTTPS passthrough"). Port 443 on the alias must be free exactly
    like port 80: a service listening on all interfaces owns it on the alias
    too.
-3. Point your DNS rewrite (§6 below) at `192.168.1.50`, not the host's main
+3. Point your DNS rewrite (§6 below) at `10.0.0.50`, not the host's main
    address.
 
 A dedicated VLAN interface or a `macvlan` Docker network works equally well
@@ -343,8 +343,8 @@ After `docker compose up -d` (or Dockge's Start), the same checks
 `deploy/README.md`'s quickstart lists apply unchanged:
 
 ```bash
-curl http://192.168.1.50/health                     # vault-core -> ok
-curl -I http://192.168.1.50/lancache-heartbeat       # X-LanCache-Processed-By: steamhangar
+curl http://10.0.0.50/health                        # vault-core -> ok
+curl -I http://10.0.0.50/lancache-heartbeat          # X-LanCache-Processed-By: steamhangar
 curl http://<truenas-host>:8080/v1/health            # vault-api -> {"status":"ok"}
 ```
 

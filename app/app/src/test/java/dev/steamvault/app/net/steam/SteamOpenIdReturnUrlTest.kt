@@ -22,9 +22,9 @@ class SteamOpenIdReturnUrlTest {
 
     @Test
     fun `LAN http vault with a port`() {
-        val r = SteamOpenIdReturnUrl.forVault("http://192.168.1.50:8080", "s1")!!
-        assertEquals("http://192.168.1.50:8080/auth/steam/app-return?state=s1", r.returnTo)
-        assertEquals("http://192.168.1.50:8080/", r.realm)
+        val r = SteamOpenIdReturnUrl.forVault("http://10.0.0.50:8080", "s1")!!
+        assertEquals("http://10.0.0.50:8080/auth/steam/app-return?state=s1", r.returnTo)
+        assertEquals("http://10.0.0.50:8080/", r.realm)
     }
 
     @Test
@@ -54,12 +54,12 @@ class SteamOpenIdReturnUrlTest {
         assertNull(SteamOpenIdReturnUrl.forVault("   ", "s1"))
         assertNull(SteamOpenIdReturnUrl.forVault("steamvault://auth/openid-return", "s1"))
         assertNull(SteamOpenIdReturnUrl.forVault("ftp://10.0.0.2/", "s1"))
-        assertNull(SteamOpenIdReturnUrl.forVault("192.168.1.50:8080", "s1"))
+        assertNull(SteamOpenIdReturnUrl.forVault("10.0.0.50:8080", "s1"))
     }
 
     @Test
     fun `isVaultReturnTo accepts only an http(s) URL on the exact vault path`() {
-        assertTrue(SteamOpenIdReturnUrl.isVaultReturnTo("http://192.168.1.50:8080/auth/steam/app-return?state=s1"))
+        assertTrue(SteamOpenIdReturnUrl.isVaultReturnTo("http://10.0.0.50:8080/auth/steam/app-return?state=s1"))
         assertTrue(SteamOpenIdReturnUrl.isVaultReturnTo("https://vault.example.lan/auth/steam/app-return?state=s1"))
         assertFalse(SteamOpenIdReturnUrl.isVaultReturnTo("steamvault://auth/openid-return?state=s1"))
         assertFalse(SteamOpenIdReturnUrl.isVaultReturnTo("https://attacker.example/cb?state=s1"))

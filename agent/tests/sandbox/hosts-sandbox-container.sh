@@ -20,7 +20,7 @@ set -u
 AGENT=/vault-agent
 HOSTS=/etc/hosts
 BACKUP=/etc/hosts.steamhangar.bak
-CACHE_IP=192.168.1.50
+CACHE_IP=10.0.0.50
 OTHER_IP=10.44.44.44
 CACHE_HOST=lancache.steamcontent.com
 # busybox su resolves a user NAME, not a numeric uid ("su: unknown user
