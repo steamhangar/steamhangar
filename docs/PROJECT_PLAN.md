@@ -4144,12 +4144,17 @@ below carry their own later dates, item 12 is the current one).
         job 260 (execute, 4.94 GB freed: old builds only). Until the fix: GC
         for 3624140 stays safe (keep set includes every owner's recorded
         manifest), but no Wanderburg verify.
-      - [ ] **PAUSE-ALL-GC-1** (api + web) "Pause
+      - [x] **PAUSE-ALL-GC-1** (4c017e7; queued GC jobs pause and resume, a running GC still 409; Pause all includes queued GC; sheet shows "GC paused"; History "GC dry run (nothing deleted)"; ADR-0016 addendum) (api + web) "Pause
         all" pauses prefill jobs only; queued GC jobs answer 409 and run at
         once (prod 2026-11-01: GC jobs 256-258 ran at 06:48:13 right after
         "Pause all", looking like a cleared queue). With Auto-GC on execute,
         "Pause all" must also hold queued GC jobs. Also: a dry-run GC job
         reads "Garbage collected" in History although nothing was deleted.
+      - [ ] nit (PAUSE-ALL-GC-1 review): a paused GC also blocks
+        miss-triggered prefills for its app (documented); a paused execute GC
+        resumed after switching VAULT_AUTO_GC still executes (documented,
+        cancel instead); `WORDING.confirmGcNote` kept only for the Android
+        twin pin.
       - [ ] **ANDROID-PAUSE-GC-1** (android; follow-up of PAUSE-ALL-GC-1)
         Android "Pause all" still skips queued GC jobs: BulkJobs.kt queued
         phase incl. GC, `gcRunning`/`gcQueued`, the three new web literals
@@ -4157,7 +4162,9 @@ below carry their own later dates, item 12 is the current one).
         twin pins, DownloadsBulkBar.kt:86 note, JobPartition.kt paused GC word
         and the dry-run label (needs `gc_execute` on JobSummary), the GC sheet
         flow's paused state, and the stale "unreachable in practice" comment
-        (JobPartition.kt:135); then drop `WORDING.confirmGcNote` from the web.
+        (JobPartition.kt:135); the toast suffix literals `gcPartOne` /
+        `gcPartMany`; GcFlow.kt paused flag and text; then drop
+        `WORDING.confirmGcNote` from the web.
       - [ ] nit (TOOL-NAMES-1 review): a cached, not-owned app (prod 1716750
         Ubisoft Connect) gets a one-off oracle verdict from the name lookup
         and shows "Update available" it cannot act on until the not_owned

@@ -1401,3 +1401,9 @@ These are not style preferences; each entry cost a review round to learn.
 - **Prod data questions: use `dev.sh diag db '<select>'`** (A-20261101-02;
   read-only, settings/steam_relay_key/runner_marks blocked) instead of
   asking the operator to paste queries.
+- **When a web pin literal's meaning changes, add new literals** and keep
+  the old one with a "kept for twin pin" comment and a web test, so the
+  Android twin stays green until its follow-up.
+- **Making a refused job type pausable touches every text that assumed
+  the old type** (resume, cancel-while-paused, DELETE 409), not only the
+  guard.
