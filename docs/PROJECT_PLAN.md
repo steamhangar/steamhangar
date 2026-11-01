@@ -4247,7 +4247,7 @@ below carry their own later dates, item 12 is the current one).
         (hidden when absent); JOB-SIZE-1 job card "of ~X (expected size)" and
         the ETA with the same hide rules and EMA, the new JobThroughputOut
         fields incl. `eta_bytes_per_second` / `eta_speed_source`.
-      - [ ] **WEB-ETA-EMA-1** (web; ANDROID-RC21-1-TWINS review should-fix,
+      - [x] **WEB-ETA-EMA-1** (5288e02; EMA steps once per new jobs list, cleared on mount; also closes the JOB-SIZE-1 web nit) (web; ANDROID-RC21-1-TWINS review should-fix,
         before the rc21.1 tag) `downloads.js:1983` steps the ETA smoother with
         the object `mergeLive` returns on every 3 s live tick while its jobs
         are the cached 30 s summary's, so the default range takes ~10 EMA steps

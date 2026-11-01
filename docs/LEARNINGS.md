@@ -1451,3 +1451,7 @@ These are not style preferences; each entry cost a review round to learn.
   containing app = A) and the oracle list. A replace-step removal plus
   `skip_own_mapping` cannot be undone in the same job, so the protection
   sits in the replace step itself (MAP-LOSS-1).
+- **Key an EMA "new sample" on the identity of the data list, not on the
+  merged answer object**: the live range re-merges the same cached jobs
+  every 3 s, so keying on the answer stepped the smoother ~10x per real
+  sample (WEB-ETA-EMA-1; Android had it right from the start).
