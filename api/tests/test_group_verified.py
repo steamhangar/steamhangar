@@ -87,7 +87,7 @@ def mapped(conn: sqlite3.Connection, appid: int) -> set[int]:
 def test_G1_unit_unobserved_depot_named_by_a_manifest_is_kept(conn: sqlite3.Connection) -> None:
     for depotid in (1, 2, 3):
         upsert_mapping(conn, depotid, 440, None)
-    change = apply_observed_mapping(conn, 440, {1}, manifest_named={1, 2})
+    change = apply_observed_mapping(conn, 440, {1}, manifest_named={1, 2}, owned={1, 2})
     assert mapped(conn, 440) == {1, 2}
     assert change.removed == {3}
     assert change.protected == {2}
@@ -97,7 +97,7 @@ def test_G1_unit_unobserved_depot_named_by_a_manifest_is_kept(conn: sqlite3.Conn
 def test_G2_unit_unreadable_evidence_removes_nothing(conn: sqlite3.Connection) -> None:
     for depotid in (1, 2, 3):
         upsert_mapping(conn, depotid, 440, None)
-    change = apply_observed_mapping(conn, 440, {1}, manifest_named=None)
+    change = apply_observed_mapping(conn, 440, {1}, manifest_named=None, owned=None)
     assert mapped(conn, 440) == {1, 2, 3}
     assert change.removed == set()
     assert "could not be read" in change.summary()

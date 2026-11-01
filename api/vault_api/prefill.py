@@ -908,10 +908,32 @@ def apply_observed_mapping(
     observed: set[int],
     *,
     manifest_named: AbstractSet[int] | None,
+    owned: AbstractSet[int] | None,
 ) -> "MappingChange":
     """Replace ``appid``'s depot mapping with ``observed`` (ADR-0003 decision 3).
 
     Semantics, precisely:
+
+    - **Only depots the app owns are added (WP MAP-ATTRIB-1).** ``observed``
+      is every depot directory that changed during the run, and the cache is
+      shared: a PC loading another game at the same time writes into that
+      game's depots (prod 2026-11-01: Wanderburg gained HELLDIVERS 2's and
+      Ubisoft Connect's depots). An observed depot is mapped only when
+      ``owned`` contains it -- positive evidence the app owns it
+      (``map_attrib.owned_depots``: its own manifest files, a recorded
+      manifest, the oracle's depot list). The rest is reported as
+      ``not_attributed`` and left alone. ``owned=None`` means there is no
+      evidence at all (oracle off or silent and no manifest); then only
+      observed depots no OTHER app maps are added (the pre-fix behaviour,
+      minus the second owner). Keyword-only without a default, like
+      ``manifest_named``. Removal below is unchanged and never reads
+      ``owned``: the filter can only add less, never remove more.
+      A content-package app whose own oracle answer lists no depot (its
+      depots sit under the parent's answer) gets no oracle evidence here; it
+      is mapped through manifest ingestion instead, which maps the
+      ``containing_appid`` of the parent's manifest files
+      (``manifest_ingest.ingest_after_prefill`` step 5) and records it, and
+      ``owned_depots`` counts that recorded containing app on later runs.
 
     - **Replace within an app.** Depot rows currently mapped to ``appid`` that
       are NOT in ``observed`` are deleted, so a depot Steam reassigned away
@@ -970,16 +992,31 @@ def apply_observed_mapping(
     for depotid in sorted(stale):
         delete_mapping(conn, depotid=depotid, appid=appid)
 
-    for depotid in sorted(observed):
+    if owned is None:
+        # No evidence at all: never add a second owner without evidence.
+        attributed = {
+            depotid
+            for depotid in observed
+            if depotid in existing
+            or conn.execute(
+                "SELECT 1 FROM depot_app_map WHERE depotid = ? AND appid != ?",
+                (depotid, appid),
+            ).fetchone() is None
+        }
+    else:
+        attributed = observed & set(owned)
+    for depotid in sorted(attributed - existing):
         upsert_mapping(conn, depotid=depotid, appid=appid, name=None)
 
     return MappingChange(
-        added=observed - existing,
+        added=attributed - existing,
         removed=stale,
         kept=observed & existing,
         skipped_empty=False,
         protected=protected,
         evidence_unreadable=manifest_named is None,
+        not_attributed=(observed - existing) - attributed,
+        ownership_unknown=owned is None,
     )
 
 
@@ -998,6 +1035,12 @@ class MappingChange:
     protected: set[int] = field(default_factory=set)
     #: True when the manifest evidence could not be read (nothing removed).
     evidence_unreadable: bool = False
+    #: Observed depots NOT mapped to the app: no evidence it owns them (WP
+    #: MAP-ATTRIB-1), most likely another app's traffic during the run.
+    not_attributed: set[int] = field(default_factory=set)
+    #: True when there was no ownership evidence at all (``owned=None``): only
+    #: observed depots no other app maps were added.
+    ownership_unknown: bool = False
 
     def summary(self, manifest_mapped: Iterable[int] = ()) -> str:
         """``manifest_mapped``: depots the same job's manifest ingestion
@@ -1030,4 +1073,16 @@ class MappingChange:
             text += f" kept_unobserved={sorted(self.protected)} ({reason})"
         if extra:
             text += f" (+ from manifests: {extra})"
+        if self.ownership_unknown:
+            text += (
+                " (no ownership evidence for this app: only depots no other app "
+                "maps were added)"
+            )
+        if self.not_attributed:
+            text += (
+                f" observed_not_attributed={len(self.not_attributed)} "
+                f"{sorted(self.not_attributed)} (no manifest, recorded manifest or "
+                "oracle depot list of this app names them; likely another app's "
+                "download during this run)"
+            )
         return text
