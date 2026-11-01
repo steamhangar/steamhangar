@@ -3,7 +3,7 @@
 // deployment mode 3):
 //
 //	# BEGIN steamhangar-agent (managed block - do not edit inside)
-//	10.0.0.50 lancache.steamcontent.com
+//	192.168.1.50 lancache.steamcontent.com
 //	# END steamhangar-agent
 //
 // The hostname is not ours to choose: `lancache.steamcontent.com` is
@@ -838,7 +838,7 @@ func ValidateCacheIP(s string) error {
 	}
 	addr, err := netip.ParseAddr(s)
 	if err != nil {
-		return fmt.Errorf("cache IP %q is not a plain IPv4 address (e.g. 10.0.0.50): %w", s, err)
+		return fmt.Errorf("cache IP %q is not a plain IPv4 address (e.g. 192.168.1.50): %w", s, err)
 	}
 	if addr.Is4In6() {
 		return fmt.Errorf("cache IP %q is an IPv4-mapped IPv6 address; write it as a plain IPv4 address instead", s)

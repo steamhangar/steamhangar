@@ -46,7 +46,7 @@ func forbidExtras(allowed ...string) func([]byte) (int, string) {
 }
 
 func newPayload() report.Payload {
-	return presencePayload().WithLocalAddrs([]string{"10.0.0.42"})
+	return presencePayload().WithLocalAddrs([]string{"192.168.1.42"})
 }
 
 func TestReportInstalled_SendsLocalAddrs(t *testing.T) {
@@ -57,7 +57,7 @@ func TestReportInstalled_SendsLocalAddrs(t *testing.T) {
 		t.Fatal(err)
 	}
 	bodies := rs.got()
-	want := `{"client_id":"test-pc","appids":[440,730],"agent_version":"0.1.0","report_interval_seconds":600,"local_addrs":["10.0.0.42"]}`
+	want := `{"client_id":"test-pc","appids":[440,730],"agent_version":"0.1.0","report_interval_seconds":600,"local_addrs":["192.168.1.42"]}`
 	if len(bodies) != 1 || bodies[0] != want {
 		t.Fatalf("bodies = %q, want exactly [%s]", bodies, want)
 	}

@@ -32,7 +32,5 @@ fun settingsDirtyDots(placed: PlacedSettings?, bodyKeys: Set<String>): SettingsD
     return SettingsDirtyDots(sections, expert)
 }
 
-/** The Expert panel's id in [SettingsLayout.SECTIONS] (whose literal list is
- * pinned against the web, so it cannot reference this); the one constant the
- * Kotlin side uses, `SettingsController`'s `EXPERT_SECTION` included. */
-internal const val EXPERT_SECTION_ID = "expert"
+/** The Expert panel's id in [SettingsLayout.SECTIONS]. */
+private const val EXPERT_SECTION_ID = "expert"

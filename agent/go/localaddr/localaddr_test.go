@@ -58,25 +58,25 @@ func (c fakeConn) LocalAddr() net.Addr { return c.local }
 func (c fakeConn) Close() error        { return nil }
 
 func TestDetect_OneSourceAddressPerResolvedFamily(t *testing.T) {
-	r := &fakeResolver{answers: map[string][]string{"vault.lan": {"10.0.0.10", "fd00:10::10"}}}
+	r := &fakeResolver{answers: map[string][]string{"vault.lan": {"192.168.1.10", "fd00:10::10"}}}
 	d := &fakeDialer{routes: map[string]string{
-		"10.0.0.10":   "10.0.0.42",
-		"fd00:10::10": "fd00:10::42",
+		"192.168.1.10": "192.168.1.42",
+		"fd00:10::10":  "fd00:10::42",
 	}}
 	got, notes := Detect(context.Background(), "http://vault.lan:8080", r, d)
-	if want := []string{"10.0.0.42", "fd00:10::42"}; !reflect.DeepEqual(got, want) {
+	if want := []string{"192.168.1.42", "fd00:10::42"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("Detect = %v, want %v (notes %v)", got, want, notes)
 	}
-	if want := []string{"udp 10.0.0.10:8080", "udp [fd00:10::10]:8080"}; !reflect.DeepEqual(d.dialed, want) {
+	if want := []string{"udp 192.168.1.10:8080", "udp [fd00:10::10]:8080"}; !reflect.DeepEqual(d.dialed, want) {
 		t.Errorf("dialed %v, want %v (UDP to the vault's own port)", d.dialed, want)
 	}
 }
 
 func TestDetect_DefaultPortsFollowTheScheme(t *testing.T) {
 	for scheme, port := range map[string]string{"http": "80", "https": "443"} {
-		d := &fakeDialer{routes: map[string]string{"10.0.0.10": "10.0.0.42"}}
-		if _, _ = Detect(context.Background(), scheme+"://10.0.0.10/", &fakeResolver{}, d); len(d.dialed) != 1 ||
-			d.dialed[0] != "udp 10.0.0.10:"+port {
+		d := &fakeDialer{routes: map[string]string{"192.168.1.10": "192.168.1.42"}}
+		if _, _ = Detect(context.Background(), scheme+"://192.168.1.10/", &fakeResolver{}, d); len(d.dialed) != 1 ||
+			d.dialed[0] != "udp 192.168.1.10:"+port {
 			t.Errorf("%s: dialed %v, want port %s", scheme, d.dialed, port)
 		}
 	}
@@ -84,9 +84,9 @@ func TestDetect_DefaultPortsFollowTheScheme(t *testing.T) {
 
 func TestDetect_IPLiteralHostIsNotResolved(t *testing.T) {
 	r := &fakeResolver{}
-	d := &fakeDialer{routes: map[string]string{"10.0.0.10": "10.0.0.42"}}
-	got, _ := Detect(context.Background(), "http://10.0.0.10:8080", r, d)
-	if !reflect.DeepEqual(got, []string{"10.0.0.42"}) {
+	d := &fakeDialer{routes: map[string]string{"192.168.1.10": "192.168.1.42"}}
+	got, _ := Detect(context.Background(), "http://192.168.1.10:8080", r, d)
+	if !reflect.DeepEqual(got, []string{"192.168.1.42"}) {
 		t.Errorf("Detect = %v", got)
 	}
 	if len(r.asked) != 0 {
@@ -97,15 +97,15 @@ func TestDetect_IPLiteralHostIsNotResolved(t *testing.T) {
 // Loopback (agent on the vault host), link-local and unspecified sources
 // are nothing another host could log: dropped, not sent.
 func TestDetect_DropsUnusableSources(t *testing.T) {
-	r := &fakeResolver{answers: map[string][]string{"vault": {"127.0.0.1", "::1", "fe80::10", "10.0.0.10"}}}
+	r := &fakeResolver{answers: map[string][]string{"vault": {"127.0.0.1", "::1", "fe80::10", "192.168.1.10"}}}
 	d := &fakeDialer{routes: map[string]string{
-		"127.0.0.1": "127.0.0.1",
-		"::1":       "::1",
-		"fe80::10":  "fe80::42",
-		"10.0.0.10": "::ffff:10.0.0.42", // dual-stack spelling, unmapped
+		"127.0.0.1":    "127.0.0.1",
+		"::1":          "::1",
+		"fe80::10":     "fe80::42",
+		"192.168.1.10": "::ffff:192.168.1.42", // dual-stack spelling, unmapped
 	}}
 	got, _ := Detect(context.Background(), "http://vault:8080", r, d)
-	if !reflect.DeepEqual(got, []string{"10.0.0.42"}) {
+	if !reflect.DeepEqual(got, []string{"192.168.1.42"}) {
 		t.Errorf("Detect = %v, want only the unmapped LAN address", got)
 	}
 }
@@ -115,7 +115,7 @@ func TestDetect_FailuresAreNotesNotErrors(t *testing.T) {
 	if len(got) != 0 || len(notes) != 1 || !strings.Contains(notes[0], "resolving") {
 		t.Errorf("Detect = %v, notes %v; want nothing and one resolve note", got, notes)
 	}
-	got, notes = Detect(context.Background(), "http://10.0.0.10", &fakeResolver{}, &fakeDialer{})
+	got, notes = Detect(context.Background(), "http://192.168.1.10", &fakeResolver{}, &fakeDialer{})
 	if len(got) != 0 || len(notes) != 1 || !strings.Contains(notes[0], "no route") {
 		t.Errorf("Detect = %v, notes %v; want nothing and one route note", got, notes)
 	}
@@ -155,14 +155,14 @@ func TestUsable_MirrorsTheServerRule(t *testing.T) {
 		in, want string
 		ok       bool
 	}{
-		{"10.0.0.42", "10.0.0.42", true},
-		{"::ffff:10.0.0.42", "10.0.0.42", true},
+		{"192.168.1.42", "192.168.1.42", true},
+		{"::ffff:192.168.1.42", "192.168.1.42", true},
 		{"fd00:10:0:0::42", "fd00:10::42", true},
 		{"2001:db8::42", "2001:db8::42", true},
 		{"not-an-ip", "", false},
-		{"10.0.0.300", "", false},
-		{" 10.0.0.42", "", false},
-		{"10.0.0.42\n", "", false},
+		{"192.168.1.300", "", false},
+		{" 192.168.1.42", "", false},
+		{"192.168.1.42\n", "", false},
 		{"fe80::1%eth0", "", false},
 		{"127.0.0.1", "", false},
 		{"::1", "", false},

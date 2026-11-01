@@ -14,7 +14,7 @@ import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
  * WP brief.
  */
 interface ConnectivityProfile {
-    /** e.g. `"http://10.0.0.50:8080"` or `"https://vault.example.org"`. No trailing slash required. */
+    /** e.g. `"http://192.168.1.50:8080"` or `"https://vault.example.org"`. No trailing slash required. */
     val baseUrl: String
 
     /** Whether an `http://` base URL / request is permitted for this profile. */

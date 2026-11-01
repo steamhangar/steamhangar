@@ -12,7 +12,7 @@ import (
 	"github.com/Riviera822/steamhangar/agent/hostsfile"
 )
 
-const testCacheIP = "10.0.0.50"
+const testCacheIP = "192.168.1.50"
 
 // stubLookup replaces the resolver used by `hosts status` for the duration
 // of one test, so the suite never depends on (or touches) real DNS.
@@ -187,7 +187,7 @@ func TestHostsApply_MissingCacheIPIsUsageError(t *testing.T) {
 
 func TestHostsApply_InvalidCacheIPIsUsageErrorAndTouchesNothing(t *testing.T) {
 	const before = "127.0.0.1 localhost\n"
-	for _, bad := range []string{"cache.lan", "2001:db8::1", "0.0.0.0", "10.0.0.256", "010.1.1.1"} {
+	for _, bad := range []string{"cache.lan", "2001:db8::1", "0.0.0.0", "192.168.1.256", "010.1.1.1"} {
 		path := tempHosts(t, before)
 		code, _, stderr := runHostsCmd(t, "apply", "--cache-ip", bad, "--hosts-path", path)
 		if code != 2 {
@@ -427,8 +427,8 @@ func TestHostsStatus_MissingFile(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestCommandLine_ReconstructsTheInvocation(t *testing.T) {
-	got := commandLine("vault-agent.exe", []string{"apply", "--cache-ip", "10.0.0.50"})
-	want := "vault-agent.exe hosts apply --cache-ip 10.0.0.50"
+	got := commandLine("vault-agent.exe", []string{"apply", "--cache-ip", "192.168.1.50"})
+	want := "vault-agent.exe hosts apply --cache-ip 192.168.1.50"
 	if got != want {
 		t.Errorf("commandLine = %q, want %q", got, want)
 	}

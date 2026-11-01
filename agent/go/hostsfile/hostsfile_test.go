@@ -15,7 +15,7 @@ import (
 // helpers
 // ---------------------------------------------------------------------------
 
-const testIP = "10.0.0.50"
+const testIP = "192.168.1.50"
 
 // writeFixture writes content to a fresh temp dir and returns the path.
 // Content is written with os.WriteFile (no line-ending translation), so
@@ -871,7 +871,7 @@ func TestApply_UnrelatedEntriesSurviveByteExact(t *testing.T) {
 	content := "127.0.0.1\tlocalhost\n" +
 		"\n" +
 		"10.0.0.5   nas.lan  media.lan   # Wohnzimmer-NAS (Umlaute: äöü)\n" +
-		"10.0.0.1 router.lan\n"
+		"192.168.1.1 router.lan\n"
 	path := writeFixture(t, content)
 	before := sha(content)
 
@@ -1198,7 +1198,7 @@ func TestApply_PermissionDeniedLeavesTheFileUntouched(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestValidateCacheIP(t *testing.T) {
-	valid := []string{"10.0.0.50", "10.0.0.1", "127.0.0.1", "1.2.3.4", "255.255.255.254"}
+	valid := []string{"192.168.1.50", "10.0.0.1", "127.0.0.1", "1.2.3.4", "255.255.255.254"}
 	for _, s := range valid {
 		if err := ValidateCacheIP(s); err != nil {
 			t.Errorf("ValidateCacheIP(%q) = %v, want nil", s, err)
@@ -1207,23 +1207,23 @@ func TestValidateCacheIP(t *testing.T) {
 
 	invalid := map[string]string{
 		"empty":            "",
-		"leading space":    " 10.0.0.50",
-		"trailing space":   "10.0.0.50 ",
+		"leading space":    " 192.168.1.50",
+		"trailing space":   "192.168.1.50 ",
 		"leading zeros":    "010.1.1.1",
-		"three octets":     "10.0.0",
+		"three octets":     "192.168.1",
 		"five octets":      "1.2.3.4.5",
-		"octet too large":  "10.0.0.256",
+		"octet too large":  "192.168.1.256",
 		"hostname":         "cache.lan",
 		"IPv6":             "2001:db8::1",
-		"IPv4-mapped IPv6": "::ffff:10.0.0.50",
-		"with port":        "10.0.0.50:80",
-		"CIDR":             "10.0.0.0/24",
+		"IPv4-mapped IPv6": "::ffff:192.168.1.50",
+		"with port":        "192.168.1.50:80",
+		"CIDR":             "192.168.1.0/24",
 		"unspecified":      "0.0.0.0",
 		"multicast":        "224.0.0.1",
 		"broadcast":        "255.255.255.255",
-		"embedded newline": "10.0.0.50\n10.0.0.1 evil.example",
-		"embedded CR":      "10.0.0.50\r",
-		"tab":              "10.0.0.50\t",
+		"embedded newline": "192.168.1.50\n10.0.0.1 evil.example",
+		"embedded CR":      "192.168.1.50\r",
+		"tab":              "192.168.1.50\t",
 	}
 	for name, s := range invalid {
 		if err := ValidateCacheIP(s); err == nil {
@@ -1235,7 +1235,7 @@ func TestValidateCacheIP(t *testing.T) {
 func TestApply_RejectsAnInvalidCacheIPBeforeTouchingTheFile(t *testing.T) {
 	const content = "127.0.0.1 localhost\n"
 	path := writeFixture(t, content)
-	if _, err := Apply(path, "10.0.0.50\n10.0.0.1 evil.example"); err == nil {
+	if _, err := Apply(path, "192.168.1.50\n10.0.0.1 evil.example"); err == nil {
 		t.Fatal("Apply accepted an address containing a newline - that would inject a hosts entry")
 	}
 	assertUnchanged(t, path, content)
@@ -1261,7 +1261,7 @@ func TestDefaultPathFor(t *testing.T) {
 }
 
 func TestElevationHint_NamesThePlatformsElevationPath(t *testing.T) {
-	const cmd = "vault-agent hosts apply --cache-ip 10.0.0.50"
+	const cmd = "vault-agent hosts apply --cache-ip 192.168.1.50"
 
 	win := elevationHintFor("windows", cmd)
 	if !strings.Contains(win, "Administrator") || !strings.Contains(win, cmd) {

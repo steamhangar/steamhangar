@@ -1,24 +1,39 @@
 package dev.steamvault.app.ui.downloads
 
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.unit.sp
+import dev.steamvault.app.ui.status.StatusKind
+import dev.steamvault.app.ui.traffic.logic.HERO_LABEL
+import dev.steamvault.app.ui.traffic.logic.HeroFigures
+import dev.steamvault.app.ui.traffic.logic.HeroMini
+import dev.steamvault.app.ui.traffic.logic.HeroPart
+import dev.steamvault.app.ui.traffic.logic.HeroTile
+import dev.steamvault.app.ui.traffic.logic.LOADING_KIND_UNATTRIBUTED
+import dev.steamvault.app.ui.traffic.logic.heroFigures
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -29,7 +44,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -42,14 +56,8 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.AnnotatedString
-import androidx.compose.ui.text.SpanStyle
-import androidx.compose.ui.text.buildAnnotatedString
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import dev.steamvault.app.R
 import dev.steamvault.app.net.error.VaultApiError
 import dev.steamvault.app.net.model.JobSummary
@@ -60,46 +68,37 @@ import dev.steamvault.app.ui.downloads.logic.HISTORY_FIRST_PAGE
 import dev.steamvault.app.ui.downloads.logic.nextShown
 import dev.steamvault.app.ui.status.StatusIcon
 import dev.steamvault.app.ui.status.StatusIconSize
-import dev.steamvault.app.ui.status.StatusKind
 import dev.steamvault.app.ui.theme.VaultColors
 import dev.steamvault.app.ui.traffic.RangeChips
 import dev.steamvault.app.ui.traffic.TrafficPoll
 import dev.steamvault.app.ui.traffic.logic.DEFAULT_STATS_RANGE
-import dev.steamvault.app.ui.traffic.logic.EtaSmoother
-import dev.steamvault.app.ui.traffic.logic.FeedState
-import dev.steamvault.app.ui.traffic.logic.HERO_LABEL
 import dev.steamvault.app.ui.traffic.logic.HISTORY_LIMIT
-import dev.steamvault.app.ui.traffic.logic.HeroFigures
-import dev.steamvault.app.ui.traffic.logic.HeroMini
-import dev.steamvault.app.ui.traffic.logic.HeroPart
-import dev.steamvault.app.ui.traffic.logic.HeroStatus
-import dev.steamvault.app.ui.traffic.logic.HeroTile
-import dev.steamvault.app.ui.traffic.logic.LEGEND_INTERNET
-import dev.steamvault.app.ui.traffic.logic.LEGEND_SERVED
 import dev.steamvault.app.ui.traffic.logic.LIVE_RANGE
 import dev.steamvault.app.ui.traffic.logic.LIVE_SUMMARY_MS
 import dev.steamvault.app.ui.traffic.logic.LIVE_SUMMARY_RANGE
-import dev.steamvault.app.ui.traffic.logic.LOADING_KIND_UNATTRIBUTED
-import dev.steamvault.app.ui.traffic.logic.LoadingNowModel
 import dev.steamvault.app.ui.traffic.logic.SERIES_END_TEXT
 import dev.steamvault.app.ui.traffic.logic.STATS_RANGES
 import dev.steamvault.app.ui.traffic.logic.feedState
 import dev.steamvault.app.ui.traffic.logic.graphGeometryToShow
 import dev.steamvault.app.ui.traffic.logic.headerTiles
-import dev.steamvault.app.ui.traffic.logic.heroFigures
+import dev.steamvault.app.ui.traffic.logic.HeroStatus
+import dev.steamvault.app.ui.traffic.logic.LEGEND_INTERNET
+import dev.steamvault.app.ui.traffic.logic.LEGEND_SERVED
+import dev.steamvault.app.ui.traffic.logic.LoadingNowModel
+import dev.steamvault.app.ui.traffic.logic.loadingNowModel
+import dev.steamvault.app.ui.traffic.logic.splitGeometry
 import dev.steamvault.app.ui.traffic.logic.isRange
 import dev.steamvault.app.ui.traffic.logic.isStatsRange
+import dev.steamvault.app.ui.traffic.logic.EtaSmoother
 import dev.steamvault.app.ui.traffic.logic.jobSpeedNote
 import dev.steamvault.app.ui.traffic.logic.jobSpeedText
 import dev.steamvault.app.ui.traffic.logic.liveSeries
-import dev.steamvault.app.ui.traffic.logic.loadingNowModel
 import dev.steamvault.app.ui.traffic.logic.mergeLive
 import dev.steamvault.app.ui.traffic.logic.mergeNow
 import dev.steamvault.app.ui.traffic.logic.pollNote
 import dev.steamvault.app.ui.traffic.logic.seriesHighestText
 import dev.steamvault.app.ui.traffic.logic.seriesLabel
 import dev.steamvault.app.ui.traffic.logic.seriesStartText
-import dev.steamvault.app.ui.traffic.logic.splitGeometry
 import dev.steamvault.app.ui.traffic.logic.trimSeries
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
@@ -171,11 +170,6 @@ data class JobSpeedLine(val text: String, val note: String)
  * WP JOB-SIZE-1 (web `paintJobSpeeds`): one EMA step of [smoother] per new
  * answer (identity-guarded, so a recomposition is no sample), the smoothed
  * rate feeds the ETA, and no ETA on a card in [verifyingJobIds].
- *
- * WP ANDROID-VERIFY-SPEED-1 (web DOWNLOADS-1 "a Verifying card says so,
- * with or without statistics"): every id in [verifyingJobIds] gets a line,
- * also without an answer, for another range, or when `jobs[]` does not
- * list it -- then [jobSpeedText] says `VERIFY_SPEED_TEXT`.
  */
 fun jobSpeedLines(
     poll: TrafficPoll<StatsAnswer>,
@@ -183,30 +177,20 @@ fun jobSpeedLines(
     smoother: EtaSmoother? = null,
     nowMs: Long = System.currentTimeMillis(),
 ): Map<Int, JobSpeedLine> {
-    val t = poll.data?.throughput
-    val fresh = t != null && t.range == poll.range
-    val lines = mutableMapOf<Int, JobSpeedLine>()
-    if (fresh && t != null) {
-        smoother?.observe(t)
-        val state = feedState(t.event_feed)
-        for (entry in t.jobs) {
-            val text = jobSpeedText(
-                entry,
-                state,
-                verifying = entry.job_id in verifyingJobIds,
-                nowMs = nowMs,
-                etaRate = if (smoother != null) smoother.rate(entry.job_id) else entry.eta_bytes_per_second,
-            ) ?: continue
-            lines[entry.job_id] = JobSpeedLine(text, jobSpeedNote(entry))
-        }
-    }
-    // Verifying cards the answer does not cover (web: entry undefined, state "disabled").
-    for (jobId in verifyingJobIds) {
-        if (jobId in lines) continue
-        val text = jobSpeedText(null, FeedState.DISABLED, verifying = true, nowMs = nowMs) ?: continue
-        lines[jobId] = JobSpeedLine(text, jobSpeedNote(null))
-    }
-    return lines
+    val t = poll.data?.throughput ?: return emptyMap()
+    if (t.range != poll.range) return emptyMap()
+    smoother?.observe(t)
+    val state = feedState(t.event_feed)
+    return t.jobs.mapNotNull { entry ->
+        val text = jobSpeedText(
+            entry,
+            state,
+            verifying = entry.job_id in verifyingJobIds,
+            nowMs = nowMs,
+            etaRate = if (smoother != null) smoother.rate(entry.job_id) else entry.eta_bytes_per_second,
+        )
+        text?.let { entry.job_id to JobSpeedLine(it, jobSpeedNote(entry)) }
+    }.toMap()
 }
 
 /**

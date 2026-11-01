@@ -71,30 +71,6 @@ data class SettingsOut(
      * Clients page's outdated-agent check (WP ANDROID-REDESIGN-1a, web
      * CLIENTS-3). `null` from a server that does not send it. */
     val server_version: String? = null,
-    /** WP RELEASE-SPLIT-1b: the bundled agent and app and the minimum
-     * client versions (`vault_api/client_versions.py`); `null` from a
-     * server before 1b. The Clients page compares agents with
-     * `clients.agent` instead of [server_version] when it is there. */
-    val clients: ClientVersionsOut? = null,
-)
-
-/** One bundled client of `GET /v1/settings` `clients` (RELEASE-SPLIT-1b):
- * component version, the version stamped on the bundled files, the
- * minimum the server supports, and every version a client of exactly the
- * bundled build may report (the server's alias list included). */
-@Serializable
-data class ClientVersionOut(
-    val version: String,
-    val build: String,
-    val minimum: String? = null,
-    val same_build: List<String> = emptyList(),
-)
-
-/** `clients` of `GET /v1/settings` / `GET /v1/dist` (RELEASE-SPLIT-1b). */
-@Serializable
-data class ClientVersionsOut(
-    val agent: ClientVersionOut? = null,
-    val app: ClientVersionOut? = null,
 )
 
 /** Pure: a settings [JsonElement] as a `String`, or `null` for JSON null / a non-scalar. */

@@ -189,7 +189,7 @@ func TestRun_OneShotSendsTheDetectedLocalAddrs(t *testing.T) {
 	old := detectLocalAddrs
 	detectLocalAddrs = func(_ context.Context, serverURL string, _ localaddr.Resolver, _ localaddr.Dialer) ([]string, []string) {
 		gotURL = serverURL
-		return []string{"10.0.0.42", "127.0.0.1"}, []string{"no route to fd00::1: test"}
+		return []string{"192.168.1.42", "127.0.0.1"}, []string{"no route to fd00::1: test"}
 	}
 	t.Cleanup(func() { detectLocalAddrs = old })
 
@@ -202,10 +202,10 @@ func TestRun_OneShotSendsTheDetectedLocalAddrs(t *testing.T) {
 		t.Errorf("detector asked about %q, want the server URL %q", gotURL, srv.URL)
 	}
 	got, _ := json.Marshal(captured.all()[0]["local_addrs"])
-	if string(got) != `["10.0.0.42"]` {
+	if string(got) != `["192.168.1.42"]` {
 		t.Errorf("local_addrs = %s, want only the usable address", got)
 	}
-	for _, want := range []string{"local_addrs=10.0.0.42", `report local address note="no route to fd00::1: test"`} {
+	for _, want := range []string{"local_addrs=192.168.1.42", `report local address note="no route to fd00::1: test"`} {
 		if !strings.Contains(stderr.String(), want) {
 			t.Errorf("log lacks %q: %s", want, stderr.String())
 		}
@@ -217,7 +217,7 @@ func TestRun_OneShotSendsTheDetectedLocalAddrs(t *testing.T) {
 func TestRun_OneShotAgainstAPreAddrServerStillSucceeds(t *testing.T) {
 	old := detectLocalAddrs
 	detectLocalAddrs = func(context.Context, string, localaddr.Resolver, localaddr.Dialer) ([]string, []string) {
-		return []string{"10.0.0.42"}, nil
+		return []string{"192.168.1.42"}, nil
 	}
 	t.Cleanup(func() { detectLocalAddrs = old })
 
