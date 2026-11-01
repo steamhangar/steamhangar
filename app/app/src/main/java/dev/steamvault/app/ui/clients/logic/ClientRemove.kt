@@ -73,3 +73,14 @@ fun requestErrorReason(error: Throwable): String {
     if (!detail.isNullOrEmpty()) return detail
     return error.message?.takeIf { it.isNotEmpty() } ?: "Request failed."
 }
+
+/** How long the Clients page hides a removed PC's overview row (web
+ * `REMOVED_HIDE_MS`, WP ANDROID-REDESIGN-1a). */
+const val REMOVED_HIDE_MS = 30_000L
+
+/** Whether the Clients page hides [clientId]'s row: removed less than
+ * [REMOVED_HIDE_MS] ago (web `hiddenRemoved`). MUTATION TARGET. */
+fun hiddenRemoved(clientId: String?, removedAt: Map<String, Long>, nowMs: Long): Boolean {
+    val at = removedAt[clientId ?: return false] ?: return false
+    return nowMs - at <= REMOVED_HIDE_MS
+}

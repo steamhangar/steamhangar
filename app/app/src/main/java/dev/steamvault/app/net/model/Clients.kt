@@ -36,4 +36,12 @@ data class ClientOut(
     val presence: String? = null,
     /** WP AGENT-FEAT-1: when the client turns offline without another report. */
     val offline_after: String? = null,
+    /** WP D15-NAMES: the operator-set name of this PC's address, `null` when
+     * none (read by the Clients page for a card built from this row alone,
+     * web `mergeAgentData`, WP ANDROID-REDESIGN-1a). */
+    val name: String? = null,
+    /** WP D15-NAMES: the address a rename writes to; `null` = cannot be named. */
+    val name_addr: String? = null,
+    /** WP D15-NAMES: [name] when set, else [client_id]; `null` from an older server. */
+    val display_name: String? = null,
 )

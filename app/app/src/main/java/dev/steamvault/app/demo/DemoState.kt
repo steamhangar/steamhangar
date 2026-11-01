@@ -825,7 +825,10 @@ class DemoState private constructor(
     // ---- settings (ADR-0009 db > env > default precedence) ------------------
 
     @Synchronized
-    fun settingsOut(): SettingsOut = SettingsOut(readonly = false, settings = describeSettings())
+    /** `server_version` as the web demo reports it (`demo-data.js`
+     * `DEMO_SERVER_VERSION`), so the Clients page's agents tile reads
+     * "all match the server" like the web demo (WP ANDROID-REDESIGN-1a). */
+    fun settingsOut(): SettingsOut = SettingsOut(readonly = false, settings = describeSettings(), server_version = DEMO_SERVER_VERSION)
 
     @Synchronized
     fun patchSettings(updates: Map<String, JsonElement?>): SettingsOut {
@@ -1041,6 +1044,9 @@ private val WEBHOOK_EVENTS_ALL = listOf(
  * pins").
  */
 internal const val CONFIG_DEFAULT_AUTO_GC = "execute"
+
+/** The web demo's server version (`web/js/demo-data.js` `DEMO_SERVER_VERSION`). */
+internal const val DEMO_SERVER_VERSION = "0.1.0"
 
 private const val STEAM_LIBRARY_STEAMID_KEY = "steam_library_steamid"
 

@@ -61,6 +61,7 @@ class D15dWiringTest {
     private val main = "$base/MainActivity.kt"
     private val nav = "$base/ui/nav/BottomNavBar.kt"
     private val clients = "$base/ui/clients/ClientsScreen.kt"
+    private val cardViews = "$base/ui/clients/ClientCardViews.kt"
     private val downloads = "$base/ui/downloads/DownloadsScreen.kt"
     private val stats = "$base/ui/downloads/DownloadsStats.kt"
     private val chips = "$base/ui/traffic/RangeChips.kt"
@@ -95,20 +96,31 @@ class D15dWiringTest {
     @Test
     fun `MUTATION PIN -- the Clients screen polls, draws range, note, cards, agentless note and Manage PCs`() {
         assertCalledFrom(clients, "poll.pollForever()", "ClientsScreen")
-        assertCalledFrom(clients, "clientsSummaryText(data.clients)", "ClientsScreen")
-        assertCalledFrom(clients, "ClientsBody(poll = poll, scope = scope, ranges = ranges, onManagePcs = onManagePcs, clock = clock, renameFlow = renameFlow)", "ClientsScreen")
-        assertCalledFrom(clients, "if (!poll.noFigures) {", "ClientsBody")
+        assertCalledFrom(clients, "clientsSummaryText(merged.map { it.client })", "ClientsScreen")
+        assertCalledFrom(clients, "ClientsBody(", "ClientsScreen")
+        assertCalledFrom(clients, "DevicesHead(showRange = !poll.noFigures) {", "ClientsBody")
+        assertCalledFrom(clients, "if (showRange) chips()", "DevicesHead")
         assertCalledFrom(clients, "poll.selectRange(scope, it)", "ClientsBody")
         assertCalledFrom(clients, "item(key = \"note\") { NoteLine(note) }", "ClientsBody")
-        assertCalledFrom(clients, "ClientCard(card, onRename = ", "ClientsBody")
-        assertCalledFrom(clients, "buildClientCardModel(", "ClientsBody")
+        assertCalledFrom(clients, "ClientCard(", "ClientsBody")
+        assertCalledFrom(clients, "clientCardView(", "ClientsBody")
         assertCalledFrom(clients, "showAgentlessNote(data.clients)", "ClientsBody")
         assertCalledFrom(clients, "ManagePcsSection(onManagePcs)", "ClientsBody")
         assertCalledFrom(clients, "OutlinedButton(onClick = onManagePcs)", "ManagePcsSection")
         assertCalledFrom(clients, "liveRegion = LiveRegionMode.Polite", "NoteLine")
-        assertCalledFrom(clients, "semantics(mergeDescendants = true)", "ClientCard")
-        for (line in listOf("model.installed?.let", "model.stats?.let", "model.recent?.let", "CardLine(model.loadingNow)", "CardLine(model.lastActive)")) {
-            assertCalledFrom(clients, line, "ClientCard")
+        // WP ANDROID-REDESIGN-1a: the card lives in ClientCardViews.kt.
+        assertCalledFrom(cardViews, "semantics(mergeDescendants = true)", "ClientCard")
+        for (line in listOf(
+            "KindIconTile(model.kind)",
+            "StatusPill(model.pill)",
+            "model.outdatedText?.let { OutdatedBox(it) }",
+            "model.health?.let { AgentHealthRow(it.bypass, it.head, it.text) }",
+            "NowBoxView(model.now)",
+            "StatGrid(model.stats)",
+            "RecentZone(model)",
+            "CardFooter(model, onRename, onRemove)",
+        )) {
+            assertCalledFrom(cardViews, line, "ClientCard")
         }
     }
 
@@ -186,9 +198,10 @@ class D15dWiringTest {
         assertCalledFrom(downloads, "ranges.history = historyFilter.range", "DownloadsBody")
         assertCalledFrom(stats, "onRangeChosen(poll.range)", "DownloadsStatsHeader")
         assertTrue("MainActivity holds one TrafficRanges", stripComments(read(main)).contains("private val trafficRanges = TrafficRanges()"))
-        assertCalledFrom(clients, "delay(NOW_TICK_MS)", "ClientsBody")
-        assertCalledFrom(clients, "remember(data, nowMs)", "ClientsBody")
-        assertCalledFrom(clients, "nowMs = nowMs,", "ClientsBody")
+        assertCalledFrom(clients, "delay(NOW_TICK_MS)", "ClientsScreen")
+        assertCalledFrom(clients, "remember(data, agentRows, removedAt, nowMs)", "ClientsScreen")
+        assertCalledFrom(clients, "nowMs = nowMs,", "ClientsScreen")
+        assertCalledFrom(clients, "loadingText = null,\n        nowMs = nowMs,", "ClientsBody")
     }
 
     @Test

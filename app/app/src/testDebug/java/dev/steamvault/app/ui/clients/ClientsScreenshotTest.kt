@@ -14,6 +14,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
@@ -31,8 +32,10 @@ import dev.steamvault.app.net.model.InstalledOnEntry
 import dev.steamvault.app.net.model.JobSummary
 import dev.steamvault.app.net.model.LiveOut
 import dev.steamvault.app.net.model.SeriesOut
+import dev.steamvault.app.net.model.SettingsOut
 import dev.steamvault.app.net.model.ThroughputOut
 import dev.steamvault.app.repo.ClientsRepository
+import dev.steamvault.app.repo.SettingsRepository
 import dev.steamvault.app.repo.TrafficRepository
 import dev.steamvault.app.ui.downloads.DownloadsStatsHeader
 import dev.steamvault.app.ui.downloads.downloadsStatsPoll
@@ -42,6 +45,7 @@ import dev.steamvault.app.ui.nav.MainShell
 import dev.steamvault.app.ui.theme.SteamVaultTheme
 import dev.steamvault.app.ui.traffic.TrafficRanges
 import java.time.Instant
+import kotlinx.serialization.json.JsonElement
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -91,6 +95,12 @@ class ClientsScreenshotTest {
     @Test
     fun clients_360dp_font130_night() = shoot("clients_360dp_font130_night", widthDp = 360, heightDp = 780, fontScale = 1.3f, page = Page.CLIENTS)
 
+    /** WP ANDROID-REDESIGN-1a: the whole page (every card, the agentless
+     * note and Manage PCs) in one tall shot, to compare with the rc20 design. */
+    @Test
+    fun clients_411dp_font100_night_full() =
+        shoot("clients_411dp_font100_night_full", widthDp = 411, heightDp = FULL_PAGE_DP, fontScale = 1.0f, page = Page.CLIENTS)
+
     @Test
     fun downloads_stats_411dp_font100_night() =
         shoot("downloads_stats_411dp_font100_night", widthDp = 411, heightDp = 1000, fontScale = 1.0f, page = Page.STATS)
@@ -108,6 +118,8 @@ class ClientsScreenshotTest {
         composeRule.runOnUiThread { composeRule.activity.enableEdgeToEdge() }
 
         val repo = FixedTrafficRepository()
+        val agents = AgentRowsRepository()
+        val controller = ClientsController(agents, NoStrings)
         composeRule.setContent {
             SteamVaultTheme {
                 when (page) {
@@ -118,7 +130,9 @@ class ClientsScreenshotTest {
                             onManagePcs = {},
                             demoMode = true,
                             clock = { NOW },
-                            clientsRepository = NoWriteClientsRepository,
+                            clientsRepository = agents,
+                            clientsController = controller,
+                            settingsRepository = ServerVersionRepository,
                         )
                     }
                     Page.STATS -> Surface(color = MaterialTheme.colorScheme.background, modifier = Modifier.fillMaxSize()) {
@@ -135,21 +149,35 @@ class ClientsScreenshotTest {
         ScreenshotGoldens.capture(composeRule.onRoot(), name)
         // After the capture, so a failing check still leaves the image.
         when (page) {
-            Page.CLIENTS -> assertClientsPage()
+            Page.CLIENTS -> assertClientsPage(wholePage = heightDp >= FULL_PAGE_DP)
             Page.STATS -> assertStatsHeader()
         }
     }
 
-    private fun assertClientsPage() {
+    /** [wholePage]: the tall shot composes every card; the phone-height
+     * shots show the tiles and the first card only (the lazy list does not
+     * compose cards below the viewport). */
+    private fun assertClientsPage(wholePage: Boolean) {
         // The answer arrived: cards of both kinds are on screen.
         composeRule.onNode(hasText("vault-agent · 10.0.0.42", substring = true), useUnmergedTree = true).assertExists()
         // WP D15-RUNNER: the prefill runner is its own card (second: connected,
         // as recent as the online PC) and counts like the web counts it.
-        composeRule.onNode(hasText("This server's prefill downloads · 172.18.0.1"), useUnmergedTree = true).assertExists()
+        if (wholePage) {
+            composeRule.onNode(hasText("This server's prefill downloads · 172.18.0.1"), useUnmergedTree = true).assertExists()
+        }
         composeRule.onNode(hasText("5 clients · 3 connected"), useUnmergedTree = true).assertExists()
         // WP ANDROID-GAPS-1: every card with a name_addr offers Rename (the runner has none).
         val renames = composeRule.onAllNodes(hasContentDescription("Rename ", substring = true)).fetchSemanticsNodes()
         assertTrue("expected Rename on the nameable cards, found ${renames.size}", renames.isNotEmpty())
+        // WP ANDROID-REDESIGN-1a: the agent rows joined the cards (one card per
+        // device): tiles, the outdated pill and box, health row, Remove agent.
+        // Displayed, not only composed: the page opens at the top, tiles first.
+        composeRule.onNode(hasText("CONNECTED"), useUnmergedTree = true).assertIsDisplayed()
+        composeRule.onNode(hasText("Agent outdated"), useUnmergedTree = true).assertExists()
+        composeRule.onNode(hasText("Agent version differs from the server"), useUnmergedTree = true).assertExists()
+        composeRule.onNode(hasText("1 outdated"), useUnmergedTree = true).assertExists()
+        composeRule.onNode(hasText("last seen 10 min ago · agent 0.1.0-rc18.1", substring = true), useUnmergedTree = true).assertExists()
+        composeRule.onNode(hasContentDescription("Remove agent demo-livingroom-pc")).assertExists()
         // Review item: with four items every nav label is ONE line -- the
         // long "Downloads" is as tall as the short "Settings".
         val downloads = composeRule.onNode(hasText("Downloads"), useUnmergedTree = true).fetchSemanticsNode().size.height
@@ -184,15 +212,29 @@ class ClientsScreenshotTest {
         override suspend fun jobHistory(range: String, limit: Int): List<JobSummary> = emptyList()
     }
 
-    /** Rename is drawn but never used in a screenshot. */
-    private object NoWriteClientsRepository : ClientsRepository {
-        override suspend fun list(): List<ClientOut> = emptyList()
+    /** The agent rows the page merges into its cards (`GET /v1/clients`);
+     * Rename and Remove are drawn but never used in a screenshot. */
+    private class AgentRowsRepository : ClientsRepository {
+        override suspend fun list(): List<ClientOut> = SNAPSHOT.agents
         override suspend fun remove(clientId: String) = error("not used in screenshots")
         override suspend fun setName(addr: String, name: String) = error("not used in screenshots")
         override suspend fun clearName(addr: String) = error("not used in screenshots")
     }
 
+    private object NoStrings : ClientsStrings {
+        override fun loadErrorFallback(): String = "load error"
+    }
+
+    /** A server one rc ahead of the living-room agent, so the outdated box shows. */
+    private object ServerVersionRepository : SettingsRepository {
+        override suspend fun get(): SettingsOut = SettingsOut(readonly = false, server_version = "0.1.0-rc19.2")
+        override suspend fun patch(updates: Map<String, JsonElement?>): SettingsOut = error("not used in screenshots")
+    }
+
     private companion object {
+        /** Height of the whole-page shot (WP ANDROID-REDESIGN-1a). */
+        const val FULL_PAGE_DP = 3000
+
         /** An evening (UTC), so the demo's daily rhythm draws a real graph. */
         val NOW: Long = Instant.parse("2026-10-14T19:30:00Z").toEpochMilli()
 
@@ -215,10 +257,12 @@ class ClientsScreenshotTest {
                 ClientOut(
                     client_id = "demo-livingroom-pc", first_seen = ago(30 * 86_400L), last_reported_at = ago(600),
                     source_addrs = listOf("10.0.0.42"), last_seen_in_cache_log = ago(600), presence = "online",
+                    agent_version = "0.1.0-rc18.1",
                 ),
                 ClientOut(
                     client_id = "demo-steamdeck", first_seen = ago(10 * 86_400L), last_reported_at = ago(7_200),
                     source_addrs = listOf("10.0.0.57"), last_seen_in_cache_log = ago(7_200), presence = "offline",
+                    agent_version = "0.1.0-rc19.2",
                 ),
             ),
         )
