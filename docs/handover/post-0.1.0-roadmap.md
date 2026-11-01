@@ -147,12 +147,36 @@ Antrag filed and the rollout on the operator's stack checked.
     a minimum agent and app version (pulls that part of the v0.4.0 "Weg B
     for agents" forward; the OS report stays in v0.4.0). A small alias
     list maps the identical agent builds `0.1.0-rc18` ... `0.1.0-rc20.2`
-    to `0.1.0-rc17`.
+    to `0.1.0-rc17` (git check in RELEASE-SPLIT-1a: rc21 and rc21.1 are
+    unchanged too, so the list runs to `0.1.0-rc21.1`; ADR-0031).
   - About page and release notes list each component with its version and
     "unchanged since ..." where it applies. New ADR (supersedes the
     single-version part of VER-1, extends ADR-0029).
   - history: no retro tags; the analysis above goes into the ADR as a
     table.
+  - notes for RELEASE-SPLIT-1b (from the 1a review, 2026-11-01):
+    - `publish` needs `agent-build` and `android-build`; once those can
+      be skipped by the plan, `publish` (and every job downstream of a
+      skippable builder) must gate with
+      `if: ${{ !cancelled() && ... }}`, or a skipped builder skips the
+      whole release.
+    - open design point: vault-api bakes `VAULT_VERSION` = the run's
+      product version while the server component's recorded version may
+      differ (unchanged server, rebuilt vault-api for new client files).
+      Decide in 1b/1c which one `/v1/about` shows (and how the other one
+      is named).
+    - rehearse the retag path (`enforce: true`, unchanged server) before
+      relying on it in a real tag run; the anonymous
+      `docker buildx imagetools inspect` of the recorded tag needs the
+      ghcr packages to be public.
+    - read only `components.*.version` from the previous tag's manifest
+      (tolerant parse, or validation per `schema` value), so a manifest
+      schema change in 1b cannot fail the next tag run.
+    - before switching `enforce` on, require that the previous tag's
+      manifest matches a replayed plan (or that its tag run's check
+      printed "versions match the plan"): a dry-run tag with a stale
+      manifest would make the first enforce release retag an outdated
+      image.
 
 ### Version rules (ADR-0029, user decisions 2026-10-18)
 

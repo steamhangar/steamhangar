@@ -93,3 +93,17 @@ at the end, under a dated heading, one entry each with the WP that proved it.
   (`startsWith(github.ref, 'refs/tags/v')`), so an unset pin fails a tag
   run but only warns on a rehearsal; a mismatch or malformed pin fails
   everywhere.
+
+### 2026-11-01 RELEASE-SPLIT-1a
+
+- A job-level `if:` cannot read `matrix`: per-leg gating in a matrix job
+  needs an early decision step (`id: mode`) with every build step gated on
+  its output; a reuse step writes the same digest output so later steps
+  read `steps.build.outputs.digest || steps.reuse.outputs.digest`.
+- Editing publish.yml by string replacement on a repeated job header
+  (`needs:` + `if:` + `permissions:`) silently hit the wrong job; anchor on
+  the `  <job>:` line, slice to the next key and assert the match count.
+- A release-time gate that cannot be undone (tags are never deleted) warns
+  in dry run and fails only once enforced; and a gate must fail closed on
+  empty outputs, or a skipped builder skips `publish` and the tag run ends
+  green with nothing published.

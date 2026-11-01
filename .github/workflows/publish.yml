@@ -224,6 +224,146 @@ jobs:
           echo "commit=${commit}" >> "$GITHUB_OUTPUT"
           echo "build version: ${version}, commit: ${commit}"
 
+  # WP RELEASE-SPLIT-1a (ADR-0031): which components changed since the
+  # previous release tag. `.github/components.json` records per component
+  # (server, agent, app) the repo paths that define it and the product
+  # version in which it last changed; `.github/scripts/component-versions.py`
+  # diffs the trees of the previous `v*` tag and this commit. Every build
+  # job below waits for this plan and is gated by its `*_build` outputs.
+  # The manifest's `enforce` switch is OFF (dry run): every component is
+  # still built and the plan only lands in the run summary. With `enforce`
+  # on, an unchanged server retags its recorded images (vault-core,
+  # vault-dns, vault-proxy; vault-api is rebuilt because it bakes this
+  # run's agent files and APK) and components whose `reuse` is "none"
+  # (agent, app until RELEASE-SPLIT-1b) are still rebuilt.
+  # On tag runs the committed manifest must already carry the planned
+  # versions (`component-versions.py write` in the release commit), so a
+  # tag never publishes with a stale record; other runs skip that check.
+  # api/tests/test_release_split_1a.py pins this job and the gating.
+  component-plan:
+    name: component-plan / changed components since the previous release
+    runs-on: ubuntu-latest
+    needs: [build-version]
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    permissions:
+      contents: read
+    timeout-minutes: 5
+    outputs:
+      mode: ${{ steps.plan.outputs.mode }}
+      server_build: ${{ steps.plan.outputs.server_build }}
+      server_version: ${{ steps.plan.outputs.server_version }}
+      agent_build: ${{ steps.plan.outputs.agent_build }}
+      agent_version: ${{ steps.plan.outputs.agent_version }}
+      app_build: ${{ steps.plan.outputs.app_build }}
+      app_version: ${{ steps.plan.outputs.app_version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          # Full history and tags: the plan diffs against the previous tag.
+          fetch-depth: 0
+
+      - name: Find the previous release tag
+        id: prev
+        run: |
+          set -eu
+          prev="$(git describe --tags --abbrev=0 --match 'v[0-9]*' "${GITHUB_SHA}^")" || {
+            echo "::error::no v* release tag before ${GITHUB_SHA}; the component plan needs one" >&2
+            exit 1
+          }
+          if ! printf '%s' "$prev" | grep -Eqx 'v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+(\.[0-9A-Za-z]+)*)?'; then
+            echo "::error::previous tag '${prev}' is not a product version tag" >&2
+            exit 1
+          fi
+          echo "tag=${prev}" >> "$GITHUB_OUTPUT"
+          echo "previous release tag: ${prev}"
+
+      - name: Plan component builds
+        id: plan
+        env:
+          BUILD_VERSION: ${{ needs.build-version.outputs.version }}
+          PREV_TAG: ${{ steps.prev.outputs.tag }}
+        run: |
+          set -eu
+          python3 .github/scripts/component-versions.py plan \
+            --version "$BUILD_VERSION" --previous-tag "$PREV_TAG" \
+            --json-out "$RUNNER_TEMP/component-plan.json" \
+            --github-output "$GITHUB_OUTPUT" --summary "$GITHUB_STEP_SUMMARY"
+          cat "$RUNNER_TEMP/component-plan.json"
+
+      # A script regression must not end in a green tag run that publishes
+      # nothing: every *_build is exactly true|false, every *_version is a
+      # product version or a dev-<sha> build version.
+      - name: Check the plan outputs
+        env:
+          SERVER_BUILD: ${{ steps.plan.outputs.server_build }}
+          SERVER_VERSION: ${{ steps.plan.outputs.server_version }}
+          AGENT_BUILD: ${{ steps.plan.outputs.agent_build }}
+          AGENT_VERSION: ${{ steps.plan.outputs.agent_version }}
+          APP_BUILD: ${{ steps.plan.outputs.app_build }}
+          APP_VERSION: ${{ steps.plan.outputs.app_version }}
+        run: |
+          set -eu
+          bad=0
+          for pair in "server_build=${SERVER_BUILD}" "agent_build=${AGENT_BUILD}" \
+                      "app_build=${APP_BUILD}"; do
+            case "${pair#*=}" in
+              true|false) ;;
+              *) echo "::error::plan output ${pair%%=*}='${pair#*=}' is not true|false" >&2; bad=1 ;;
+            esac
+          done
+          for pair in "server_version=${SERVER_VERSION}" "agent_version=${AGENT_VERSION}" \
+                      "app_version=${APP_VERSION}"; do
+            if ! printf '%s' "${pair#*=}" | grep -Eqx \
+                '[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+(\.[0-9A-Za-z]+)*)?|dev-[0-9a-f]{7,40}'; then
+              echo "::error::plan output ${pair%%=*}='${pair#*=}' is not a version" >&2
+              bad=1
+            fi
+          done
+          if [ "$bad" -ne 0 ]; then
+            exit 1
+          fi
+          echo "plan outputs OK"
+
+      # Tags cannot be deleted, so a hard failure here burns the version.
+      # It is hard only with `enforce: true` (reuse depends on the recorded
+      # versions); in dry run a stale manifest is a warning with the fix.
+      - name: Check the manifest records the planned versions
+        env:
+          BUILD_VERSION: ${{ needs.build-version.outputs.version }}
+          PREV_TAG: ${{ steps.prev.outputs.tag }}
+          STRICT: ${{ startsWith(github.ref, 'refs/tags/v') }}
+          MODE: ${{ steps.plan.outputs.mode }}
+        run: |
+          set -eu
+          if [ "$STRICT" != "true" ]; then
+            echo "::notice::not a v* tag run (version ${BUILD_VERSION}): manifest check skipped"
+            exit 0
+          fi
+          case "$MODE" in
+            enforce|dry-run) ;;
+            *) echo "::error::unexpected plan mode '${MODE}'" >&2; exit 1 ;;
+          esac
+          rc=0
+          python3 .github/scripts/component-versions.py check \
+            --version "$BUILD_VERSION" --previous-tag "$PREV_TAG" || rc=$?
+          if [ "$rc" -eq 0 ]; then
+            exit 0
+          fi
+          if [ "$rc" -eq 1 ] && [ "$MODE" = "dry-run" ]; then
+            echo "::warning::.github/components.json does not record the planned versions (dry run, continuing). Before the next tag run: python3 .github/scripts/component-versions.py write --version ${BUILD_VERSION} --previous-tag ${PREV_TAG}"
+            exit 0
+          fi
+          exit "$rc"
+
+      - name: Upload the component plan (workflow artifact)
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: component-plan
+          path: ${{ runner.temp }}/component-plan.json
+          if-no-files-found: error
+          retention-days: 3
+
   publish:
     name: publish / ${{ matrix.image }} (ghcr.io)
     runs-on: ubuntu-latest
@@ -231,7 +371,12 @@ jobs:
     # bakes their artifacts (see "Stage release downloads" below). The other
     # three legs wait for them too -- one ordering for the whole matrix keeps
     # the "a release is all or nothing" reading simple.
-    needs: [build-version, android-build, agent-build]
+    # WP RELEASE-SPLIT-1a: and the component plan, which decides per leg
+    # whether the image is built or its recorded release is retagged. That
+    # puts the component-plan job (checkout with full history, plan, output
+    # check, manifest check; about a minute) on the critical path of
+    # every build.
+    needs: [build-version, component-plan, android-build, agent-build]
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     permissions:
       contents: read
@@ -295,6 +440,35 @@ jobs:
         with:
           persist-credentials: false
 
+      # WP RELEASE-SPLIT-1a: build or reuse this leg. The server is one
+      # component (ADR-0031): its `server_build` output covers all four
+      # images. vault-api is always built until RELEASE-SPLIT-1b, because
+      # it bakes the agent files and APK of THIS run (DIST-1a).
+      - name: Decide build or reuse (component plan)
+        id: mode
+        env:
+          IMAGE: ${{ matrix.image }}
+          SERVER_BUILD: ${{ needs.component-plan.outputs.server_build }}
+          SERVER_VERSION: ${{ needs.component-plan.outputs.server_version }}
+        run: |
+          set -eu
+          case "$SERVER_BUILD" in
+            true|false) ;;
+            *) echo "::error::component-plan server_build is '${SERVER_BUILD}', not true/false" >&2; exit 1 ;;
+          esac
+          if [ "$IMAGE" = "vault-api" ]; then
+            build=true
+          else
+            build="$SERVER_BUILD"
+          fi
+          if [ "$build" = "false" ] && ! printf '%s' "$SERVER_VERSION" | grep -Eqx '[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+(\.[0-9A-Za-z]+)*)?'; then
+            echo "::error::recorded server version '${SERVER_VERSION}' is not a product version" >&2
+            exit 1
+          fi
+          echo "build=${build}" >> "$GITHUB_OUTPUT"
+          echo "recorded_version=${SERVER_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "${IMAGE}: build=${build} (server recorded version ${SERVER_VERSION})"
+
       # QEMU cross-build, not a native arm64 runner: GitHub-hosted Linux
       # arm64 runners exist but are not available to every account tier for
       # free, and this repo has no evidence of that entitlement -- QEMU
@@ -305,7 +479,7 @@ jobs:
       # entry has none, so this step (and its emulation-registration cost)
       # is skipped for it entirely rather than run and do nothing.
       - name: Set up QEMU (arm64 emulation for cross-building)
-        if: contains(matrix.platforms, 'arm64')
+        if: contains(matrix.platforms, 'arm64') && steps.mode.outputs.build == 'true'
         uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4.2.0
         with:
           platforms: arm64
@@ -465,7 +639,7 @@ jobs:
       # not read as semver (it then emits only the sha- tag) fails here,
       # before anything is built or pushed.
       - name: Check the baked version matches the image tag
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: startsWith(github.ref, 'refs/tags/v') && steps.mode.outputs.build == 'true'
         env:
           META_VERSION: ${{ steps.meta.outputs.version }}
           BUILD_VERSION: ${{ needs.build-version.outputs.version }}
@@ -593,6 +767,7 @@ jobs:
 
       - name: Build and push ${{ matrix.image }}
         id: build
+        if: steps.mode.outputs.build == 'true'
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: ${{ matrix.context }}
@@ -645,11 +820,53 @@ jobs:
       # Both registry checks below read the PUSHED image back by digest, so
       # they share the push gate above: on a dispatch build there is
       # nothing in the registry to verify (WP SEC-FIX-2, P2).
+      # WP RELEASE-SPLIT-1a: an unchanged server keeps its recorded
+      # version (ADR-0031). Its image is not rebuilt: the recorded release
+      # tag is resolved to its digest and that digest gets this release's
+      # version tag (no sha-* tag: that one names the commit an image was
+      # built from), so `${VAULT_IMAGE_TAG}` compose pins keep working.
+      # Only on a v* tag run anything is pushed; a rehearsal resolves only.
+      - name: Reuse the recorded image (retag, no rebuild)
+        id: reuse
+        if: steps.mode.outputs.build == 'false'
+        env:
+          SRC: ${{ steps.base.outputs.base }}/${{ matrix.image }}:${{ steps.mode.outputs.recorded_version }}
+          NEW_TAGS: ${{ steps.meta.outputs.tags }}
+          PUSH: ${{ startsWith(github.ref, 'refs/tags/v') }}
+        run: |
+          set -eu
+          digest="$(docker buildx imagetools inspect "$SRC" --format '{{json .Manifest}}' | jq -r .digest)"
+          if ! printf '%s' "$digest" | grep -Eqx 'sha256:[0-9a-f]{64}'; then
+            echo "::error::could not resolve ${SRC} to a sha256 digest (got '${digest}')" >&2
+            exit 1
+          fi
+          set --
+          for tag in $NEW_TAGS; do
+            case "$tag" in *:sha-*) continue ;; esac
+            set -- "$@" --tag "$tag"
+          done
+          if [ "$#" -eq 0 ]; then
+            echo "::error::no version tag to put on ${SRC}" >&2
+            exit 1
+          fi
+          if [ "$PUSH" = "true" ]; then
+            docker buildx imagetools create "$@" "${SRC%:*}@${digest}"
+          else
+            echo "rehearsal: would run docker buildx imagetools create $* ${SRC%:*}@${digest}"
+          fi
+          echo "digest=${digest}" >> "$GITHUB_OUTPUT"
+          {
+            echo "### ${{ matrix.image }} -- reused, NOT rebuilt"
+            echo ""
+            echo "Server unchanged since \`${{ steps.mode.outputs.recorded_version }}\`: \`${SRC%:*}@${digest}\`"
+            echo "retagged as: $*"
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Verify pushed manifest matches declared platforms
         if: startsWith(github.ref, 'refs/tags/v')
         run: |
           set -eu
-          REF="${{ steps.base.outputs.base }}/${{ matrix.image }}@${{ steps.build.outputs.digest }}"
+          REF="${{ steps.base.outputs.base }}/${{ matrix.image }}@${{ steps.build.outputs.digest || steps.reuse.outputs.digest }}"
           EXPECTED="$(printf '%s' '${{ matrix.platforms }}' | tr ',' '\n' | sort)"
           # `select(.platform.os != "unknown")`: found and fixed during this
           # package's own verification, before ever pushing anything for
@@ -733,7 +950,7 @@ jobs:
       # publishes is a real version or a commit-derived sha, never a
       # no-information floating tag -- a narrower, but true, claim.
       - name: Record published digest
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: startsWith(github.ref, 'refs/tags/v') && steps.mode.outputs.build == 'true'
         run: |
           {
             echo "### ${{ matrix.image }} (${{ matrix.platforms }})"
@@ -744,7 +961,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Record build (dispatch -- nothing pushed)
-        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+        if: ${{ !startsWith(github.ref, 'refs/tags/v') && steps.mode.outputs.build == 'true' }}
         run: |
           {
             echo "### ${{ matrix.image }} (${{ matrix.platforms }}) -- built, NOT pushed"
@@ -762,7 +979,7 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         env:
           IMAGE: ${{ matrix.image }}
-          PIN: ${{ steps.base.outputs.base }}/${{ matrix.image }}@${{ steps.build.outputs.digest }}
+          PIN: ${{ steps.base.outputs.base }}/${{ matrix.image }}@${{ steps.build.outputs.digest || steps.reuse.outputs.digest }}
         run: |
           set -eu
           case "$PIN" in
@@ -803,8 +1020,11 @@ jobs:
     # other way round: `publish` needs this job, so no image is pushed for
     # a release whose APK build failed. WP CI-FIX-DIST: `build-version` is
     # needed for the APK's file name (see "Record APK checksum" below).
-    needs: [build-version]
-    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    # WP RELEASE-SPLIT-1a: gated by the component plan. app_build is always
+    # "true" while the app's `reuse` is "none" in .github/components.json
+    # (RELEASE-SPLIT-1b wires attaching the recorded APK instead).
+    needs: [build-version, component-plan]
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && needs.component-plan.outputs.app_build == 'true'
     # Read-only since WP DIST-1a: attaching to the release (the one step
     # that needed `contents: write`) moved to `android-release` below, which
     # holds no signing secret. The keystore and the write token are no
@@ -1338,8 +1558,12 @@ jobs:
     name: agent-build / cross-compiled vault-agent (workflow artifact)
     runs-on: ubuntu-latest
     # build-version (WP VER-1) supplies the -ldflags version and commit.
-    needs: build-version
-    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    # WP RELEASE-SPLIT-1a: gated by the component plan. agent_build is
+    # always "true" while the agent's `reuse` is "none" in
+    # .github/components.json (RELEASE-SPLIT-1b wires attaching the
+    # recorded release files instead).
+    needs: [build-version, component-plan]
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && needs.component-plan.outputs.agent_build == 'true'
     # Read-only: this job writes nothing outside its own workspace and the
     # run's artifact store (WP DIST-1a; attaching moved to agent-binaries).
     permissions:
