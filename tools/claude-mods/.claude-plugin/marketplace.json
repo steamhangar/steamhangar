@@ -1,0 +1,19 @@
+{
+  "name": "steamhangar-dev-mods",
+  "owner": {
+    "name": "SteamHangar contributors"
+  },
+  "description": "Claude Code mods for developing SteamHangar (generic; host paths come in as plugin options).",
+  "plugins": [
+    {
+      "name": "output-trim",
+      "source": "./output-trim",
+      "description": "Trims long Bash output to head, tail and failure lines; keeps the full output in a file."
+    },
+    {
+      "name": "dev-commands",
+      "source": "./dev-commands",
+      "description": "Zero-token slash commands: /ci, /antraege, /wp."
+    }
+  ]
+}
