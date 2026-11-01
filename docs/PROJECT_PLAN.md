@@ -4094,6 +4094,34 @@ below carry their own later dates, item 12 is the current one).
         stub_prefill `lancache_failures.txt` counter never reset.
       - [x] close: release gate (roadmap "Release plan"), tag `v0.1.0-rc21` (2026-11-01: tag on 5d94d11, main CI 41275492016 and Publish 41275885575 green, verify 627/0; rollout Antrag A-20261101-01 filed; prod rollout check pending)
 
+    - [ ] **rc21.1 — mapping and name fixes from the prod rollout** (operator
+      decision 2026-11-01: patch, not rc22; measure together on prod first)
+      - [ ] **MAP-ATTRIB-1** (api) a prefill maps every depot whose directory
+        changed during its run to the running app (`prefill.py`
+        `diff_depots` / `apply_observed_mapping`, ~884-990), so traffic a PC
+        loads in parallel lands on the wrong game. Prod evidence 2026-11-01:
+        Wanderburg (3624140) owns HELLDIVERS 2 depots 436781, 553851, 553854
+        and Ubisoft Connect's 1716751 (GC job 251 planned them under
+        3624140; `gc.py:1440` plans only the app's own mapped depots), while
+        HD2's GC (job 260, execute) no longer lists 436781. Fix: only map
+        observed depots the app really has (oracle depot list / recorded
+        manifest), plus a one-time cleanup of wrong rows; check GC keep sets
+        stay intact. Likely the cause of Wanderburg staying "Cached · not
+        verified" after its verify (foreign pairs have no target, figure
+        unknown; job 250 "0 depots observed").
+      - [ ] **TOOL-NAMES-1** (api) Steam Tool/Config apps without a store
+        page show "Unknown app" (prod: 3990420 "Steam Frame Wireless Adapter
+        Driver", Tool, no depots; 1716750 "Ubisoft Connect PC Client",
+        Config). Store GetItems answers success != 1, they are not in the
+        owned list, and the oracle name exists only for apps the update
+        check sends (cached, not `not_owned`). Fix: fetch the oracle name for
+        rows without any name (rate-limited, metadata only).
+      - [ ] measure on prod with the operator before cutting packages: the
+        depot_app_map rows of 3624140, 553850, 1716750; HD2 completeness
+        after GC job 260 (execute, 4.94 GB freed, 553853 keep 23700 / 6067
+        orphans, `needs_force` set for 553850 and 3624140).
+      - [ ] close: release gate, tag `v0.1.0-rc21.1`
+
     - [ ] **rc22 — release hardening, no new features** (packages to be cut
       in the version's planning session)
       - D7 `:443` measurement and the `VAULT_TLS_CLIENT_MAX_CONNS`
