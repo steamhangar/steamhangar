@@ -2040,7 +2040,7 @@ and VERIFY-COLD-1 is prose in the Sunday-test box of the rc19.3 block.
   same eviction and the same client. The two AIO runs differed by 1.4 %.
   Cause unknown (ZFS metadata or prefetch state, other host load). Repeat
   baselines in future tuning tests; one baseline is not enough.
-- **CAP-503-FIX-1 (core/runner, measured 2026-11-01; OPEN DECISION):**
+- **CAP-503-FIX-1 (core/runner, measured 2026-11-01; decided Weg A, rc23):**
   a Steam client and the prefill runner share the global MISS cap (16);
   under contention the runner (SteamPrefill, 8 threads) retries rejected
   chunks without backoff: ~37,000 503s per minute against ~550 200s, and
@@ -2050,7 +2050,11 @@ and VERIFY-COLD-1 is prose in the Sunday-test box of the rc19.3 block.
   idle gap; Weg B reserve cap slots for clients (separate `limit_conn` zone
   for the runner address, e.g. runner <= cap/2); Weg C slow the retry loop
   in the core (`limit_req` / delayed 503 for the runner address). Rec.:
-  Weg B (core-only, small) plus Weg A later if needed. Operator decides.
+  Weg B (core-only, small) plus Weg A later if needed.
+  **Decision (operator, 2026-11-01): Weg A, client priority, in rc23.**
+  The API pauses (or holds) the runner while client MISS traffic is seen
+  and resumes it after an idle gap; must not lose the job's progress and
+  must show the reason in the Downloads UI (web + app twin).
 - **APP-DL-CARD-1 (android, operator 2026-11-01, screenshot; rc23 by operator decision 2026-11-01):** the
   Downloads page's active-job card ("Breathedge, job #266 ... 0 MB/s · 0
   GB loaded so far", Pause/Cancel) looks unpolished next to the

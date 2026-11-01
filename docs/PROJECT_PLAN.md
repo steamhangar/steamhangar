@@ -468,8 +468,9 @@ their open boxes (items 2, 7 and 11) are in section 12. Item 13 stays here.
       follow in rc23): APP-DL-STATS-1 (Downloads page values: active card,
       avg/peak, served/from internet while the runner loads; web vs app
       twin check first), APP-DL-CARD-1 (design pass of the active-job
-      card), OUTPUT-TRIM-TAP-1 (dev tooling); candidate CAP-503-FIX-1
-      (open decision); details in the roadmap
+      card), OUTPUT-TRIM-TAP-1 (dev tooling), CAP-503-FIX-1 Weg A
+      (operator decision 2026-11-01: client priority, the runner pauses
+      while a PC downloads); details in the roadmap
     - v0.2.0 rename: D18 incl. logo, LAUNCHER-PREP-1
     - v0.3.0 privacy: D22 then LIBRARY-META-1d
     - v0.4.0 agents and devices: Weg B for agents with the installer (D6
@@ -605,7 +606,7 @@ their open boxes (items 2, 7 and 11) are in section 12. Item 13 stays here.
         503s per minute (~600/s) with ~550 200s, the PC got 6,688 503s in
         the same minute (39 Mbit/s); once the runner was idle the PC alone
         ran ~150 Mbit/s with 0x 503. No `113`. Measurement done; the fix
-        is CAP-503-FIX-1 (open decision, roadmap).
+        is CAP-503-FIX-1 (Weg A, rc23).
       - [ ] HIT-PATH-1 measure server-to-client HIT throughput (iperf3,
         nginx counters, hit-path read)
       - [ ] NITS-AUDIT-1 small items (list in the roadmap; the GameHangar
