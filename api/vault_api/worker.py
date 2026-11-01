@@ -71,6 +71,7 @@ from vault_api import (
     gc_execute,
     jobs,
     manifest_ingest,
+    map_attrib,
     oracle,
     prefill,
     prefill_queue,
@@ -605,10 +606,15 @@ class PrefillWorker:
                 # when the replace step will run, and never allowed to fail
                 # the job: a crash here degrades to "remove nothing".
                 manifest_named: set[int] | None = None
+                # WP MAP-ATTRIB-1: observed depots are added only with evidence
+                # the app owns them (other PCs load other games into the same
+                # cache during the run). A crash here adds nothing new.
+                owned: set[int] | None = set()
                 if observed:
+                    evidence_settings = self._job_settings(conn)
                     try:
                         manifest_named = manifest_ingest.own_manifest_depots(
-                            self._job_settings(conn), appid
+                            evidence_settings, appid
                         )
                     except Exception:  # noqa: BLE001 - the job already succeeded
                         logger.exception(
@@ -617,9 +623,29 @@ class PrefillWorker:
                             appid, job_id,
                         )
                         manifest_named = None
+                    try:
+                        owned = map_attrib.owned_depots(
+                            conn, appid,
+                            manifest_named=manifest_named,
+                            oracle_enabled=evidence_settings.manifest_oracle_enabled,
+                        )
+                    except Exception:  # noqa: BLE001 - the job already succeeded
+                        logger.exception(
+                            "Reading the ownership evidence for appid %s (job %s) "
+                            "failed; no observed depot is added to its mapping.",
+                            appid, job_id,
+                        )
+                        owned = set()
                 change = prefill.apply_observed_mapping(
-                    conn, appid, observed, manifest_named=manifest_named
+                    conn, appid, observed, manifest_named=manifest_named, owned=owned
                 )
+                if change.not_attributed:
+                    logger.info(
+                        "Prefill job %s for appid %s: %d observed depot(s) not "
+                        "attributed (no ownership evidence): %s",
+                        job_id, appid, len(change.not_attributed),
+                        sorted(change.not_attributed),
+                    )
                 # The mapping line is appended after ingestion (below) so it
                 # can say what ingestion added; the order stays
                 # replace-within-app first, manifest mapping second (WP
