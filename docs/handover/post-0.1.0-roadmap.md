@@ -102,6 +102,10 @@ Antrag filed and the rollout on the operator's stack checked.
   `dev.sh verify`, `verify full` for tags and nightly; decided Weg A),
   CARD-CORNERS-1 (Library card corners with real covers, waiting for a
   screenshot). Details in `docs/PROJECT_PLAN.md`, rc22 block.
+- **Added 2026-11-01 (dev efficiency, user decisions):** DOC-DIET-1 as the
+  first rc22 package (plan core + archive, LEARNINGS index, lean agent
+  reads; Weg A) and DEV-FLOW-1 (Workflow tool for every rc22 package,
+  artifact dashboard with a database instead of status messages).
 - **Entry:** rc21 tagged.
 - **Exit:** release gate; every open item 13 B box ticked or explicitly
   moved by the user; measurements written up (inbox note or ADR addendum).

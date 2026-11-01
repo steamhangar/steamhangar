@@ -4169,6 +4169,19 @@ below carry their own later dates, item 12 is the current one).
       in the version's planning session)
       - D7 `:443` measurement and the `VAULT_TLS_CLIENT_MAX_CONNS`
         default (closes the D7 box above)
+      - [ ] **DOC-DIET-1** (docs + agents, user decision 2026-11-01,
+        Weg A; first rc22 package) every coder/reviewer start reads
+        `PROJECT_PLAN.md` (292 KB) and `LEARNINGS.md` (87 KB), roughly
+        100k tokens per agent. Split the plan into a core (sections 1-6,
+        8-11, current version block) and an archive of finished phases;
+        give `LEARNINGS.md` an index by area; `coder.md`/`reviewer.md`
+        read the core plus the area section only. Docs-only, one short
+        review.
+      - [ ] **DEV-FLOW-1** (process, user decision 2026-11-01) every rc22
+        package runs its coder -> reviewer -> fix loop through the Workflow
+        tool (max 3 agents at a time); a private artifact dashboard with a
+        database (packages, CI, open decisions, Antraege) replaces status
+        messages. rc21.1 keeps the manual flow.
       - [ ] CAP-503-LOOP-1 measure whether the 503 retry loop still occurs
         at the current rate
       - [ ] HIT-PATH-1 measure server-to-client HIT throughput (iperf3,
