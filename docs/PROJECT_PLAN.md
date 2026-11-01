@@ -4258,7 +4258,7 @@ below carry their own later dates, item 12 is the current one).
         contains-style pins (use assertCalledFrom like D15dWiringTest);
         `smoother.observe` runs as a composition side effect (idempotent); a
         malformed `storage_balance` fails the whole summary decode on Android.
-      - [ ] close: release gate, tag `v0.1.0-rc21.1`
+      - [x] close: release gate, tag `v0.1.0-rc21.1` (2026-11-01, operator's yes: tag on a65fede, main CI 41298914431 green, verify 627/0; rollout Antrag A-20261101-03 filed; prod rollout check pending)
 
     - [ ] **rc22 — release hardening, no new features** (packages to be cut
       in the version's planning session)
