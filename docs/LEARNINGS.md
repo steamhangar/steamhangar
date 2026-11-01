@@ -1387,3 +1387,17 @@ These are not style preferences; each entry cost a review round to learn.
   (empty content until data arrives).
 - **"Is on screen" checks need `assertIsDisplayed`, not `assertExists`**:
   a composed item outside the viewport passes `assertExists`.
+
+## 2026-11-01 — rc21.1 (prod findings after the rc21 rollout)
+
+- **A before/after disk diff on a shared cache is not attribution**: any
+  mapping from "what changed during my run" needs positive per-app evidence
+  (own manifest, recorded manifest, oracle depot list), or it picks up other
+  clients' traffic (MAP-ATTRIB-1, Wanderburg owning HD2 depots).
+- **A seeded store row in a refresher test is deleted on the first tick if
+  the fake store answers success != 1**; the fake store must answer it.
+- **Stamps written by `oracle.refresh_app` use the real clock**, not an
+  injected `now`; keep fake-clock windows on the safe side of the real date.
+- **Prod data questions: use `dev.sh diag db '<select>'`** (A-20261101-02;
+  read-only, settings/steam_relay_key/runner_marks blocked) instead of
+  asking the operator to paste queries.

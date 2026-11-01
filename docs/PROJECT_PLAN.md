@@ -4111,7 +4111,7 @@ below carry their own later dates, item 12 is the current one).
         stay intact. Likely the cause of Wanderburg staying "Cached · not
         verified" after its verify (foreign pairs have no target, figure
         unknown; job 250 "0 depots observed").
-      - [ ] **TOOL-NAMES-1** (api) Steam Tool/Config apps without a store
+      - [x] **TOOL-NAMES-1** (4971b52; oracle_names.py: at most 2 oracle lookups per 60 s refresher tick for apps no source names, backoff, oracle off = no request; GC can only gain protection, pinned by tests) (api) Steam Tool/Config apps without a store
         page show "Unknown app" (prod: 3990420 "Steam Frame Wireless Adapter
         Driver", Tool, no depots; 1716750 "Ubisoft Connect PC Client",
         Config). Store GetItems answers success != 1, they are not in the
