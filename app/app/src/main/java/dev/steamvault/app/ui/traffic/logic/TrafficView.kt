@@ -419,13 +419,138 @@ fun graphGeometryToShow(
     return if (geo.maxBytesPerSecond == 0.0) null else geo
 }
 
+/** Tooltip of a job card's speed line (web `JOB_SPEED_NOTE`); on Android the
+ * line's TalkBack description after its text ([jobSpeedNote]). */
+const val JOB_SPEED_NOTE = "Exclusive depots only: bytes on depots that belong to this game alone, from every address."
+
+/** WP JOB-SIZE-1: the note while a first download counts expected depots
+ * (web `JOB_SPEED_EXPECTED_NOTE`; WP RUNNER-NAME-1: the runner is named by
+ * the product). */
+const val JOB_SPEED_EXPECTED_NOTE =
+    "Expected depots: the server has not mapped this game yet, so the speed and size count $PRODUCT_NAME's own prefill bytes on the depots the oracle expects (an estimate until the download ends)."
+
+/** The note of a job's speed line (web `jobSpeedNote`, WP JOB-SIZE-1). */
+fun jobSpeedNote(entry: JobThroughputOut?): String =
+    if (entry?.expected == true) JOB_SPEED_EXPECTED_NOTE else JOB_SPEED_NOTE
+
+/** WP JOB-SIZE-1: a first download's size is the oracle's expectation. */
+const val EXPECTED_SIZE_NOTE = " (expected size)"
+
+/** WP JOB-SIZE-1 (ETA): no estimate in a job's first seconds (unstable). */
+const val JOB_ETA_MIN_AGE_MS = 20_000L
+
+/** WP JOB-SIZE-1 (ETA): an estimate above a day says nothing useful. */
+const val JOB_ETA_MAX_SECONDS = 86_400.0
+
+/** WP JOB-SIZE-1 (ETA): weight of the newest speed sample in the EMA. */
+const val ETA_SMOOTHING = 0.3
+
+/**
+ * One EMA step over the ETA speed (web `smoothEtaRate`). A missing or
+ * non-positive sample resets (`null`): there is no speed to estimate with,
+ * and the next real sample starts afresh instead of being dragged down by
+ * a stale zero.
+ */
+fun smoothEtaRate(previous: Double?, sample: Double?, alpha: Double = ETA_SMOOTHING): Double? {
+    if (sample == null || !sample.isFinite() || sample <= 0.0) return null
+    if (previous == null || !previous.isFinite() || previous <= 0.0) return sample
+    return previous + alpha * (sample - previous)
+}
+
+/**
+ * Per-job smoothed ETA speeds across throughput polls (web `EtaSmoother`,
+ * WP JOB-SIZE-1). [observe] advances each job once per new answer (a
+ * recomposition with the same answer is not a sample) and forgets jobs the
+ * answer no longer lists. "New answer" is the identity of its `jobs` list:
+ * the live range re-merges the same cached jobs every few seconds, which
+ * is not a new speed sample. The Downloads screen holds one per visit and
+ * [clear]s it whenever the screen starts (the web nit "keeps a rate across
+ * leaving and re-entering Downloads", done right here).
+ */
+class EtaSmoother(private val alpha: Double = ETA_SMOOTHING) {
+    private var rates: Map<Int, Double> = emptyMap()
+    private var last: List<JobThroughputOut>? = null
+
+    fun observe(throughput: ThroughputOut?) {
+        if (throughput == null || throughput.jobs === last) return
+        last = throughput.jobs
+        val next = HashMap<Int, Double>()
+        for (job in throughput.jobs) {
+            smoothEtaRate(rates[job.job_id], job.eta_bytes_per_second, alpha)?.let { next[job.job_id] = it }
+        }
+        rates = next
+    }
+
+    fun rate(jobId: Int): Double? = rates[jobId]
+
+    /** Forget every rate (screen entry). */
+    fun clear() {
+        rates = emptyMap()
+        last = null
+    }
+}
+
+/**
+ * Seconds a running job still needs, or `null` when there is nothing honest
+ * to say (web `jobEtaSeconds`, WP JOB-SIZE-1): `remaining_bytes /
+ * eta_bytes_per_second`. The server matches the divisor to the remainder
+ * and takes it from the live tier, or from a swept window only when that
+ * started with the job. [rate] is the smoothed speed ([EtaSmoother]); left
+ * out, the entry's own value is used (web: `rate` undefined). Never for a
+ * Verifying card, a job younger than 20 s, a zero or unknown speed,
+ * nothing remaining, or more than a day.
+ */
+fun jobEtaSeconds(
+    entry: JobThroughputOut?,
+    verifying: Boolean = false,
+    nowMs: Long = System.currentTimeMillis(),
+    rate: Double? = entry?.eta_bytes_per_second,
+): Double? {
+    if (verifying || entry == null) return null
+    val remaining = entry.remaining_bytes ?: return null
+    if (remaining <= 0L) return null
+    if (rate == null || !rate.isFinite() || rate <= 0.0) return null
+    val started = parseMs(entry.started_at) ?: return null
+    if (nowMs - started < JOB_ETA_MIN_AGE_MS) return null
+    val seconds = remaining / rate
+    if (!seconds.isFinite() || seconds > JOB_ETA_MAX_SECONDS) return null
+    return seconds
+}
+
+/**
+ * "about 6 min left", "about 2 h 5 min left" (web `formatEta`): rounded up
+ * to whole minutes, always marked as approximate. `null` for anything that
+ * is not a positive finite number.
+ */
+fun formatEta(seconds: Double?): String? {
+    if (seconds == null || !seconds.isFinite() || seconds <= 0.0) return null
+    val minutes = maxOf(1L, Math.ceil(seconds / 60).toLong())
+    if (minutes < 60) return "about $minutes min left"
+    val hours = minutes / 60
+    val rest = minutes % 60
+    return if (rest != 0L) "about $hours h $rest min left" else "about $hours h left"
+}
+
 /**
  * The line under a running job's card: its speed at the cache (WP D13
  * SPEED-1, `GET /v1/throughput`'s `jobs`). `null` when there is nothing
  * honest to say: no entry, or the feed not `ok` (the header's note explains
  * that).
+ *
+ * WP JOB-SIZE-1 (web twin): a first download (`expected`) says "<so far>
+ * of ~<expected download> loaded so far (expected size)", and with a known
+ * remainder the line ends in "· about N min left" ([jobEtaSeconds],
+ * [formatEta]; [etaRate] is the smoothed speed, left out = the entry's own).
+ * [verifying] only hides the ETA here; the web's Verifying line
+ * (`VERIFY_SPEED_TEXT`, WP DOWNLOADS-1) is not ported to Android.
  */
-fun jobSpeedText(entry: JobThroughputOut?, state: FeedState): String? {
+fun jobSpeedText(
+    entry: JobThroughputOut?,
+    state: FeedState,
+    verifying: Boolean = false,
+    nowMs: Long = System.currentTimeMillis(),
+    etaRate: Double? = entry?.eta_bytes_per_second,
+): String? {
     if (entry == null || state != FeedState.OK) return null
     val bps = entry.bytes_per_second
         ?: return if (entry.exclusive_depots == 0) {
@@ -439,7 +564,11 @@ fun jobSpeedText(entry: JobThroughputOut?, state: FeedState): String? {
         }
     val speed = formatSpeed(bps) ?: return null
     val sofar = formatTrafficBytes(entry.bytes_since_start)
-    return if (sofar != null) "$speed · $sofar loaded so far" else speed
+    val eta = formatEta(jobEtaSeconds(entry, verifying = verifying, nowMs = nowMs, rate = etaRate))
+    val tail = if (eta != null) " · $eta" else ""
+    val total = if (entry.expected == true) formatTrafficBytes(entry.expected_download_bytes) else null
+    if (sofar != null && total != null) return "$speed · $sofar of ~$total loaded so far" + EXPECTED_SIZE_NOTE + tail
+    return (if (sofar != null) "$speed · $sofar loaded so far" else speed) + tail
 }
 
 // ---------------------------------------------------------------------

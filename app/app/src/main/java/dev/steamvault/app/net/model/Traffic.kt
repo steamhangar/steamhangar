@@ -98,6 +98,24 @@ data class JobThroughputOut(
     val exclusive_depots: Int = 0,
     /** Depots mapped to the app at all (shared or not); 0 on an older server. */
     val mapped_depots: Int = 0,
+    // WP JOB-SIZE-1 (api/README.md, additive; all `null` from an older
+    // server, which keeps today's speed line).
+    /** `true` while a first download counts the D19 preview's expected depots. */
+    val expected: Boolean? = null,
+    val expected_depots: Int? = null,
+    val expected_size_bytes: Long? = null,
+    /** The expected download size: the "of ~X" figure. */
+    val expected_download_bytes: Long? = null,
+    /** The runner's MISS share of [bytes_per_second]. */
+    val miss_bytes_per_second: Double? = null,
+    /** Bytes still to come for the ETA (`preview`: chunks still to request;
+     * `completeness`: internet bytes still to fetch). */
+    val remaining_bytes: Long? = null,
+    val remaining_source: String? = null,
+    /** The ETA divisor, same byte kind as [remaining_bytes]; `null` while
+     * there is no honest speed (no live tier, a diluted window). */
+    val eta_bytes_per_second: Double? = null,
+    val eta_speed_source: String? = null,
 )
 
 @Serializable

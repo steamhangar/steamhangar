@@ -128,7 +128,7 @@ class D15dWiringTest {
     fun `MUTATION PIN -- Downloads draws the statistics header, speed lines and the history filter`() {
         assertCalledFrom(downloads, "statsPoll.pollForever()", "DownloadsScreen")
         assertCalledFrom(downloads, "historyFilter.load()", "DownloadsScreen")
-        assertCalledFrom(downloads, "jobSpeedLines(statsPoll)", "DownloadsScreen")
+        assertCalledFrom(downloads, "jobSpeedLines(statsPoll, verifyingJobIds, etaSmoother)", "DownloadsScreen")
         assertCalledFrom(downloads, "filterJobsByRange(historyJobs, historyFilter.range)", "DownloadsScreen")
         assertCalledFrom(downloads, "DownloadsStatsHeader(statsPoll, scope, rateCap, onRangeChosen = { ranges.statistics = it })", "DownloadsBody")
         // WP RATE-TILE: the cap line reads the controller's settings and schedule, loaded once per visit.
@@ -138,6 +138,13 @@ class D15dWiringTest {
         assertCalledFrom(downloads, "historyFilter.selectRange(scope, it)", "DownloadsBody")
         assertCalledFrom(downloads, "emptyHistoryText(historyFilter.range)", "DownloadsBody")
         assertCalledFrom(downloads, "if (speedLine != null) {", "JobCard")
+        // WP ANDROID-RC21-1-TWINS (JOB-SIZE-1): the EMA starts afresh with
+        // every screen start, a Verifying card gets no ETA, and the web's
+        // tooltip (jobSpeedNote) is read by TalkBack after the line.
+        assertCalledFrom(downloads, "val etaSmoother = remember(trafficRepository) { EtaSmoother() }", "DownloadsScreen")
+        assertCalledFrom(downloads, "etaSmoother.clear()\n            statsPoll.pollForever()", "DownloadsScreen")
+        assertCalledFrom(downloads, "activeModels.filter { it.kind == StatusKind.VERIFY }", "DownloadsScreen")
+        assertCalledFrom(downloads, "contentDescription = \"\${speedLine.text}. \${speedLine.note}\"", "JobCard")
         assertCalledFrom(main, "trafficRepository = remember(client) { VaultTrafficRepository(client) },\n            ranges = trafficRanges,\n            ownedLibrary", "DownloadsDestinationContent")
         assertCalledFrom(main, "trafficRepository = remember(demo) { DemoTrafficRepository(demo) },\n                ranges = trafficRanges,\n                ownedLibrary", "DownloadsDestinationContent")
     }

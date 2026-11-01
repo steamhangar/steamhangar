@@ -26,6 +26,8 @@ import androidx.compose.runtime.key
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.heading
 import dev.steamvault.app.ui.settings.logic.PlacedSettings
+import dev.steamvault.app.ui.settings.logic.StorageBalanceText
+import dev.steamvault.app.ui.settings.logic.StorageBalanceView
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.IconButton
@@ -153,6 +155,11 @@ fun SettingsScreen(
             val current = controller.section.takeIf { it in sections } ?: SettingsLayout.DEFAULT_SECTION
             val dirty = controller.dirtyDots
             SettingsSectionStrip(sections = sections, selected = current, dirty = dirty.sections, onSelect = { controller.selectSection(it) })
+            // WP ANDROID-RC21-1-TWINS: the storage balance card's figures,
+            // fetched each time the Expert panel opens.
+            LaunchedEffect(controller, current) {
+                if (current == EXPERT_SECTION) controller.loadCacheSummary()
+            }
             // A new panel starts at its top.
             val scroll = key(current) { rememberScrollState() }
             Column(
@@ -188,6 +195,12 @@ fun SettingsScreen(
                                     color = MaterialTheme.colorScheme.error,
                                 )
                             else -> SettingsForm(controller, current)
+                        }
+                        // WP ANDROID-RC21-1-TWINS (web STORAGE-BALANCE-1): a
+                        // read-only card at the end of the Expert panel,
+                        // hidden while there is nothing honest to show.
+                        if (current == EXPERT_SECTION && controller.expertOn) {
+                            controller.storageBalance?.let { StorageBalanceCard(it) }
                         }
                         if (current == "vault") {
                             HorizontalDivider()
@@ -488,6 +501,50 @@ private fun FieldCard(title: String?, content: @Composable ColumnScope.() -> Uni
             Text(title, style = MaterialTheme.typography.titleSmall, modifier = Modifier.semantics { heading() })
         }
         content()
+    }
+}
+
+/**
+ * The Expert panel's "Storage balance" card (WP ANDROID-RC21-1-TWINS, web
+ * settings.js `paintStorageBalance`): the server's warning on top, one tile
+ * per figure (label, value with its depot count, note; a highlighted tile
+ * while the warning is on), then the note line. Words and rules:
+ * `ui/settings/logic/StorageBalance.kt`.
+ */
+@Composable
+private fun StorageBalanceCard(view: StorageBalanceView) {
+    FieldCard(StorageBalanceText.TITLE) {
+        view.warning?.let { warning ->
+            Text(
+                warning,
+                style = MaterialTheme.typography.bodySmall,
+                color = VaultColors.StatusStale,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .border(1.dp, VaultColors.StatusStale, RoundedCornerShape(8.dp))
+                    .padding(8.dp)
+                    .testTag("balance-warning"),
+            )
+        }
+        for (tile in view.tiles) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(VaultColors.Raised, RoundedCornerShape(8.dp))
+                    .border(1.dp, if (tile.hi) VaultColors.StatusStale else VaultColors.LineSoft, RoundedCornerShape(8.dp))
+                    .padding(8.dp)
+                    .testTag("balance-${tile.key}"),
+            ) {
+                Text(tile.label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(
+                    if (tile.sub != null) "${tile.value} · ${tile.sub}" else tile.value,
+                    style = MaterialTheme.typography.titleMedium,
+                    color = if (tile.hi) VaultColors.StatusStale else MaterialTheme.colorScheme.onSurface,
+                )
+                Text(tile.note, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+        Text(view.note, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 

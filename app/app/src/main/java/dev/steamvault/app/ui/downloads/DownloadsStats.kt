@@ -89,6 +89,8 @@ import dev.steamvault.app.ui.traffic.logic.loadingNowModel
 import dev.steamvault.app.ui.traffic.logic.splitGeometry
 import dev.steamvault.app.ui.traffic.logic.isRange
 import dev.steamvault.app.ui.traffic.logic.isStatsRange
+import dev.steamvault.app.ui.traffic.logic.EtaSmoother
+import dev.steamvault.app.ui.traffic.logic.jobSpeedNote
 import dev.steamvault.app.ui.traffic.logic.jobSpeedText
 import dev.steamvault.app.ui.traffic.logic.liveSeries
 import dev.steamvault.app.ui.traffic.logic.mergeLive
@@ -156,16 +158,39 @@ fun downloadsStatsPoll(
 const val LOADING_STATISTICS_TEXT = "Loading statistics…"
 const val COULD_NOT_LOAD_STATISTICS = "Could not load the statistics"
 
+/** One job card's speed line and its note (web: the line's `title`, here
+ * read by TalkBack after the line, WP JOB-SIZE-1 `jobSpeedNote`). */
+data class JobSpeedLine(val text: String, val note: String)
+
 /**
  * The speed line under each running job's card, by job id, from the same
  * answer's `jobs[]` (WP D13 SPEED-1). Empty while the answer is for another
  * range or missing.
+ *
+ * WP JOB-SIZE-1 (web `paintJobSpeeds`): one EMA step of [smoother] per new
+ * answer (identity-guarded, so a recomposition is no sample), the smoothed
+ * rate feeds the ETA, and no ETA on a card in [verifyingJobIds].
  */
-fun jobSpeedLines(poll: TrafficPoll<StatsAnswer>): Map<Int, String> {
+fun jobSpeedLines(
+    poll: TrafficPoll<StatsAnswer>,
+    verifyingJobIds: Set<Int> = emptySet(),
+    smoother: EtaSmoother? = null,
+    nowMs: Long = System.currentTimeMillis(),
+): Map<Int, JobSpeedLine> {
     val t = poll.data?.throughput ?: return emptyMap()
     if (t.range != poll.range) return emptyMap()
+    smoother?.observe(t)
     val state = feedState(t.event_feed)
-    return t.jobs.mapNotNull { entry -> jobSpeedText(entry, state)?.let { entry.job_id to it } }.toMap()
+    return t.jobs.mapNotNull { entry ->
+        val text = jobSpeedText(
+            entry,
+            state,
+            verifying = entry.job_id in verifyingJobIds,
+            nowMs = nowMs,
+            etaRate = if (smoother != null) smoother.rate(entry.job_id) else entry.eta_bytes_per_second,
+        )
+        text?.let { entry.job_id to JobSpeedLine(it, jobSpeedNote(entry)) }
+    }.toMap()
 }
 
 /**

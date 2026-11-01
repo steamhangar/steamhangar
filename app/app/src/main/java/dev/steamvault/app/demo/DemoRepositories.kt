@@ -2,6 +2,7 @@ package dev.steamvault.app.demo
 
 import dev.steamvault.app.net.model.AboutOut
 import dev.steamvault.app.net.model.CacheDeletionOut
+import dev.steamvault.app.net.model.CacheSummaryOut
 import dev.steamvault.app.net.model.ClientsOverviewOut
 import dev.steamvault.app.net.model.ClientOut
 import dev.steamvault.app.net.model.DeletePlanOut
@@ -84,6 +85,7 @@ class DemoCacheRepository(private val state: DemoState) : CacheRepository {
     override suspend fun deleteWithPackages(appid: Int, members: List<Int>): CacheDeletionOut =
         state.deleteCacheWithPackages(appid, members)
     override suspend fun repair(appid: Int, execute: Boolean): RepairOut = state.repair(appid, execute)
+    override suspend fun summary(): CacheSummaryOut = state.cacheSummary()
 }
 
 class DemoClientsRepository(private val state: DemoState) : ClientsRepository {

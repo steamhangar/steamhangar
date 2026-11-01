@@ -453,6 +453,7 @@ class MainActivity : ComponentActivity() {
                 VaultSteamRelayRepository(it),
                 VaultAboutRepository(it),
                 settingsViewPreferences,
+                VaultCacheRepository(it),
             )
         }
         ownedLibraryState = client?.let { OwnedLibraryController(VaultSettingsRepository(it), VaultSteamRelayRepository(it)) }
@@ -495,6 +496,7 @@ class MainActivity : ComponentActivity() {
             DemoSteamRelayRepository(demo),
             DemoAboutRepository(demo),
             settingsViewPreferences,
+            DemoCacheRepository(demo),
         )
         ownedLibraryState = OwnedLibraryController(DemoSettingsRepository(demo), DemoSteamRelayRepository(demo))
         clientsControllerState = ClientsController(DemoClientsRepository(demo), AndroidClientsStrings(resources))

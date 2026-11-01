@@ -17,6 +17,31 @@ data class UnmappedDepotsOut(
     val size_bytes: Long,
 )
 
+/**
+ * `CacheSummaryOut.storage_balance` (WP STORAGE-BALANCE-1, api/README.md
+ * "Storage balance"): where the bytes on disk come from. Every field is
+ * nullable on purpose: a missing field makes the whole balance "nothing
+ * honest to show" (`ui/settings/logic/StorageBalance.kt`), the same rule
+ * the web applies, instead of a decode default that would print a zero.
+ */
+@Serializable
+data class StorageBalanceOut(
+    val on_disk_bytes: Long? = null,
+    val planned_bytes: Long? = null,
+    val present_bytes: Long? = null,
+    val measured_depots: Long? = null,
+    val old_builds_bytes: Long? = null,
+    val unmeasured_bytes: Long? = null,
+    val unmeasured_depots: Long? = null,
+    val unmapped_bytes: Long? = null,
+    val unmapped_depots: Long? = null,
+    /** The residual; 0 by construction, negative when the size snapshot is
+     * older than the measurement. The only field that may be negative. */
+    val unexplained_bytes: Long? = null,
+    val warning: Boolean? = null,
+    val warning_reason: String? = null,
+)
+
 /** `GET /v1/cache/summary` — `vault_api/routers/cache.py::CacheSummaryOut`. */
 @Serializable
 data class CacheSummaryOut(
@@ -24,6 +49,8 @@ data class CacheSummaryOut(
     val top_consumers: List<TopConsumerOut> = emptyList(),
     val unmapped_depots: UnmappedDepotsOut,
     val free_disk_bytes: Long? = null,
+    /** WP STORAGE-BALANCE-1: `null` from an older server (the card stays hidden). */
+    val storage_balance: StorageBalanceOut? = null,
 )
 
 /** One row of `CacheDeletionOut.deleted_depots` — `DeletedDepotOut`. */
