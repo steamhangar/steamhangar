@@ -264,8 +264,12 @@ private fun ClientsBody(
         contentPadding = PaddingValues(12.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        if (!poll.unsupported && tiles.isNotEmpty()) {
-            item(key = "tiles") { SummaryTiles(tiles) }
+        // Always the first item, also before the first answer: a LazyColumn
+        // keeps its first visible item in place when items are inserted
+        // above it, so a tiles item that only appeared with the data opened
+        // the page scrolled past the tiles (round-3 golden).
+        if (!poll.unsupported) {
+            item(key = "tiles") { if (tiles.isNotEmpty()) SummaryTiles(tiles) }
         }
         item(key = "devices") {
             DevicesHead(showRange = !poll.noFigures) {

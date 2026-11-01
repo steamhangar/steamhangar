@@ -14,6 +14,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
@@ -170,7 +171,8 @@ class ClientsScreenshotTest {
         assertTrue("expected Rename on the nameable cards, found ${renames.size}", renames.isNotEmpty())
         // WP ANDROID-REDESIGN-1a: the agent rows joined the cards (one card per
         // device): tiles, the outdated pill and box, health row, Remove agent.
-        composeRule.onNode(hasText("CONNECTED"), useUnmergedTree = true).assertExists()
+        // Displayed, not only composed: the page opens at the top, tiles first.
+        composeRule.onNode(hasText("CONNECTED"), useUnmergedTree = true).assertIsDisplayed()
         composeRule.onNode(hasText("Agent outdated"), useUnmergedTree = true).assertExists()
         composeRule.onNode(hasText("Agent version differs from the server"), useUnmergedTree = true).assertExists()
         composeRule.onNode(hasText("1 outdated"), useUnmergedTree = true).assertExists()

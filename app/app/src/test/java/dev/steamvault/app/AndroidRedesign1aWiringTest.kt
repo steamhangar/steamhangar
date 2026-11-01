@@ -82,7 +82,10 @@ class AndroidRedesign1aWiringTest {
     @Test
     fun `MUTATION PIN -- tiles, devices head, cards and the empty state are drawn`() {
         assertCalledFrom(screen, "summaryTiles(merged, range, serverVersion)", "ClientsBody")
-        assertCalledFrom(screen, "item(key = \"tiles\") { SummaryTiles(tiles) }", "ClientsBody")
+        assertCalledFrom(screen, "item(key = \"tiles\") { if (tiles.isNotEmpty()) SummaryTiles(tiles) }", "ClientsBody")
+        // MUTATION PIN (round-3 golden): the tiles item exists before the first
+        // answer, so the list never opens scrolled past it.
+        assertCalledFrom(screen, "if (!poll.unsupported) {\n            item(key = \"tiles\")", "ClientsBody")
         assertCalledFrom(screen, "clientCardView(it, range, serverVersion, nowMs,", "ClientsBody")
         assertCalledFrom(screen, "SectionLabel(DEVICES_HEADING,", "DevicesHead")
         assertCalledFrom(screen, "cards.isEmpty() -> item(key = \"empty\") { EmptyState() }", "ClientsBody")
