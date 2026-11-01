@@ -231,3 +231,13 @@ at the end, under a dated heading, one entry each with the WP that proved it.
   not from plan wording.
 - Text meant for a GitHub release body needs absolute links; relative repo
   links only work in the repo view.
+
+### 2026-11-01 publish rehearsals
+
+- `workflow_dispatch` rehearsals of publish.yml need the operator (GitHub
+  web UI or GitHub Mobile, logged in): the dev host has git push rights
+  but no API token with `actions: write` (operator decision 2026-11-01:
+  stays that way). Tag runs remain possible from the dev host. A rehearsal
+  is read via the jobs/steps API: skipped `*-build` plus green `*-reuse`
+  proves the reuse path; `Record build (dispatch -- nothing pushed)` and
+  skipped release steps prove nothing was published.
