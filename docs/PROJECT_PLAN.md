@@ -4264,7 +4264,7 @@ below carry their own later dates, item 12 is the current one).
       2026-11-01 in the planning session, user yes the same day; each
       package runs through the Workflow tool, max 3 agents at a time).
       Order: wave 0 DOC-DIET-1 alone; wave 1 DEV-MODS-1a, DEV-MODS-1b,
-      ANDROID-VERIFY-SPEED-1; wave 2 NITS-WEB-1, NITS-APP-1, NITS-API-1;
+      ANDROID-VERIFY-SPEED-1; wave 2 NITS-WEB-1, NITS-APP-1, NITS-API-1, ADD-DEVICE-QR-1;
       wave 3 SAMPLE-IP-1, CI-SIGN-PIN-1, VERIFY-FAST-1; wave 4
       RELEASE-SPLIT-1a/b/c ([Fable] second pass), RELEASE-NOTES-1.
       Measurements (orchestrator, read-only `dev.sh diag`, every rate step
@@ -4286,6 +4286,14 @@ below carry their own later dates, item 12 is the current one).
       - [ ] **NITS-API-1** (api + agent) MAP-DRIFT-1 fail-safe tests,
         claim-vs-move race test, regrow-without-idle-gap test, open api
         review nits of rc20-rc21.1.
+      - [ ] **ADD-DEVICE-QR-1** (web; operator report 2026-11-01, wave 2)
+        Add a device shows the app-download QR (step 1) and, once revealed,
+        the pairing QR (step 2) close together, so the camera can catch the
+        wrong one. Only one code is ever sharp: the download QR gets a small
+        eye toggle that blurs it, and revealing the pairing QR blurs the
+        download QR automatically (and the reverse). Applies to the wide and
+        the narrow layout; `add-device-sheet.js`, `kit.css`, web tests and
+        a `test-web-shots` golden. No Android twin (ANDROID-ADD-DEVICE-1).
       - [ ] **SAMPLE-IP-1** (tests/examples; user decision 2026-11-01,
         Weg A) sweep the generic `192.168.1.x` examples to `10.0.0.x`.
       - [ ] **CI-SIGN-PIN-1** (ci; CI-FIX-3 follow-up) pin the APK signing

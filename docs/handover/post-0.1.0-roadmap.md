@@ -101,6 +101,8 @@ Antrag filed and the rollout on the operator's stack checked.
   waves, see the rc22 block in `docs/PROJECT_PLAN.md` (NITS-AUDIT-1 is
   split into NITS-WEB-1, NITS-APP-1, NITS-API-1, SAMPLE-IP-1,
   CI-SIGN-PIN-1, RELEASE-NOTES-1; the rest of its list stays here).
+  ADD-DEVICE-QR-1 (operator report 2026-11-01): only one QR sharp at a
+  time in Add a device (eye toggle on the download QR).
 - **Added 2026-10-18 (planning session):** VERIFY-FAST-1 (lean default
   `dev.sh verify`, `verify full` for tags and nightly; decided Weg A),
   CARD-CORNERS-1 (Library card corners with real covers, waiting for a
