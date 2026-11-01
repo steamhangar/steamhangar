@@ -520,7 +520,7 @@ their open boxes (items 2, 7 and 11) are in section 12. Item 13 stays here.
         download QR automatically (and the reverse). Applies to the wide and
         the narrow layout; `add-device-sheet.js`, `kit.css`, web tests and
         a `test-web-shots` golden. No Android twin (ANDROID-ADD-DEVICE-1).
-      - [ ] **NITS-API-2** (api + web/android twins; user decisions
+      - [x] **NITS-API-2** (api + web/android twins; user decisions
         2026-11-01 on NITS-API-1 skips) NOT-OWNED-UPDATE-1 Weg A: no
         `update_available` for cached, not-owned apps; LOADING-COUNT-1 Weg A:
         the "now loading" device count counts agents like its rows;
@@ -653,6 +653,13 @@ their open boxes (items 2, 7 and 11) are in section 12. Item 13 stays here.
         in the twin test and drop the indirection); split LIBRARY-DETAIL-1
         and FIX-POP-HIDDEN-1 into one box per part when picked up. Checked:
         steam_relay/oracle server timeout 10 s < 20 s client deadline.
+      - [ ] nit (NITS-API-2 follow-ups): the swept `active_clients_now` (15 min
+        sweep) and the in-range `summary.active_clients` still count
+        addresses; the header "Current speed" window (`LiveTier.now_view`)
+        still divides by its full 15-20 s right after a mid-file tailer
+        start; `LiveTier.active_clients()` stays address-based (tests only);
+        a mid-file start without a complete line uses the read moment as
+        `_data_from` (one bucket can read slightly high).
       - [ ] remaining nits: MAP-DRIFT-1 fail-safe tests, claim-vs-move race
         test, aria-live on queue move (fixed in NITS-WEB-1:
         `downloads-queue-reorder.test.js`), D19WiringTest pin,
@@ -1306,10 +1313,12 @@ is done, tick it HERE, not in the archive.
     (relevant for NOW-LOADING-1).
   - [ ] nit (RUNNER-SPLIT-1 review): ~~redundant `when is not None` in
     `_series_point` (traffic.py ~748)~~ (fixed in NITS-API-1,
-    `routers/traffic.py`); `/v1/throughput/live` still divides
+    `routers/traffic.py`); ~~`/v1/throughput/live` still divides
     its running 5/15/60 s point by the full bucket length (N1 fixed only
-    for the series); a running ring bucket that only partly covers its
-    bucket (api restarted mid-bucket) still reads too low; demo summary
+    for the series)~~ (fixed in NOW-LOADING-1, `_elapsed_seconds`); ~~a
+    running ring bucket that only partly covers its bucket (api restarted
+    mid-bucket) still reads too low~~ (fixed in NITS-API-2:
+    `live_tier.covered_seconds`, LIVE-DIVISOR-1); demo summary
     says the runner was 60 % HIT while its points say 0 % (kept for
     golden stability). Android: read the runner split, add the
     "Verifying" pill and count runner HITs as cache in the graph.
@@ -1398,8 +1407,9 @@ is done, tick it HERE, not in the archive.
     counts as known on the client side)~~ (fixed in NITS-API-1:
     `test_an_address_listed_only_under_the_runner_is_not_a_known_client`);
     each loading poll reads all of
-    `agent_reports` at the 3 s live rate; device count counts addresses
-    while rows group by agent ("2 devices loading", one row); demo job
+    `agent_reports` at the 3 s live rate; ~~device count counts addresses
+    while rows group by agent ("2 devices loading", one row)~~ (fixed in
+    NITS-API-2: the count is the client rows, LOADING-COUNT-1); demo job
     card shows 31.5 MB/s (swept window) next to a 6.4 MB/s runner row.
   - tuning defaults from the Sunday test, if not shipped in rc20.x
     (the rc20.x box moves here)
@@ -1446,10 +1456,12 @@ is done, tick it HERE, not in the archive.
     cancel instead); GcFlowTest "an unrecognized job status keeps
     polling" also asserts the known status "queued" (rename or use a second
     unknown status).
-  - [ ] nit (TOOL-NAMES-1 review): a cached, not-owned app (prod 1716750
+  - [x] nit (TOOL-NAMES-1 review): a cached, not-owned app (prod 1716750
     Ubisoft Connect) gets a one-off oracle verdict from the name lookup
     and shows "Update available" it cannot act on until the not_owned
     window expires; consider hiding update_available for not_owned apps.
+    (fixed in NITS-API-2: no `update_available` while `not_owned`,
+    NOT-OWNED-UPDATE-1)
   - [ ] nit (MAP-LOSS-1 review): a depot Steam moved away keeps its old
     row (keep-only, GC keeps more) and can leave an old completeness target
     ("Update available"/"not verified") until DELETE /v1/mapping; the

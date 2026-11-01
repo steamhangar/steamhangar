@@ -222,3 +222,14 @@ apps that no source names, to show a name (ADR-0022 addendum 2026-11-01).
 Its stored snapshot is an ordinary oracle answer, so such an app can also
 carry an update verdict from that one answer; it is not re-checked by the
 update check unless it is cached and not `not_owned`.
+
+## Note 2026-11-01 (WP NITS-API-2): no update hint for not-owned apps
+
+Operator decision NOT-OWNED-UPDATE-1 (Weg A): an app whose last prefill
+ended `not_owned` (the `not_owned` flag of `GET /v1/games`) never reads
+`update_available: true`, even with a cached build and a `stale` verdict
+(for example the one-off verdict of the name lookup above). SteamPrefill
+cannot update an app no linked account owns, so the hint could not be acted
+on. The stored verdict and `update_checked_at` are unchanged; once the
+`not_owned` state clears (a newer job, or the recheck window expires), the
+flag follows the verdict again. Owned apps are unchanged.

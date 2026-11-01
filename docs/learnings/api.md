@@ -251,3 +251,15 @@ at the end, under a dated heading, one entry each with the WP that proved it.
   shrink: `live_tier` now keeps up to 512 bytes before the cursor
   (`MARK_BYTES`) and restarts at offset 0 with a hole when they changed.
   Found by the regrow-without-idle-gap test (6 of 8 lines folded before).
+
+### 2026-11-01 NITS-API-2
+
+- `pytest.approx` on epoch timestamps checks nothing: 1e-6 relative is
+  ~1700 s at ~1.7e9. Compare epoch floats exactly or pass `abs=`.
+- Before re-implementing a nit, `git log -S` the named helper: half of
+  LIVE-DIVISOR-1 was already done in NOW-LOADING-1 (`_elapsed_seconds`).
+- A tailer's coverage start comes from the first parsed line, including
+  lines older than the ring; rotation, truncation and regrow keep the old
+  start because the ring keeps its earlier cells.
+- A count shown next to rows is derived from those rows (sum of client
+  rows), so the two can never disagree.
