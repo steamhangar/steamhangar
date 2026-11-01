@@ -4268,6 +4268,32 @@ below carry their own later dates, item 12 is the current one).
         (VERIFY_SPEED_TEXT, DOWNLOADS-1, operator 2026-10-16) was never ported
         to Android; port it with a twin pin.
         default (closes the D7 box above)
+      - [ ] **DOC-DIET-1** (docs + agents, user decision 2026-11-01,
+        Weg A; first rc22 package) every coder/reviewer start reads
+        `PROJECT_PLAN.md` (292 KB) and `LEARNINGS.md` (87 KB), roughly
+        100k tokens per agent. Split the plan into a core (sections 1-6,
+        8-11, current version block) and an archive of finished phases;
+        give `LEARNINGS.md` an index by area; `coder.md`/`reviewer.md`
+        read the core plus the area section only. Docs-only, one short
+        review.
+      - [ ] **DEV-FLOW-1** (process, user decision 2026-11-01) every rc22
+        package runs its coder -> reviewer -> fix loop through the Workflow
+        tool (max 3 agents at a time); a private artifact dashboard with a
+        database (packages, CI, open decisions, Antraege) replaces status
+        messages. rc21.1 keeps the manual flow.
+      - [ ] **DEV-MODS-1** (dev tooling, user decision 2026-11-01, Weg A)
+        Claude Code mods under `tools/claude-mods/` (generic, no host
+        paths; host paths come in as plugin options): token meter per
+        request and agent (`turn.step`, writes a file), output trimming for
+        long test/verify/CI output (`tool.call` after `next`, full output
+        kept as a file), read brake for whole-file reads of
+        `PROJECT_PLAN.md`/`LEARNINGS.md`/`WORKPACKAGES.md`, and
+        zero-token commands (`/ci`, `/antraege`, `/wp`). Each mod with
+        `claude plugin test` tests and a clean `claude plugin validate`;
+        no `$.process` call outside a fixed command list. The operator
+        loads them as managed mods (`allowManagedModsOnly`). Entry:
+        Claude Code >= 2.1.287 in the devbox (Antrag). First use: token
+        meter numbers before and after DOC-DIET-1.
       - [ ] CAP-503-LOOP-1 measure whether the 503 retry loop still occurs
         at the current rate
       - [ ] HIT-PATH-1 measure server-to-client HIT throughput (iperf3,
