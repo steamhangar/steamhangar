@@ -189,7 +189,9 @@ class D15dWiringTest {
             Triple(downloads, "statsPoll", "DownloadsScreen"),
         )) {
             val code = stripComments(read(path))
-            val m = Regex("""repeatOnLifecycle\(Lifecycle\.State\.STARTED\)\s*\{\s*${poll}\.pollForever\(\)\s*\}""").find(code)
+            // WP ANDROID-RC21-1-TWINS: Downloads clears its ETA smoother at
+            // each start, right before the poll (nothing else may sit there).
+            val m = Regex("""repeatOnLifecycle\(Lifecycle\.State\.STARTED\)\s*\{\s*(?:etaSmoother\.clear\(\)\s*)?${poll}\.pollForever\(\)\s*\}""").find(code)
             assertTrue("$path: $poll.pollForever() must be the body of repeatOnLifecycle(Lifecycle.State.STARTED)", m != null)
             assertEquals("$path: the lifecycle-bound poll MOVED", screen, nearestEnclosingFun(code, m!!.range.first))
         }
