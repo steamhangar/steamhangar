@@ -139,6 +139,10 @@ class LivePoint:
     #: Largest single cell inside the bucket / its length (a 5 s cell for ring
     #: points, the 1-minute row itself for persisted ones).
     peak_bytes_per_second: float
+    #: The divisor of the point's rate: the seconds of the bucket the ring
+    #: has read (``covered_seconds``) for a ring point, the bucket length for
+    #: a persisted one (NITS-API-2).
+    seconds: float
 
 
 def _floor(epoch: float, step: int) -> int:
@@ -151,6 +155,31 @@ def _epoch(moment: datetime) -> float:
 
 def _iso(epoch: int) -> str:
     return to_utc_iso(datetime.fromtimestamp(epoch, tz=UTC))
+
+
+def covered_seconds(
+    start: int, length: int, now_epoch: float, data_from: float | None
+) -> float:
+    """The seconds of the bucket ``[start, start + length)`` the ring has
+    read, the divisor of a ring bucket's rate (NITS-API-2, LIVE-DIVISOR-1,
+    operator decision 2026-11-01, Weg A).
+
+    A bucket holds lines only from ``data_from`` (where the tailer started
+    reading, ``LiveTier.data_from``; ``None`` = no start inside the ring)
+    up to now: the running bucket only the seconds elapsed so far (WP
+    RUNNER-SPLIT-1, GRAPH-RECENT-1 nits N1/N2), a bucket the tailer started
+    in (vault-api restarted mid-bucket) only the seconds since that start.
+    Dividing by the full length would read such a bucket too low. At least
+    one second. A bucket that ends before ``data_from`` (nothing read in it)
+    or lies in the future keeps its full length.
+    """
+    end = start + length
+    if now_epoch < start:
+        return float(length)
+    low = float(start) if data_from is None else max(float(start), data_from)
+    if low >= end:
+        return float(length)
+    return max(1.0, min(float(end), now_epoch) - low)
 
 
 def _ring_totals(
@@ -232,6 +261,18 @@ class LiveTier:
         self._last_tail: float | None = None
         #: Minutes starting at or after this epoch are fully in the ring.
         self._covered_from: float | None = None
+        #: NITS-API-2 (LIVE-DIVISOR-1): the ring holds every line from this
+        #: epoch on, set when the tailer starts reading inside the file (a
+        #: fresh start or a restart after an idle gap): the first line it
+        #: read, or the moment of the read when it found none. ``None`` when
+        #: it started at the file's first byte (the file holds every line not
+        #: yet swept, so no start inside the ring is known). Unlike
+        #: ``_covered_from`` it is not rounded to a minute: it is the divisor
+        #: of the bucket it falls in (``covered_seconds``).
+        self._data_from: float | None = None
+        #: The time of the first parsed line of the current tail (any line,
+        #: also one older than the ring), for ``_data_from``.
+        self._first_seen: float | None = None
 
     # -- watcher ----------------------------------------------------------
 
@@ -275,6 +316,7 @@ class LiveTier:
         self._ino = None
         self._mark = None
         self._covered_from = None
+        self._data_from = None
 
     def _tail(self, path: str, now: datetime, epoch: float, gap: bool = False) -> int:
         if path != self._path:
@@ -334,6 +376,7 @@ class LiveTier:
                 prev = os.pread(fd, 1, self._cursor - 1)
                 align = prev != b"\n"
             first_line_epoch: float | None = None
+            self._first_seen = None
             for _ in range(MAX_READS_PER_REFRESH):
                 data = os.pread(fd, self._max_read, self._cursor)
                 if not data:
@@ -380,6 +423,16 @@ class LiveTier:
                     self._covered_from = float(_floor(first_line_epoch, 60) + 60)
                 else:
                     self._covered_from = float(_floor(epoch, 60) + 60)
+            if fresh:
+                # NITS-API-2: where the ring's lines start (``_data_from``).
+                # A rotation, a truncation or a regrow (not fresh) keeps the
+                # cells read before, so their buckets keep their start.
+                if started_mid_file:
+                    self._data_from = (
+                        self._first_seen if self._first_seen is not None else epoch
+                    )
+                else:
+                    self._data_from = None
         finally:
             try:
                 self._mark = self._read_mark(fd)
@@ -398,10 +451,14 @@ class LiveTier:
 
     def _fold(self, raw: str, now: datetime, epoch: float) -> float | None:
         line, _reason = event_sweep.parse_line(raw)
-        if line is None or line.cache_status == event_sweep.STATUS_RUNNER_MARK:
+        if line is None:
             return None
         seen = parse_utc_iso(line.time_utc) if line.time_utc else None
         seen_epoch = min(_epoch(seen), epoch) if seen is not None else epoch
+        if self._first_seen is None:
+            self._first_seen = seen_epoch
+        if line.cache_status == event_sweep.STATUS_RUNNER_MARK:
+            return None
         if seen_epoch < epoch - self._ring_seconds:
             return None  # older than the ring: persisted already
         key = _floor(seen_epoch, CELL_SECONDS)
@@ -443,12 +500,20 @@ class LiveTier:
     # -- reading ----------------------------------------------------------
 
     def _copy(self) -> tuple[dict[int, dict[str, tuple[int, ...]]], float | None]:
+        """The cells and ``_data_from`` (NITS-API-2; was ``_covered_from``,
+        which no reader used), read under one lock."""
         with self._lock:
             cells = {
                 key: {addr: tuple(c) for addr, c in by_addr.items()}
                 for key, by_addr in self._cells.items()
             }
-            return cells, self._covered_from
+            return cells, self._data_from
+
+    def data_from(self) -> float | None:
+        """The ring holds every line from this epoch on (``None``: no start
+        inside the ring is known; NITS-API-2)."""
+        with self._lock:
+            return self._data_from
 
     def stitch(
         self,
@@ -464,10 +529,13 @@ class LiveTier:
         whether an address's traffic in that bucket is the prefill runner's.
         """
         epoch = _epoch(now)
-        cells, _covered_from = self._copy()
+        cells, data_from = self._copy()
 
         def totals(start: int, end: int) -> tuple[LiveTotals, LiveTotals, int]:
             return _ring_totals(cells, start, end, is_runner)
+
+        def seconds(start: int, length: int) -> float:
+            return covered_seconds(start, length, epoch, data_from)
 
         points: list[LivePoint] = []
         now_cell = _floor(epoch, CELL_SECONDS)
@@ -482,28 +550,42 @@ class LiveTier:
             all_t, run_t, peak = totals(minute, minute + COARSE_BUCKET)
             if prefer_ring(all_t, row.all if row is not None else None):
                 points.append(
-                    LivePoint(_iso(minute), COARSE_BUCKET, "live", all_t, run_t, peak / CELL_SECONDS)
+                    LivePoint(
+                        _iso(minute), COARSE_BUCKET, "live", all_t, run_t, peak / CELL_SECONDS,
+                        seconds(minute, COARSE_BUCKET),
+                    )
                 )
                 continue
             if row is None:
-                points.append(LivePoint(_iso(minute), COARSE_BUCKET, "persisted", LiveTotals(), LiveTotals(), 0.0))
+                points.append(
+                    LivePoint(
+                        _iso(minute), COARSE_BUCKET, "persisted", LiveTotals(), LiveTotals(), 0.0,
+                        float(COARSE_BUCKET),
+                    )
+                )
             else:
                 points.append(
                     LivePoint(
                         _iso(minute), COARSE_BUCKET, "persisted", row.all, row.runner,
-                        row.peak / COARSE_BUCKET,
+                        row.peak / COARSE_BUCKET, float(COARSE_BUCKET),
                     )
                 )
 
         for start in range(medium_start, fine_start, MEDIUM_BUCKET):
             all_t, run_t, peak = totals(start, start + MEDIUM_BUCKET)
             points.append(
-                LivePoint(_iso(start), MEDIUM_BUCKET, "live", all_t, run_t, peak / CELL_SECONDS)
+                LivePoint(
+                    _iso(start), MEDIUM_BUCKET, "live", all_t, run_t, peak / CELL_SECONDS,
+                    seconds(start, MEDIUM_BUCKET),
+                )
             )
         for start in range(fine_start, now_cell + CELL_SECONDS, CELL_SECONDS):
             all_t, run_t, peak = totals(start, start + CELL_SECONDS)
             points.append(
-                LivePoint(_iso(start), CELL_SECONDS, "live", all_t, run_t, peak / CELL_SECONDS)
+                LivePoint(
+                    _iso(start), CELL_SECONDS, "live", all_t, run_t, peak / CELL_SECONDS,
+                    seconds(start, CELL_SECONDS),
+                )
             )
         return points
 
@@ -524,12 +606,16 @@ class LiveTier:
         bucket that still ends inside the ring up to the running one.
         """
         epoch = _epoch(now)
-        cells, _covered_from = self._copy()
+        cells, data_from = self._copy()
         first = _floor(epoch - self._ring_seconds, bucket_seconds)
         out: dict[int, RingBucket] = {}
         for start in range(first, _floor(epoch, bucket_seconds) + 1, bucket_seconds):
             all_t, run_t, _peak = _ring_totals(cells, start, start + bucket_seconds, is_runner)
-            out[start] = RingBucket(all=all_t, runner=run_t)
+            out[start] = RingBucket(
+                all=all_t,
+                runner=run_t,
+                seconds=covered_seconds(start, bucket_seconds, epoch, data_from),
+            )
         return out
 
     def active_clients(self, now: datetime, is_runner: Callable[[str, str], bool]) -> int:
@@ -647,7 +733,11 @@ class PersistedMinute:
 
 def loading_counts(activity: dict[tuple[str, bool], "AddrActivity"]) -> tuple[int, bool]:
     """From one ``addr_activity`` read: client addresses loading now (the
-    runner not counted) and whether the runner is loading (WP LOADING-NOW-1)."""
+    runner not counted) and whether the runner is loading (WP LOADING-NOW-1).
+
+    Addresses, not devices: the ring knows no agents. The endpoints' "N
+    devices loading" counts the ``loading_sources`` client rows instead
+    (NITS-API-2, ``routers.traffic._loading_device_count``)."""
     clients = {addr for addr, runner in activity if not runner}
     return len(clients), any(runner for _addr, runner in activity)
 
@@ -658,6 +748,9 @@ class RingBucket:
 
     all: LiveTotals
     runner: LiveTotals
+    #: The divisor of its rate: the seconds of the bucket the ring has read
+    #: (``covered_seconds``, NITS-API-2).
+    seconds: float
 
 
 @dataclass

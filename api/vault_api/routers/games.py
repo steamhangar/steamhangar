@@ -287,7 +287,8 @@ class GameSummary(BaseModel):
     # (``VAULT_MANIFEST_ORACLE=off``) or has never been asked about this app --
     # ``update_checked_at`` (null in both cases) tells the two apart. Read from
     # stored rows only; the list never makes a network request. The always-on
-    # check and ``POST /v1/updates/check`` keep the rows fresh.
+    # check and ``POST /v1/updates/check`` keep the rows fresh. Always
+    # ``false`` while ``not_owned`` is true (NITS-API-2): nothing to update.
     update_available: bool = False
     # When the oracle last answered for this app (UTC), null if never.
     update_checked_at: str | None = None
@@ -454,7 +455,9 @@ def _tool_app_fields(appid: int) -> dict[str, object]:
 
 
 def _update_fields(
-    verdict: tuple[str, str | None] | None, size_bytes: int | None
+    verdict: tuple[str, str | None] | None,
+    size_bytes: int | None,
+    not_owned: bool = False,
 ) -> dict[str, object]:
     """``update_available`` / ``update_checked_at`` from a stored oracle verdict
     (``None`` = the oracle never answered for this app).
@@ -462,12 +465,20 @@ def _update_fields(
     An update is only offered for a game that currently has bytes in the cache:
     ``depot_manifests`` rows survive ``DELETE /v1/cache/{appid}``, so a deleted
     game would otherwise keep a "stale" verdict for a cache that is gone.
+
+    NITS-API-2 (NOT-OWNED-UPDATE-1, operator decision 2026-11-01, Weg A): nor
+    for an app no linked account owns (``not_owned``, the same fact as the
+    row's ``not_owned`` flag): SteamPrefill cannot update it, so the hint
+    would be one the operator cannot act on (prod: a cached Ubisoft Connect
+    package with a one-off oracle verdict from the name lookup). Owned apps
+    are unchanged; ``update_checked_at`` still says when the oracle answered.
     """
     if verdict is None:
         return {"update_available": False, "update_checked_at": None}
     return {
         "update_available": verdict[0] == oracle.VERDICT_STALE
-        and bool(size_bytes),
+        and bool(size_bytes)
+        and not not_owned,
         "update_checked_at": verdict[1],
     }
 
@@ -727,7 +738,11 @@ def list_games(
                 **_tool_app_fields(row["appid"]),
                 cover_url=covers.get(row["appid"]),
                 cover_cached_url=cached_covers.get(row["appid"]),
-                **_update_fields(update_verdicts.get(row["appid"]), size_bytes),
+                **_update_fields(
+                    update_verdicts.get(row["appid"]),
+                    size_bytes,
+                    row["appid"] in not_owned_set,
+                ),
                 **_classification_fields(classifications.get(row["appid"])),
                 group_size_bytes=group_size,
                 **completeness_fields,
@@ -880,6 +895,7 @@ def get_game(
         **_update_fields(
             (update_view.verdict, update_view.checked_at) if update_view.known else None,
             detail_size,
+            detail_not_owned,
         ),
         **_classification_fields(classification),
         group_size_bytes=group_size,

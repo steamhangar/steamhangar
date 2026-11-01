@@ -383,8 +383,10 @@ class ThroughputNowOut(BaseModel):
     Clients page's ``live_now`` reads."""
 
     current: LiveCurrentOut
-    #: Client addresses that were served bytes in the window, the prefill
-    #: runner excluded.
+    #: Clients that were served bytes in the window, counted like the
+    #: ``loading_sources`` client rows (NITS-API-2, LOADING-COUNT-1): an agent
+    #: with all its addresses counts once, an agentless address once; the
+    #: prefill runner and the unattributed bytes are not counted.
     active_clients: int
     #: The prefill runner was served bytes in the window.
     runner_active: bool
@@ -974,15 +976,26 @@ def _ring_now(
     # One read of the window for every figure (WP NOW-LOADING-1): speed,
     # counts (the Clients page's rule) and the per-source rows agree.
     view = ring.now_view(now, _runner_test(windows))
-    clients, runner = live_tier.loading_counts(view.activity)
+    sources = _loading_sources(open_db, settings, view, now)
     return ThroughputNowOut(
         current=_live_current_out(view.current),
-        active_clients=clients,
-        runner_active=runner,
+        active_clients=_loading_device_count(sources),
+        runner_active=live_tier.loading_counts(view.activity)[1],
         window_seconds=view.current.window_seconds,
         live_since=ring.covered_from(),
-        loading_sources=_loading_sources(open_db, settings, view, now),
+        loading_sources=sources,
     )
+
+
+def _loading_device_count(sources: list[LoadingSourceOut]) -> int:
+    """The "N devices loading" count: the client rows of ``loading_sources``
+    (NITS-API-2, LOADING-COUNT-1, operator decision 2026-11-01, Weg A).
+
+    The rows group by client as the Clients page does (an agent with all its
+    addresses, or one agentless address), so one PC loading over two
+    addresses counts once, and the count always equals the rows shown under
+    it. The runner and the unattributed row are not devices."""
+    return sum(1 for source in sources if source.kind == "client")
 
 
 def _running_prefill_job(conn: sqlite3.Connection) -> sqlite3.Row | None:
@@ -1158,16 +1171,17 @@ def _series_point(
     runner_part: traffic.Totals,
     spec: traffic.RangeSpec,
     ring: dict[int, live_tier.RingBucket],
-    now_epoch: float | None = None,
 ) -> SeriesPointOut:
     """One graph point: the swept bucket, or the ring's where the ring holds
     more of it (``live_tier.prefer_ring``, WP GRAPH-RECENT-1).
 
     One source per point, never a sum, so nothing is counted twice. A ring
     bucket is its own peak (bytes / bucket length, as a 1-minute row is).
-    The running ring bucket (``now_epoch`` inside it) holds only the seconds
-    elapsed so far, so its rate divides by those (WP RUNNER-SPLIT-1, nit N1
-    of GRAPH-RECENT-1), at least one second, as ``LiveTier.current`` does.
+    A ring bucket's rate divides by the seconds of it the ring has read
+    (``RingBucket.seconds``, ``live_tier.covered_seconds``): the running
+    bucket only the seconds elapsed so far (WP RUNNER-SPLIT-1, nit N1 of
+    GRAPH-RECENT-1), a bucket the tailer started in only the seconds since
+    that start (NITS-API-2, LIVE-DIVISOR-1), at least one second.
     WP RUNNER-SPLIT-1: both sources carry the runner's HIT / MISS bytes.
     """
     when = live_tier.minute_epoch(point.bucket_at) if ring else None
@@ -1177,10 +1191,7 @@ def _series_point(
     )
     if bucket is not None and live_tier.prefer_ring(bucket.all, swept):  # bucket implies when
         whole, run = bucket.all, bucket.runner
-        seconds: float = spec.bucket_seconds
-        if now_epoch is not None and when <= now_epoch < when + spec.bucket_seconds:
-            seconds = max(1.0, now_epoch - when)
-        rate = whole.bytes_served / seconds
+        rate = whole.bytes_served / bucket.seconds
         return SeriesPointOut(
             t=point.bucket_at,
             bytes_served=whole.bytes_served,
@@ -1238,7 +1249,6 @@ def get_throughput_series(
         else {}
     )
     empty = traffic.Totals()
-    now_epoch = now.timestamp()
     return SeriesOut(
         event_feed=feed,
         range=range,
@@ -1247,7 +1257,7 @@ def get_throughput_series(
         range_start=spec.start,
         points=[
             _series_point(
-                point, runner_rows.get(point.bucket_at, empty), spec, ring_rows, now_epoch
+                point, runner_rows.get(point.bucket_at, empty), spec, ring_rows
             )
             for point in points
         ],
@@ -1286,11 +1296,12 @@ class LiveOut(BaseModel):
     range_start: str | None
     #: Null when the feed is disabled.
     current: LiveCurrentOut | None
-    #: Client addresses loading now, counted from the ring (the persisted
-    #: figure lags a sweep): served bytes in the ``current`` window (WP
-    #: LOADING-NOW-1, the Clients page's ``live_now`` rule; was 5 minutes of
-    #: any traffic). The prefill runner is not counted. Null when the feed is
-    #: disabled.
+    #: Clients loading now, counted from the ring (the persisted figure lags
+    #: a sweep): served bytes in the ``current`` window (WP LOADING-NOW-1, the
+    #: Clients page's ``live_now`` rule; was 5 minutes of any traffic). Since
+    #: NITS-API-2 (LOADING-COUNT-1) counted like the ``loading_sources``
+    #: client rows: an agent with all its addresses counts once. The prefill
+    #: runner is not counted. Null when the feed is disabled.
     active_clients: int | None = None
     #: WP LOADING-NOW-1: the window of ``active_clients`` in seconds (=
     #: ``current.window_seconds``). Null when the feed is disabled.
@@ -1398,17 +1409,17 @@ def get_throughput_live(
         points, view = _live_points(conn, tier, now, windows)
     current = view.current
     # The per-source rows read SQLite again (names), after the connection
-    # above is closed; only with a fresh feed, like ``/v1/throughput``'s ``now``.
-    sources = (
-        _loading_sources(open_db, settings, view, now) if feed.state == "ok" else None
-    )
-    now_epoch = now.timestamp()
+    # above is closed; shown only with a fresh feed, like ``/v1/throughput``'s
+    # ``now``. The device count is always the rows' count (NITS-API-2); an
+    # idle window costs no SQLite read either way.
+    rows = _loading_sources(open_db, settings, view, now)
+    sources = rows if feed.state == "ok" else None
     return LiveOut(
         event_feed=feed,
         watcher_window_seconds=int(live_tier.WATCHER_WINDOW_SECONDS),
         live_since=tier.covered_from(),
         range_start=points[0].t if points else None,
-        active_clients=live_tier.loading_counts(view.activity)[0],
+        active_clients=_loading_device_count(rows),
         active_window_seconds=current.window_seconds,
         current=_live_current_out(current),
         loading_sources=sources,
@@ -1424,24 +1435,16 @@ def get_throughput_live(
                 runner_bytes=p.runner.bytes_served,
                 runner_hit_bytes=p.runner.hit_bytes,
                 runner_miss_bytes=p.runner.miss_bytes,
-                bytes_per_second=p.all_totals.bytes_served / _elapsed_seconds(p, now_epoch),
+                # NITS-API-2 (LIVE-DIVISOR-1): the seconds of the bucket the
+                # ring has read (``live_tier.covered_seconds``): the running
+                # bucket and a bucket the tailer started in divide by their
+                # covered part, not the full length.
+                bytes_per_second=p.all_totals.bytes_served / p.seconds,
                 peak_bytes_per_second=p.peak_bytes_per_second,
             )
             for p in points
         ],
     )
-
-
-def _elapsed_seconds(point: live_tier.LivePoint, now_epoch: float) -> float:
-    """A live point's divisor: its bucket length, or for the running bucket
-    (``now_epoch`` inside it) the seconds elapsed in it, at least one, as
-    ``_series_point`` and ``LiveTier.current`` do (GRAPH-RECENT-1 nit N2)."""
-    # ``minute_epoch`` parses any of our UTC ISO stamps to epoch seconds
-    # (here a 5, 15 or 60 s bucket start), not only whole minutes.
-    start = live_tier.minute_epoch(point.t)
-    if start is not None and start <= now_epoch < start + point.bucket_seconds:
-        return max(1.0, now_epoch - start)
-    return float(point.bucket_seconds)
 
 
 @router.get("/v1/clients/overview", response_model=ClientsOverviewOut)

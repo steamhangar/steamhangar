@@ -486,13 +486,14 @@ def test_name_lookup_snapshot_only_adds_to_the_gc_keep_set(db, tmp_path) -> None
     assert extra_off == {}
 
 
-def test_name_lookup_gives_a_cached_not_owned_app_a_one_off_update_verdict(db, tmp_path) -> None:
-    """Documented side effect (ADR-0006 note 2026-11-01): the stored answer is
-    an ordinary oracle snapshot, so a cached, not-owned app with a recorded
-    manifest that differs from the oracle's public one shows
-    update_available=true with update_checked_at from that one answer. The
-    update check still leaves it out (not_owned), so the verdict is not
-    refreshed by it."""
+def test_name_lookup_verdict_on_a_cached_not_owned_app_shows_no_update(db, tmp_path) -> None:
+    """The stored answer is an ordinary oracle snapshot (ADR-0006 note
+    2026-11-01), so a cached, not-owned app with a recorded manifest that
+    differs from the oracle's public one gets a ``stale`` verdict from that one
+    answer. NITS-API-2 (NOT-OWNED-UPDATE-1, Weg A): neither the list nor the
+    detail offers it as ``update_available`` (nothing the operator can
+    update); ``update_checked_at`` still names the answer. The update check
+    leaves the app out (not_owned)."""
     from fastapi.testclient import TestClient
 
     from vault_api import jobs, scheduler
@@ -514,10 +515,55 @@ def test_name_lookup_gives_a_cached_not_owned_app_a_one_off_update_verdict(db, t
     assert view.checked_at is not None
 
     with TestClient(create_app(settings)) as client:
-        body = client.get(
-            f"/v1/games/{CONFIG_APP}", headers={"X-Api-Key": TEST_API_KEY}
-        ).json()
+        headers = {"X-Api-Key": TEST_API_KEY}
+        body = client.get(f"/v1/games/{CONFIG_APP}", headers=headers).json()
+        listed = [
+            g for g in client.get("/v1/games", headers=headers).json()
+            if g["appid"] == CONFIG_APP
+        ]
     assert body["name"] == "Synthetic Launcher PC Client"
     assert body["not_owned"] is True
-    assert body["update_available"] is True
+    assert body["size_bytes"]
+    assert body["update_available"] is False
     assert body["update_checked_at"] == view.checked_at
+    assert len(listed) == 1
+    assert listed[0]["not_owned"] is True
+    assert listed[0]["update_available"] is False
+    assert listed[0]["update_checked_at"] == view.checked_at
+
+
+def test_the_same_cached_app_once_owned_shows_its_update(db, tmp_path) -> None:
+    """Owned apps are unchanged (NITS-API-2): the same fixture whose newest
+    prefill job did not end not_owned reads update_available=true on the list
+    and the detail. The control for the test above (the gate is ownership,
+    not the fixture)."""
+    from fastapi.testclient import TestClient
+
+    from vault_api import jobs
+
+    _cached_not_owned(db, tmp_path / "cache")
+    conn = get_connection(db)
+    try:
+        conn.execute(
+            "INSERT INTO jobs (appid, type, status, created_at, finished_at) "
+            "VALUES (?, 'prefill', 'done', ?, ?)",
+            (CONFIG_APP, "2026-11-01T11:00:00Z", "2026-11-01T11:05:00Z"),
+        )
+        conn.commit()
+        assert CONFIG_APP not in jobs.not_owned_appids(conn)
+    finally:
+        conn.close()
+    fake = FakeOracle(answers={CONFIG_APP: ANSWER_WITH_BETA})
+    _refresher(db, tmp_path, fake, [NOW]).tick()
+
+    with TestClient(create_app(_settings(tmp_path))) as client:
+        headers = {"X-Api-Key": TEST_API_KEY}
+        body = client.get(f"/v1/games/{CONFIG_APP}", headers=headers).json()
+        listed = [
+            g for g in client.get("/v1/games", headers=headers).json()
+            if g["appid"] == CONFIG_APP
+        ]
+    assert body["not_owned"] is False
+    assert body["update_available"] is True
+    assert listed[0]["not_owned"] is False
+    assert listed[0]["update_available"] is True
