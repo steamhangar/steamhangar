@@ -213,3 +213,12 @@ The stale comparison still covers every recorded depot, not only those in
 `depot_app_map`: the mapping drops depots a partial update did not touch, so
 filtering by it hid later updates (review B1). Orphan rows and mapping drift
 on partial updates are a tracked follow-up.
+
+## Note 2026-11-01 (WP TOOL-NAMES-1): the update check is unchanged, one name lookup is added
+
+Point 3 of the 2026-10-13 addendum ("cached games only") stays true for the
+update check. A separate, rate-limited lookup asks the oracle about tracked
+apps that no source names, to show a name (ADR-0022 addendum 2026-11-01).
+Its stored snapshot is an ordinary oracle answer, so such an app can also
+carry an update verdict from that one answer; it is not re-checked by the
+update check unless it is cached and not `not_owned`.

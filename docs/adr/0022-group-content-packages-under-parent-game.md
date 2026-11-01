@@ -411,3 +411,30 @@ prefill skip stays on the reviewed fixed list (open question 7).
    nesting: in a chain Y (dlc) -> X (game) -> Z, deleting Z with packages
    deletes Y and keeps X (Y resolves to the top-level parent Z; X is a
    game-typed child and stays an outside owner).
+
+## Addendum 2026-11-01 — oracle names for apps no source names (WP TOOL-NAMES-1, rc21.1)
+
+Prod rollout finding (2026-11-01, `docs/PROJECT_PLAN.md` rc21.1): Steam
+tool/config apps without a store page (a Tool with no depots, a Config app
+with one depot) showed "Unknown app": the store answers `success != 1`, they
+are not owned, and the oracle's `common.name` existed only for apps the update
+check sends (cached, not `not_owned`). The rc21.1 scope (operator decision
+2026-11-01) takes Q8's Weg A for **names only**, narrowly:
+
+- Only a tracked app with NO name from any source (blank `apps.name`, no
+  store name, no stored oracle name) is asked about, and only after the store
+  was tried; fixed-list tool apps and named apps never are.
+- Same client and rules as the update check (`oracle.refresh_app`: the
+  oracle switch, URL, validation, snapshot storage and the "this request
+  LEAVES the LAN" log line). At most 2 requests per cover-refresher tick
+  (60 s); per-app backoff 1 day doubling to 30 days after a failure, 30 days
+  after an answer without a name; any failure pauses all name lookups for an
+  hour (`api/vault_api/oracle_names.py`).
+- Grouping (type, parent, links) gains no new request of its own; it uses
+  whatever the stored answer carries, as before. The update check's selection
+  (`scheduler.update_check_appids`) is unchanged.
+
+Q8 named the addenda Weg A needs: the threat model (outbound flows, item 2),
+api/README.md and both `.env.example` privacy texts are updated in the same
+package; ADR-0006 (2026-10-13 addendum point 3) and ADR-0011 (the
+2026-10-13 note) carry a pointer note below their existing text.

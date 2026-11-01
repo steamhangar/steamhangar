@@ -58,6 +58,7 @@ api/
 │   ├── mapping.py        # upsert_mapping() — the depot->app write path
 │   ├── jobs.py           # job queue + apps.status transitions
 │   ├── tool_apps.py      # Steam tool apps never prefilled, e.g. 228980 (WP API-FIX-4)
+│   ├── oracle_names.py   # oracle names for apps no source names (WP TOOL-NAMES-1)
 │   ├── prefill.py        # SteamPrefill runner + depot attribution
 │   ├── worker.py         # the single background job worker thread
 │   ├── sizes.py          # depot disk walk, TTL size cache, summary aggregation
@@ -874,10 +875,10 @@ on a request path:
   `success != 1` (the HD2 packages and 228980 answer `15`) removes only
   the app's earlier store row.
 - `steamcmd_api`: the manifest oracle's STORED answers, only while the oracle
-  is on. No extra oracle request is made (decision Q8 B): the update check
-  still asks only about cached apps, and the classification uses what those
-  answers carry: the app's own `common.type` / `common.parent` /
-  `common.name`, plus `extended.listofdlc` and depot `dlcappid` of a cached
+  is on. No extra oracle request is made for grouping (decision Q8 B): the
+  update check still asks only about cached apps, and the classification uses
+  what those answers carry (the one exception is the name lookup below): the
+  app's own `common.type` / `common.parent` / `common.name`, plus `extended.listofdlc` and depot `dlcappid` of a cached
   parent (`linked`; the parent is named only when exactly one cached parent
   lists the app).
 
@@ -908,6 +909,23 @@ value is re-validated on read.
 control characters, bidi controls, LRM/RLM/ALM, zero-width characters, BOM
 and line/paragraph separators are dropped, the result is trimmed and capped
 at 256 characters, on write and again on read. The UIs render it as text.
+
+**Apps no source names (WP TOOL-NAMES-1, rc21.1).** A tracked app with a
+blank `apps.name`, no store name (the store answered `success != 1`) and no
+stored oracle name used to read "Unknown app" (prod: Steam tool and config
+apps without a store page that are neither owned nor cached). While the
+oracle is on, the cover refresher now asks the oracle about such apps itself
+(`vault_api/oracle_names.py`): the same `oracle.refresh_app` the update check
+uses, at most 2 apps per tick (60 s), only after the store was tried, never
+for a named app or a fixed-list tool app. The answer is stored as an ordinary
+oracle snapshot (so the app also gets the oracle's depots and an update
+verdict like any refreshed app), and the next fill shows its `common.name`
+in the same tick. An unanswered app backs off per app (1 day doubling to 30
+days, in memory: a restart may ask once more); an answer without a name is
+not asked again for 30 days (persisted via `oracle_app_state.checked_at`);
+any failed request pauses all name lookups for an hour. With the oracle off
+nothing is asked and the app stays unnamed. The update check's selection is
+unchanged.
 
 ### Grouped delete (`with_packages`, WP TOOL-APPS-2b, ADR-0022 §4)
 
@@ -6014,8 +6032,14 @@ project).
   scheduler's update check sends the app id of **every cached game** in the
   background, every `VAULT_SCHEDULE_INTERVAL_MINUTES`, with or without a
   schedule window (WP UPD-5); `POST /v1/updates/check` and
-  `POST /v1/oracle/{appid}/refresh` add on-demand requests. The job worker
-  never calls it. Turning the oracle off is the only way to stop it; the
+  `POST /v1/oracle/{appid}/refresh` add on-demand requests. Since rc21.1
+  (WP TOOL-NAMES-1) the cover refresher also asks about tracked apps that
+  **no source names** (blank `apps.name`, no store or oracle name; e.g. a
+  Steam tool or config app without a store page), at most 2 per minute, once,
+  then backed off: an unanswered app backs off from 1 day doubling to 30 days, an
+  answer without a name is not asked again for 30 days, and a failed request
+  pauses all such lookups for an hour (`vault_api/oracle_names.py`). The job
+  worker never calls it. Turning the oracle off is the only way to stop it; the
   schedule window does not (see "Always-on update check").
 - **Keeping it on your network:** point `VAULT_MANIFEST_ORACLE_URL` at your
   own mirror of the same API. Redirects are never followed, so the request
