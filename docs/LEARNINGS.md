@@ -1436,3 +1436,13 @@ These are not style preferences; each entry cost a review round to learn.
 - **A Kotlin state that gains a defaulted field keeps old equality asserts
   compiling while they silently assert the default**; once a status
   becomes known, tests that used it as the "unknown" example must change.
+- **A clean textual merge can still turn main red**: a parallel package
+  added a "prefill runner" literal that RUNNER-NAME-1's source-scan test
+  forbids. Run the full suite on the merged tree (or `git merge-tree` +
+  tests) before merging packages that touched the same files.
+- **Check which release a prod run used before blaming current code**
+  (rollout Antrag dates against tags): MAP-LOSS-1's removals came from
+  rc20.2, before GROUP-VERIFIED-1.
+- **`diag db` takes plain SELECT only (no WITH) and cuts long cells**: read
+  a `log_excerpt` with `substr(log_excerpt, i, 180)` and
+  `replace(..., char(10), ' | ')`.

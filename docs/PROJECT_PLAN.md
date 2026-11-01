@@ -4185,7 +4185,7 @@ below carry their own later dates, item 12 is the current one).
         Scope addition (operator 2026-11-01): an ETA on the running job card
         (remaining bytes / smoothed download speed, MISS bytes only, hidden
         while unstable, for verify runs or above 24 h; "about N min left").
-      - [ ] **RUNNER-NAME-1** (web + android) the "Prefill runner" row and
+      - [x] **RUNNER-NAME-1** (47973c4 + goldens 0c1d6c5/91b9610, merge fix 95587ff; PRODUCT_NAME constant per platform, ProductNameWebTwinTest ties web, Kotlin and app_name) (web + android) the "Prefill runner" row and
         captions read the product name from one constant (operator decision
         2026-11-01: today "SteamHangar", "GameHangar" with D18), so it is
         clear who loads.
@@ -4232,6 +4232,10 @@ below carry their own later dates, item 12 is the current one).
         for up to one sweep; `etaSmoother` keeps a rate across leaving and
         re-entering Downloads (clear it on mount); the preview total
         includes owned DLC and language depots (older D19 behaviour).
+      - [ ] nit (RUNNER-NAME-1 review): mini line "SteamHangar 25.6 GB of
+        it" could read "By SteamHangar: ..."; KDoc line widths in
+        ClientsPage.kt / DownloadsHero.kt; web/tests/now-loading.test.js:47
+        uses 192.168.1.50 (SAMPLE-IP-1).
       - [ ] **ANDROID-RC21-1-TWINS** (android; follow-ups of rc21.1 web
         packages) STORAGE-BALANCE-1 expert card from `storage_balance`
         (hidden when absent); JOB-SIZE-1 job card "of ~X (expected size)" and
