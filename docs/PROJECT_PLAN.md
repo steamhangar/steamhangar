@@ -497,7 +497,7 @@ their open boxes (items 2, 7 and 11) are in section 12. Item 13 stays here.
         decided Verifying speed line "Verifying files, no download speed"
         (VERIFY_SPEED_TEXT, DOWNLOADS-1, operator 2026-10-16) was never ported
         to Android; port it with a twin pin.
-      - [ ] **NITS-WEB-1** (web) from NITS-AUDIT-1 and the remaining nits:
+      - [x] **NITS-WEB-1** (web) from NITS-AUDIT-1 and the remaining nits:
         client-side request timeout in `api.js`, group-sheet "Update now"
         test, origin check in `isVaultReturnTo`, aria-live on queue move,
         CARD-CORNERS-1 candidate fix. Done in NITS-WEB-1: request timeout
@@ -506,10 +506,10 @@ their open boxes (items 2, 7 and 11) are in section 12. Item 13 stays here.
         queue move (`views/downloads.js`, `downloads-queue-reorder.test.js`),
         CARD-CORNERS-1 candidate CSS. Not web: `isVaultReturnTo` lives only in
         the Android app (`SteamOpenIdLoginUrl.kt`), moved to NITS-APP-1.
-      - [ ] **NITS-APP-1** (android) dead `packagesAriaText`, trivial last
+      - [x] **NITS-APP-1** (android) dead `packagesAriaText`, trivial last
         assertion in `DownloadsStatsLiveTest`, D19WiringTest pin, open
         Android review nits of rc20-rc21.1.
-      - [ ] **NITS-API-1** (api + agent) MAP-DRIFT-1 fail-safe tests,
+      - [x] **NITS-API-1** (api + agent) MAP-DRIFT-1 fail-safe tests,
         claim-vs-move race test, regrow-without-idle-gap test, open api
         review nits of rc20-rc21.1.
       - [x] **ADD-DEVICE-QR-1** (web; operator report 2026-11-01, wave 2)
@@ -547,7 +547,7 @@ their open boxes (items 2, 7 and 11) are in section 12. Item 13 stays here.
         give `LEARNINGS.md` an index by area; `coder.md`/`reviewer.md`
         read the core plus the area section only. Docs-only, one short
         review.
-      - [ ] **DEV-FLOW-1** (process, user decision 2026-11-01) every rc22
+      - [x] **DEV-FLOW-1** (process, user decision 2026-11-01) every rc22
         package runs its coder -> reviewer -> fix loop through the Workflow
         tool (max 3 agents at a time); a private dashboard with a
         database (packages, CI, open decisions, Antraege, agents) replaces
@@ -556,6 +556,11 @@ their open boxes (items 2, 7 and 11) are in section 12. Item 13 stays here.
         on the dev host (outside the repo) rendered to one HTML page that
         is sent to the operator; agent numbers are synced from the token
         meter at each package end (Weg 1).
+        (Done 2026-11-01: all rc22 packages ran coder -> reviewer -> fix
+        through one Workflow script, max 3 agents; the dashboard is a local
+        SQLite file mirrored into a private Claude doc; release packages got
+        a second review with the strongest model. Leftover parts of the
+        NITS packages stay as their own nit lines below.)
       - [ ] **DEV-MODS-1** (dev tooling, user decision 2026-11-01, Weg A)
         Claude Code mods under `tools/claude-mods/` (generic, no host
         paths; host paths come in as plugin options): token meter per
