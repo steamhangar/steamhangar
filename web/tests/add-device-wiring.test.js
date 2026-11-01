@@ -29,7 +29,10 @@
  *     header / scrolling body / footer with Close, tab icons, one tinted
  *     notice, numbered steps per tab, blurred stand-ins (code and pairing
  *     QR) until Show, Show + Copy side by side with an idle Copy before
- *     Show, two QR boxes on the Phone tab, the dashed OS pick box.
+ *     Show, two QR boxes on the Phone tab, the dashed OS pick box;
+ *   - WP ADD-DEVICE-QR-1: never both QR codes sharp: the download code's eye
+ *     blurs it (aria-pressed, label, aria-hidden, hint), Show of the pairing
+ *     code blurs it, unblurring it hides the pairing code; demo mode too.
  *
  * Harness: fake-dom.js, Map-backed localStorage, routing `fetch` fake; the
  * REAL store-singleton polls it and is stopped in `after()`. Assertions
@@ -1050,4 +1053,145 @@ test("demo mode hides the tabs with the options; a keyed open shows them again",
   }
   openAddDeviceSheet();
   assert.equal(sheet().querySelector('[role="tablist"]').hidden, false);
+});
+
+// ---- WP ADD-DEVICE-QR-1: only one sharp code at a time ---------------------
+
+const eye = () => q("app-download-qr-eye");
+const appQrBox = () => q("app-download-qr").parentNode;
+const downloadBlurred = () => appQrBox().classList.contains("ad-qrblur");
+const pairingShown = () => reveal("phone").querySelector('[data-role="pair-qr"]') !== null;
+/** The invariant of the package: never both codes sharp. */
+function assertOneSharp(label) {
+  assert.equal(pairingShown() && !downloadBlurred(), false, `both codes sharp: ${label}`);
+}
+function assertDownloadState(blurred) {
+  assert.equal(downloadBlurred(), blurred, "blur class");
+  assert.equal(eye().getAttribute("aria-pressed"), String(blurred));
+  assert.equal(eye().getAttribute("aria-label"), blurred ? "Show download code" : "Hide download code");
+  assert.equal(q("app-download-qr").getAttribute("aria-hidden"), blurred ? "true" : null);
+  assert.equal(q("app-download-qr-hint").hidden, !blurred, "visible hint only while blurred");
+}
+
+test("MUTATION TARGET (ADD-DEVICE-QR-1): the eye blurs and unblurs the download code; it stays in the DOM", async () => {
+  server.index = indexFor("0.1.0-rc10", { local: true });
+  openAddDeviceSheet();
+  await until(() => appLink() !== null, "download button");
+  const url = `${ORIGIN}/dist/steamhangar-app.apk`;
+  assert.equal(eye().tagName, "BUTTON");
+  assert.equal(eye().type, "button");
+  assert.notEqual(eye().querySelector('[data-icon="eye"]'), null, "the eye icon");
+  assert.equal(eye().parentNode === appQrBox().querySelector(".ad-qrside"), true, "beside the download code");
+  assertDownloadState(false);
+
+  click(eye());
+  assertDownloadState(true);
+  assert.equal(q("app-download-qr-hint").textContent, "Download code hidden");
+  assert.equal(q("app-download-qr").children[1].getAttribute("d"), qrPathFor(url), "not a secret: the code stays, only blurred");
+  assert.equal(reveal("phone").hidden, true, "the eye shows nothing else");
+
+  click(eye());
+  assertDownloadState(false);
+  assert.match(kitCss, /\.kit \.ad-qrbox\.ad-qrblur > \.pair-qr, \.kit \.ad-qrmask \.pair-qr\{ filter:blur\(9px\); opacity:\.55; \}/, "the stand-in's blur");
+  assert.match(kitCss, /\.kit\.add-device \.ad-qrhint\[hidden\]/, "the hint's [hidden] guard");
+});
+
+test("MUTATION TARGET (ADD-DEVICE-QR-1): showing the pairing code blurs the download code (toggle and cover)", async () => {
+  openAddDeviceSheet();
+  await until(() => appLink() !== null, "download button");
+  click(showBtn("phone"));
+  assert.equal(pairingShown(), true);
+  assertDownloadState(true);
+  click(showBtn("phone")); // Hide
+  assert.equal(pairingShown(), false);
+  assertOneSharp("after Hide");
+
+  closeSheetIfOpen();
+  openAddDeviceSheet();
+  await until(() => appLink() !== null, "download button again");
+  assertDownloadState(false);
+  click(q("show-phone-cover"));
+  assert.equal(pairingShown(), true);
+  assertDownloadState(true);
+});
+
+test("MUTATION TARGET (ADD-DEVICE-QR-1): unblurring the download code hides the pairing code (the Hide path)", async () => {
+  openAddDeviceSheet();
+  await until(() => appLink() !== null, "download button");
+  click(showBtn("phone"));
+  assert.equal(secretInDom(), true);
+  click(eye());
+  assertDownloadState(false);
+  assert.equal(reveal("phone").hidden, true);
+  assert.equal(reveal("phone").childNodes.length, 0);
+  assert.equal(secretInDom(), false, "the secret leaves the DOM as on Hide");
+  assert.equal(showBtn("phone").textContent, "Show pairing QR code");
+  assert.equal(showBtn("phone").getAttribute("aria-expanded"), "false");
+  assert.equal(q("pair-qr-mask").hidden, false, "the stand-in is back");
+  assert.equal(q("show-phone-cover").hidden, false, "and its cover");
+});
+
+test("MUTATION TARGET (ADD-DEVICE-QR-1): never both codes sharp, in any order of eye, Show, Hide, cover, tab change", async () => {
+  openAddDeviceSheet();
+  await until(() => appLink() !== null, "download button");
+  const steps = [
+    ["eye", () => click(eye())],
+    ["show/hide", () => click(showBtn("phone"))],
+    ["cover", () => { if (!q("show-phone-cover").hidden) click(q("show-phone-cover")); }],
+    ["tab away and back", () => { click(tabBtn("browser")); click(tabBtn("phone")); }],
+  ];
+  // Every sequence of three steps, from a fresh open each time.
+  for (const a of steps) for (const b of steps) for (const c of steps) {
+    closeSheetIfOpen();
+    openAddDeviceSheet();
+    await until(() => appLink() !== null, "download button");
+    for (const [name, run] of [a, b, c]) {
+      run();
+      assertOneSharp(`${a[0]} / ${b[0]} / ${c[0]} at ${name}`);
+    }
+  }
+});
+
+test("MUTATION TARGET (ADD-DEVICE-QR-1): a download code painted after Show arrives blurred; a new open starts sharp", async () => {
+  server.hold = true;
+  openAddDeviceSheet();
+  await until(() => server.held.length === 1, "index request");
+  click(showBtn("phone"));
+  assert.equal(pairingShown(), true);
+  server.held.shift()(indexFor("0.1.0-rc10", { local: true }));
+  await until(() => appLink() !== null, "download button");
+  assertDownloadState(true);
+  assertOneSharp("late paint");
+  server.hold = false;
+
+  closeSheetIfOpen();
+  openAddDeviceSheet();
+  await until(() => appLink() !== null, "download button after reopen");
+  assertDownloadState(false);
+  assert.equal(pairingShown(), false);
+});
+
+test("ADD-DEVICE-QR-1: demo mode — the eye works on the demo's download code", async () => {
+  storage.set("steamvault.demoMode", "1");
+  try {
+    openAddDeviceSheet();
+    await until(() => q("app-download-demo") !== null, "demo download note");
+    assert.notEqual(q("demo-app-download").querySelector('[data-role="app-download-qr-eye"]'), null);
+    assertDownloadState(false);
+    click(eye());
+    assertDownloadState(true);
+    click(eye());
+    assertDownloadState(false);
+  } finally {
+    closeSheetIfOpen();
+    storage.delete("steamvault.demoMode");
+  }
+});
+
+test("ADD-DEVICE-QR-1: a narrow touch screen leaves out the eye and the hint with the download code", () => {
+  const touch = kitCss.slice(kitCss.indexOf(".kit .ad-qreye{ position:relative;"));
+  assert.match(touch, /^\.kit \.ad-qreye\{ position:relative; width:var\(--ctl-h\); height:var\(--ctl-h\); \}/, "a 38px touch control");
+  const narrow = touch.slice(touch.indexOf("@container addev (max-width:420px){"));
+  assert.match(narrow, /^@container addev \(max-width:420px\)\{[^]*\.kit \.pair-download \.ad-qreye, \.kit \.pair-download \.ad-qrhint\{ display:none; \}/);
+  assert.match(kitCss, /\.kit \.pair-download > \.ad-desc, \.kit \.pair-download \.ad-qrbox > \.pair-qr\{ display:none; \}/, "the download code itself is out there");
 });

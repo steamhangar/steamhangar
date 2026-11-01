@@ -356,7 +356,25 @@
 .kit .ad-qrbox{ display:grid; grid-template-columns:164px minmax(0, 1fr); gap:var(--sp-3) var(--sp-4); align-items:center; }
 .kit .ad-qrbox .pair-qr{ grid-column:1; grid-row:1; display:block; width:164px; height:164px; border-radius:var(--r-m); }
 .kit .ad-qrmask{ grid-column:1; grid-row:1; display:block; width:164px; height:164px; }
-.kit .ad-qrmask .pair-qr{ filter:blur(9px); opacity:.55; }
+.kit .ad-qrbox.ad-qrblur > .pair-qr, .kit .ad-qrmask .pair-qr{ filter:blur(9px); opacity:.55; }
+/* One sharp code at a time (WP ADD-DEVICE-QR-1): the download code's eye
+   toggle heads its button column; while blurred (the stand-in's blur
+   above) a short hint sits on the code. */
+.kit .ad-qrhint{
+  grid-column:1; grid-row:1; place-self:center; z-index:1; margin:0; padding:6px 12px; max-width:150px;
+  font:500 var(--fs-2)/1.25 var(--ui); color:var(--text); text-align:center; pointer-events:none;
+  border-radius:999px; background:color-mix(in srgb, var(--bg) 78%, transparent); border:1px solid var(--line);
+}
+.kit .ad-qreye{
+  display:inline-grid; place-items:center; width:30px; height:30px; padding:0; flex:none;
+  border:1px solid var(--line); border-radius:50%; background:none; color:var(--dim); cursor:pointer;
+}
+.kit .ad-qreye svg{ width:16px; height:16px; }
+.kit .ad-qreye[aria-pressed="true"]{ color:var(--accent); border-color:var(--accent); }
+.kit .ad-qreye:focus-visible{ outline:2px solid var(--accent); outline-offset:2px; }
+@media (hover:hover) and (pointer:fine){
+  .kit .ad-qreye:hover{ color:var(--accent); border-color:var(--accent); }
+}
 .kit .ad-qrside{ grid-column:2; grid-row:1; display:flex; flex-direction:column; align-items:flex-start; gap:var(--sp-2); min-width:0; }
 .kit .ad-qrbox .pair-reveal{ display:contents; }
 .kit .ad-qrbox .pair-reveal > :not(svg){ grid-column:1 / -1; }
@@ -374,7 +392,7 @@
 .kit.add-device .pair-download[hidden], .kit.add-device .code[hidden], .kit.add-device .ad-acts[hidden],
 .kit.add-device .ad-qrbox[hidden], .kit.add-device .ad-qrbox .pair-qr[hidden], .kit.add-device .ad-qrside[hidden],
 .kit.add-device .ad-qrbox .pair-reveal[hidden], .kit.add-device .ad-demo[hidden], .kit.add-device .ad-slot[hidden],
-.kit.add-device .ad-qrmask[hidden]{ display:none; }
+.kit.add-device .ad-qrmask[hidden], .kit.add-device .ad-qrhint[hidden]{ display:none; }
 
 /* ============================================================
    Downloads, width-aware (WP DOWNLOADS-2)
@@ -1203,6 +1221,13 @@
   .kit .field .lh{ min-height:var(--hit); }
   .kit .lib-chips{ padding-block:3px; margin-block:-3px; }
   .kit .pair-open{ display:inline-flex; align-items:center; min-height:var(--ctl-h); }
+  /* The download code's eye (ADD-DEVICE-QR-1): 38px, a 44px extender. */
+  .kit .ad-qreye{ position:relative; width:var(--ctl-h); height:var(--ctl-h); }
+  .kit .ad-qreye::after{
+    content:""; position:absolute;
+    top:calc(50% - var(--hit) / 2); bottom:calc(50% - var(--hit) / 2);
+    left:calc(50% - var(--hit) / 2); right:calc(50% - var(--hit) / 2);
+  }
   /* The detail sheet's tabs sit in a scroll container: 44px tall
      themselves instead of an extender it would clip. */
   .kit.game-detail .tab{ min-height:var(--hit); }
@@ -1263,6 +1288,8 @@
     .kit .ad-pairbox .ad-qrside > .btn[aria-expanded="false"]{ display:none; }
     .kit .pair-download > .ad-desc, .kit .pair-download .ad-qrbox > .pair-qr{ display:none; }
     .kit .pair-download .ad-qrside{ grid-row:1; }
+    /* ...and with it its eye and hint (ADD-DEVICE-QR-1). */
+    .kit .pair-download .ad-qreye, .kit .pair-download .ad-qrhint{ display:none; }
   }
 }
 /* The safe area under the Add-a-device footer (0 on a desktop). */
