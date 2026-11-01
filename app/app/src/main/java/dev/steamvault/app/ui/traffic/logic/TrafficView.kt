@@ -433,6 +433,13 @@ const val JOB_SPEED_EXPECTED_NOTE =
 fun jobSpeedNote(entry: JobThroughputOut?): String =
     if (entry?.expected == true) JOB_SPEED_EXPECTED_NOTE else JOB_SPEED_NOTE
 
+/**
+ * The speed line of a Verifying job card (web `VERIFY_SPEED_TEXT`, WP
+ * DOWNLOADS-1, decided by the user 2026-10-16): a Verify run compares files
+ * and downloads nothing, so "not measured" would read as a fault.
+ */
+const val VERIFY_SPEED_TEXT = "Verifying files, no download speed"
+
 /** WP JOB-SIZE-1: a first download's size is the oracle's expectation. */
 const val EXPECTED_SIZE_NOTE = " (expected size)"
 
@@ -541,8 +548,10 @@ fun formatEta(seconds: Double?): String? {
  * of ~<expected download> loaded so far (expected size)", and with a known
  * remainder the line ends in "· about N min left" ([jobEtaSeconds],
  * [formatEta]; [etaRate] is the smoothed speed, left out = the entry's own).
- * [verifying] only hides the ETA here; the web's Verifying line
- * (`VERIFY_SPEED_TEXT`, WP DOWNLOADS-1) is not ported to Android.
+ * [verifying] hides the ETA; a Verifying card without a measured speed
+ * (no entry, feed not `ok`, or `bytes_per_second` null) says
+ * [VERIFY_SPEED_TEXT] instead (web twin, WP DOWNLOADS-1 /
+ * ANDROID-VERIFY-SPEED-1); a speed the server did measure still wins.
  */
 fun jobSpeedText(
     entry: JobThroughputOut?,
@@ -551,6 +560,10 @@ fun jobSpeedText(
     nowMs: Long = System.currentTimeMillis(),
     etaRate: Double? = entry?.eta_bytes_per_second,
 ): String? {
+    if (verifying) {
+        val measured = entry != null && state == FeedState.OK && entry.bytes_per_second != null
+        if (!measured) return VERIFY_SPEED_TEXT
+    }
     if (entry == null || state != FeedState.OK) return null
     val bps = entry.bytes_per_second
         ?: return if (entry.exclusive_depots == 0) {

@@ -73,6 +73,31 @@ class JobSizeWebTwinTest {
         assertEquals(0.3, ETA_SMOOTHING, 0.0)
     }
 
+    /** WP ANDROID-VERIFY-SPEED-1: the Verifying line (web DOWNLOADS-1) is the web's. */
+    @Test
+    fun `the Verifying speed line`() {
+        assertFragments(
+            "lib/traffic-view.js",
+            listOf(
+                "export const VERIFY_SPEED_TEXT = \"$VERIFY_SPEED_TEXT\";",
+                // The condition: Verifying and no measured speed; a measured one wins.
+                "if (verifying) {",
+                "const measured = entry && state === \"ok\" && entry.bytes_per_second !== null && entry.bytes_per_second !== undefined;",
+                "if (!measured) return VERIFY_SPEED_TEXT;",
+            ),
+        )
+        // "with or without statistics": a card the answer does not cover gets the line too.
+        assertFragments(
+            "views/downloads.js",
+            listOf(
+                "const fresh = t && t.range === traffic.range;",
+                "const entry = fresh ? entries.get(Number(card.dataset.jid)) : undefined;",
+                "const text = jobSpeedText(entry, fresh ? state : \"disabled\", {",
+            ),
+        )
+        assertEquals("Verifying files, no download speed", VERIFY_SPEED_TEXT)
+    }
+
     @Test
     fun `the Downloads view feeds the smoothed rate and the Verifying flag`() {
         assertFragments(
