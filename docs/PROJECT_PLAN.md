@@ -660,6 +660,15 @@ their open boxes (items 2, 7 and 11) are in section 12. Item 13 stays here.
         start; `LiveTier.active_clients()` stays address-based (tests only);
         a mid-file start without a complete line uses the read moment as
         `_data_from` (one bucket can read slightly high).
+      - [ ] VERIFY-FAST-1 dev.sh part (Antrag A-20261101-06: `dev.sh verify`
+        defaults to lean, `verify full` runs everything) and the first lean
+        measurement incl. the live check of the 6d stand-in chunk. Full run
+        on the worktree 2026-11-01: 627 PASS / 0 FAIL, sections 1-11 287 s
+        (s1 1, s2 10, s3 3, s4 40, s5 31, s6 59, s7 8, s8 12, s9 26, s10 76,
+        s11 18, cleanup 3; image builds not timed).
+      - [ ] nit (VERIFY-FAST-1 review): steps of sections 1-3 and 7-11 are
+        selectable only as whole sections; non-preset subsets are for
+        debugging only (hidden on-disk state between steps).
       - [ ] remaining nits: MAP-DRIFT-1 fail-safe tests, claim-vs-move race
         test, aria-live on queue move (fixed in NITS-WEB-1:
         `downloads-queue-reorder.test.js`), D19WiringTest pin,

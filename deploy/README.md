@@ -53,7 +53,8 @@ deploy/
 ├── examples/
 │   └── truenas-scale-dockge.md   # NAS-specific layout (dedicated ZFS cache dataset, etc.)
 ├── tests/
-│   └── verify-stack.sh     # container verification suite (see "Verifying")
+│   ├── verify-stack.sh     # container verification suite (see "Verifying")
+│   └── verify-sections.sh  # its VERIFY_SECTIONS selection and [time] lines
 └── VERIFICATION-*.md       # recorded evidence from a real run
 ```
 
@@ -1960,6 +1961,49 @@ from that section to your own post-deploy checklist — a DNS lookup answers
 the wrong question here, since the mechanism that actually matters in this
 layout is which address the heartbeat reaches, not what `lancache.
 steamcontent.com` resolves to.
+
+### Running a subset: `VERIFY_SECTIONS` (WP VERIFY-FAST-1)
+
+By default the script runs every section. `VERIFY_SECTIONS` picks a subset,
+as a comma list of the ids the transcript prints:
+
+| Value | Runs |
+| --- | --- |
+| unset, empty or `full` | everything (the nightly CI job sets `full` explicitly; the gate before a release tag runs `full`, per the plan) |
+| `lean` | `1,3,8,5a-5d,6a-6e`: config drift, compose rendering, the fail-fast guards, one stack start with the vault-core basics (health, heartbeat, temp paths, Host allowlist) and the vault-api basics (health, auth, mapping, shared volume, database volume). No Steam CDN or other internet step |
+| `1` .. `11` | one whole section |
+| `5a`, `6i-core`, `4-settings`, `3.5-runner` ... | one step; step ids exist for sections 4, 5 and 6 |
+| `5a-5d`, `1-3` | a range in script order (steps within one section, or section numbers) |
+| `lean,5e` | presets and ids combine |
+
+```bash
+sudo VERIFY_SECTIONS=lean sh deploy/tests/verify-stack.sh
+VERIFY_PLAN=1 VERIFY_SECTIONS=lean sh deploy/tests/verify-stack.sh   # print the plan only, no Docker
+```
+
+- An unknown id, a backwards range or a range across step groups stops the
+  script before it creates anything (exit 2, message on stderr).
+- Every part that does not run prints one `skip <id>` line.
+- Dependencies are added, not refused: `5f` and `5g` add `5e` (the chunk it
+  fetches), `9` adds `3` (its bind directory and env files come from 3p).
+  The image builds of section 2 run whenever a selected section uses an
+  image (the image checks 2.sizes to 2.ver only when `2` is selected), and
+  the stack of section 4 starts once whenever a step of 4, 5, 6 or section
+  10 is selected. Cleanup always runs. Other step subsets are not checked for
+  hidden state between steps; use them for debugging, not as a gate.
+- `6d` normally sizes the chunk 5e fetched from the CDN. Without `5e` and
+  `5i` (as in `lean`) a local stand-in chunk is written into the volume by
+  uid 101 before 6a, so the shared-volume check still runs offline.
+- `lean` still builds the images: with a warm build cache that needs no
+  network; on a fresh host the base images are pulled.
+
+**Measuring lean against full.** Every timed part prints
+`[time] start <id> <UTC time>` and `[time] end <id> <UTC time> <N>s`; after
+Cleanup the transcript ends with one `[time] section <id> <N>s` line per part
+and `[time] total <N>s`. Compare two runs with
+`grep '^\[time\] \(section\|total\)' <transcript>`. Section 4's time is the
+stack start (plus its own steps when selected), so a lean run is dominated by
+the builds and that one start.
 
 ---
 

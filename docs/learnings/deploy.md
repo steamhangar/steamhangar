@@ -169,3 +169,10 @@ at the end, under a dated heading, one entry each with the WP that proved it.
 
 ## 2026-11-01 — rc21.1 (prod findings after the rc21 rollout)
 - **`zfs list` "G" is GiB**: server log lines compared with zfs use 2^30.
+
+### 2026-11-01 VERIFY-FAST-1
+- Wrapping the steps of a linear shell suite in selection guards exposes
+  hidden data dependencies: 6d relied on the real CDN chunk that 5e wrote,
+  and vault-api's 60 s size-cache TTL makes a stand-in seeded late (after
+  6c's first scan) invisible. Before making steps selectable, map per step
+  the variables, functions and shared on-disk state it reads and writes.
