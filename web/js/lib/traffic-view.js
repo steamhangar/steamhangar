@@ -609,22 +609,29 @@ export function smoothEtaRate(previous, sample, alpha = ETA_SMOOTHING) {
  * Per-job smoothed ETA speeds across throughput polls (WP JOB-SIZE-1). The
  * live runner speed is a ~15-20 s window polled every few seconds; the EMA
  * keeps the ETA from jumping on every poll. `observe` advances each job once
- * per new answer object (a repaint with the same answer does not count as a
- * sample) and forgets jobs the answer no longer lists.
+ * per new `jobs` list and forgets jobs the list no longer has. WP
+ * WEB-ETA-EMA-1: keyed on the identity of `throughput.jobs`, not of the
+ * answer object (Android twin: `throughput.jobs === last`). The live view
+ * re-merges its cached 30 s summary every 3 s (`mergeLive` makes a new
+ * object around the same `jobs` array); a repaint or a re-merge of the same
+ * list is no sample. `clear` forgets everything (the view mounts).
  */
 export class EtaSmoother {
   constructor(alpha = ETA_SMOOTHING) {
     this.alpha = alpha;
     this.rates = new Map();
+    /** The `jobs` list of the last step (identity), `null` before the first. */
     this.last = null;
   }
 
   /** @param {{jobs?: Array<object>} | null | undefined} throughput */
   observe(throughput) {
-    if (!throughput || throughput === this.last) return;
-    this.last = throughput;
+    if (!throughput) return;
+    const jobs = throughput.jobs || [];
+    if (jobs === this.last) return;
+    this.last = jobs;
     const next = new Map();
-    for (const job of throughput.jobs || []) {
+    for (const job of jobs) {
       const rate = smoothEtaRate(this.rates.get(job.job_id), job.eta_bytes_per_second, this.alpha);
       if (rate !== null) next.set(job.job_id, rate);
     }
@@ -634,6 +641,12 @@ export class EtaSmoother {
   /** @param {number} jobId @returns {number | null} */
   rate(jobId) {
     return this.rates.has(jobId) ? this.rates.get(jobId) : null;
+  }
+
+  /** Forget every rate (view mount; Android `EtaSmoother.clear`). */
+  clear() {
+    this.rates = new Map();
+    this.last = null;
   }
 }
 

@@ -1970,7 +1970,9 @@ function paintStats() {
   });
 }
 
-/** WP JOB-SIZE-1: smoothed ETA speeds across throughput polls. */
+/** WP JOB-SIZE-1: smoothed ETA speeds across throughput polls; WP
+ * WEB-ETA-EMA-1: cleared on every mount (`renderDownloads`), so no rate
+ * survives a visit. */
 const etaSmoother = new EtaSmoother();
 
 /** Patch every running job card's speed line (text only). */
@@ -1979,7 +1981,8 @@ function paintJobSpeeds() {
   const t = traffic.throughput;
   const state = feedState(t);
   const entries = new Map(((t && t.jobs) || []).map((j) => [j.job_id, j]));
-  // WP JOB-SIZE-1: one EMA step per new throughput answer, not per repaint.
+  // WP JOB-SIZE-1 + WEB-ETA-EMA-1: one EMA step per new jobs list, not per
+  // repaint and not per 3 s live re-merge of the cached 30 s summary.
   if (t && t.range === traffic.range) etaSmoother.observe(t);
   for (const card of els.activeBody.querySelectorAll(".job")) {
     const line = card.querySelector('[data-role="job-speed"]');
@@ -2298,6 +2301,8 @@ export function renderDownloads() {
   sectionEl = section;
   // WP DOWNLOADS-3: every visit starts at the first History page.
   history.shown = HISTORY_FIRST_PAGE;
+  // WP WEB-ETA-EMA-1: every visit starts the ETA smoothing afresh.
+  etaSmoother.clear();
   fullRender();
   paintUpdates(); // WP UPD-6
   paintIncomplete(); // WP CACHE-COMPLETE-1c
