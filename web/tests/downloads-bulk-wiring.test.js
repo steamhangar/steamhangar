@@ -144,7 +144,11 @@ test("bar visibility: hidden when idle, Pause all for queued/running, Resume all
     assert.equal(q(section, "bulk-pause").hidden, false);
     assert.equal(q(section, "bulk-resume").hidden, true);
     assert.equal(q(section, "bulk-pause").textContent, "Pause all");
-    assert.equal(q(section, "bulk-pause").getAttribute("aria-label"), "Pause all 2 downloads", "the GC job is not counted");
+    assert.equal(
+      q(section, "bulk-pause").getAttribute("aria-label"),
+      "Pause all 3 downloads",
+      "WP PAUSE-ALL-GC-1: the queued GC job is counted, it is paused too",
+    );
     assert.equal(section.querySelector(".dl-bulk-note").textContent, "Pausing does not stop the scheduler: its next sweep can still queue new downloads.");
     assert.equal(bar.getAttribute("role"), "group");
 
@@ -227,6 +231,60 @@ test("409/404 count as skipped, a 5xx as a failure with its reason (warn toast)"
     await settle();
     assert.equal(toastText(), "Paused 1 of 2 — 1 could not be paused: vault-api is restarting");
     assert.equal(toastWarn(), true);
+  } finally {
+    releaseGates();
+  }
+});
+
+test("WP PAUSE-ALL-GC-1: Pause all holds queued GC jobs, leaves a running GC job alone, and says both", async () => {
+  reset();
+  try {
+    await serve([
+      job(1, "running"),
+      job(2, "queued", { type: "gc", gc_execute: true }),
+      job(3, "queued"),
+      job(4, "running", { type: "gc", gc_execute: true }),
+    ]);
+    const section = renderDownloads();
+    click(q(section, "bulk-pause"));
+    assert.equal(dialogRoot().querySelector("h3").textContent, "Pause 3 downloads?");
+    const note = q(dialogRoot(), "bulk-pause-gc-note");
+    assert.equal(note.hidden, false);
+    assert.equal(
+      note.textContent,
+      "This includes 1 queued garbage-collection run: it is held too and deletes nothing until you resume it. " +
+        "The garbage-collection run that already started finishes: a running one cannot be paused (cancel it instead).",
+    );
+    calls.length = 0;
+    click(q(dialogRoot(), "bulk-pause-yes"));
+    await settle();
+    assert.deepEqual(controlCalls(), ["POST /v1/jobs/2/pause", "POST /v1/jobs/3/pause", "POST /v1/jobs/1/pause"]);
+    assert.equal(toastText(), "Paused 3 downloads (incl. 1 garbage-collection run)");
+
+    // Without any GC job the note is hidden again on the next opening.
+    reset();
+    await serve([job(5, "running")]);
+    click(q(section, "bulk-pause"));
+    assert.equal(q(dialogRoot(), "bulk-pause-gc-note").hidden, true);
+    click(q(dialogRoot(), "bulk-pause-no"));
+    await settle();
+  } finally {
+    releaseGates();
+  }
+});
+
+test("WP PAUSE-ALL-GC-1: a paused GC job folds into Active with honest text, and Resume all resumes it", async () => {
+  reset();
+  try {
+    await serve([job(7, "paused"), job(8, "paused", { type: "gc", gc_execute: true })]);
+    const section = renderDownloads();
+    const text = section.textContent;
+    assert.ok(text.includes("Garbage collection paused"), "GC word, not the download word");
+    assert.ok(text.includes("Paused before it started — nothing was deleted."), "GC hold note");
+    click(q(section, "bulk-resume"));
+    await settle();
+    assert.deepEqual(controlCalls(), ["POST /v1/jobs/7/resume", "POST /v1/jobs/8/resume"]);
+    assert.equal(toastText(), "Resumed 2 downloads (incl. 1 garbage-collection run)");
   } finally {
     releaseGates();
   }

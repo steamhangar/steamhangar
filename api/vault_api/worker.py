@@ -1114,11 +1114,19 @@ class PrefillWorker:
             )
             return
 
+        # WP PAUSE-ALL-GC-1: the dedupe can land on a PAUSED GC job ("Pause
+        # all" parks queued GC jobs). "already queued" would suggest it runs
+        # next; it runs only after a resume, so say that.
+        if created:
+            what = f"GC job {gc_job['id']} was queued"
+        elif str(gc_job["status"]) == jobs.STATUS_PAUSED:
+            what = f"GC job {gc_job['id']} is paused (resume it to run)"
+        else:
+            what = f"GC job {gc_job['id']} was already queued"
         log_parts.append(
             f"[vault-api] Auto-GC (VAULT_AUTO_GC={settings.auto_gc}): this run "
-            f"updated {summary.updated} app(s), so GC job {gc_job['id']} was "
-            + ("queued" if created else "already queued")
-            + f" for app {appid} in {settings.auto_gc} mode."
+            f"updated {summary.updated} app(s), so {what}"
+            f" for app {appid} in {settings.auto_gc} mode."
         )
         logger.info(
             "Auto-GC queued GC job %s for appid %s in %s mode after prefill "

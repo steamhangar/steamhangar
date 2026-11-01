@@ -629,3 +629,34 @@ Scope of the exception, all in WP API-FIX-5:
 
 Every other frozen-path change still needs its own user decision and note
 here.
+
+## Addendum 2026-11-01 — freeze exception: pause a queued GC job (WP PAUSE-ALL-GC-1)
+
+Operator decision 2026-11-01 (rc21.1 scope, `docs/PROJECT_PLAN.md`):
+"Pause all" must also hold queued GC jobs. Prod evidence the same day: with
+`VAULT_AUTO_GC=execute`, GC jobs 256-258 ran right after "Pause all",
+because `POST /v1/jobs/{id}/pause` answered `409` for every GC job.
+
+- api/: `jobs.request_pause` parks a **queued GC** job at `paused` exactly
+  like a queued prefill (WEB-FEAT-5 addendum above): same `BEGIN IMMEDIATE`
+  lock, `outcome: "immediate"`, new constant `PAUSED_QUEUED_GC_MESSAGE`.
+  `gc_execute` is kept, so resume runs the job in its queued mode. A
+  **running** GC job keeps its `409` (detail `RUNNING_GC_PAUSE_REFUSED`,
+  cancel is the tool). `resume_job` words its detail per type; `cancel_job`
+  on a paused GC job stores `CANCELLED_PAUSED_GC_MESSAGE`;
+  `DELETE /v1/cache/{appid}` explains a paused GC job as pending work.
+  `worker._maybe_queue_auto_gc` logs "GC job N is paused (resume it to run)"
+  when auto-GC dedupes into a paused GC job (log text only). No new
+  route, no response-model change, no schema change; `claim_next_job`,
+  `recover_stale_jobs` and `ACTIVE_STATUSES` are unchanged.
+- Consequences, documented in api/README.md: a paused GC job is active, so
+  it also makes the miss-triggered prefill sweep skip its app (guard 2,
+  `skipped_active`); and its mode is fixed at queue time, so a paused
+  execute job resumed after switching `VAULT_AUTO_GC` still executes.
+- Not frozen, listed for completeness: web Pause all / Resume all and the
+  GC job wording (incl. "GC dry run (nothing deleted)" for a finished
+  dry-run job), demo data, tests, api/README.md "Job control". The Android
+  twin is a follow-up (it keeps pausing prefill jobs only).
+
+Every other frozen-path change still needs its own user decision and note
+here.

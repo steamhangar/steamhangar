@@ -506,7 +506,19 @@ def delete_cached_app(
         # blocks a deletion is a different one worth spelling out — there is no
         # write in flight, but the depots hold the partial download the pause
         # exists to preserve, and resume would have to fetch it all again.
-        if str(active_job["status"]) == jobs.STATUS_PAUSED:
+        if (
+            str(active_job["status"]) == jobs.STATUS_PAUSED
+            and str(active_job["type"]) == jobs.JOB_TYPE_GC
+        ):
+            # WP PAUSE-ALL-GC-1: a GC job is only ever paused while queued —
+            # nothing is on disk for it, but it is still pending work.
+            why = (
+                "A paused GC job is still pending for this app (it was paused "
+                "before it started and deleted nothing). Resume it and let it "
+                "finish, or cancel it with "
+                f"DELETE /v1/jobs/{active_job['id']}, then delete."
+            )
+        elif str(active_job["status"]) == jobs.STATUS_PAUSED:
             why = (
                 "A paused prefill has partially downloaded content in these "
                 "depots and resuming it continues from what is on disk, so "

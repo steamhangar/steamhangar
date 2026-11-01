@@ -3,7 +3,9 @@
  * `lib/bulk-jobs.js` run the view performs, against `demoRequest` instead
  * of a server. Demo mode has no worker draining a queue (an enqueued demo
  * job is "running" at once), so every pausable demo job is a running one;
- * a GC job stays unpausable (409 -> skipped), exactly like the real API.
+ * a RUNNING GC job stays unpausable (409 -> skipped), exactly like the
+ * real API (a queued one can be paused since WP PAUSE-ALL-GC-1, but a demo
+ * GC job is running at once).
  *
  * Run: node --test "web/tests/*.test.js"   (see web/tests/README.md)
  */
@@ -45,7 +47,7 @@ test("demo: Pause all pauses every running prefill job, Resume all brings them b
   assert.equal(bulkResumeTargets(await jobs()).length, 0);
 });
 
-test("demo: a GC job answers 409 to pause, which a bulk run reports as skipped", async () => {
+test("demo: a running GC job answers 409 to pause, which a bulk run reports as skipped", async () => {
   // Any game with depots can queue a GC job in the demo.
   const games = await demoRequest("GET", "/v1/games");
   const withDepots = games.find((g) => (g.depot_count ?? g.depots?.length ?? 0) > 0) || games[0];

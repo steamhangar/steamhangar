@@ -164,20 +164,28 @@ const PREFILL_WORD = Object.freeze({
 const GC_WORD = Object.freeze({
   queued: "Garbage collection queued",
   running: "Collecting garbage",
-  paused: "Paused", // unreachable in practice (pause 409s on a GC job) — defensive only
+  // WP PAUSE-ALL-GC-1: reachable now — "Pause all" parks queued GC jobs.
+  paused: "Garbage collection paused",
   done: "Garbage collected",
   error: "Garbage collection failed",
   cancelled: "Garbage collection cancelled",
 });
+
+/** A finished DRY-RUN GC job (`gc_execute === false`) deleted nothing, so
+ * "Garbage collected" would claim the opposite (WP PAUSE-ALL-GC-1, prod
+ * 2026-11-01). Only an explicit `false` gets it: an execute job (`true`)
+ * and a row without the field (older server) keep "Garbage collected". */
+export const GC_DRY_RUN_DONE_WORD = "GC dry run (nothing deleted)";
 
 /**
  * The word a job's badge/history-row shows, single source of truth for
  * both (mockup's `LABEL` table split by job type). Falls back to the raw
  * status string for a status this table doesn't know, rather than
  * fabricating something plausible-looking.
- * @param {{type: string, status: string}} job
+ * @param {{type: string, status: string, gc_execute?: boolean | null}} job
  */
 export function jobStatusWord(job) {
+  if (job.type === "gc" && job.status === "done" && job.gc_execute === false) return GC_DRY_RUN_DONE_WORD;
   const table = job.type === "gc" ? GC_WORD : PREFILL_WORD;
   return table[job.status] || job.status;
 }

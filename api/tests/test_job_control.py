@@ -346,15 +346,18 @@ def test_cancelling_an_unknown_job_is_unknown(conn) -> None:
     assert jobs.cancel_job(conn, 12345).outcome == jobs.CONTROL_UNKNOWN
 
 
-def test_pause_is_refused_for_a_gc_job(conn) -> None:
+def test_pause_is_refused_for_a_running_gc_job(conn) -> None:
     job, _ = jobs.enqueue_gc(conn, 440, execute=False)
     jobs.claim_next_job(conn)
+    before = jobs.get_job(conn, int(job["id"]))
 
     result = jobs.request_pause(conn, int(job["id"]))
 
     assert result.outcome == jobs.CONTROL_CONFLICT
     assert "cannot be paused" in result.detail
+    assert "DELETE /v1/jobs/{id}" in result.detail, "cancel is the tool"
     assert jobs.read_stop_request(conn, int(job["id"])) is None
+    assert jobs.get_job(conn, int(job["id"])) == before, "a refused pause writes nothing"
 
 
 @pytest.mark.parametrize("state", ["paused", "finished", "cancelled"])
@@ -475,14 +478,120 @@ def test_cancelling_a_job_paused_while_queued_is_immediate_and_honest(conn) -> N
     assert "caught the job before it started" in result.detail
 
 
-def test_pausing_a_queued_gc_job_is_still_refused(conn) -> None:
+# --- WP PAUSE-ALL-GC-1: pausing a QUEUED GC job --------------------------
+
+
+@pytest.mark.parametrize("execute", [False, True])
+def test_pausing_a_queued_gc_job_parks_it_and_keeps_its_mode(
+    conn, execute: bool
+) -> None:
+    """Was a 409 before PAUSE-ALL-GC-1 — "Pause all" let auto-GC jobs run."""
+    job, _ = jobs.enqueue_gc(conn, 440, execute=execute)
+    job_id = int(job["id"])
+
+    result = jobs.request_pause(conn, job_id)
+
+    assert result.outcome == jobs.CONTROL_IMMEDIATE
+    assert result.detail == jobs.PAUSED_QUEUED_GC_MESSAGE
+    assert "nothing was deleted" in result.detail
+    row = jobs.get_job(conn, job_id)
+    assert row["status"] == jobs.STATUS_PAUSED
+    assert row["paused_at"] is not None
+    assert row["stop_request"] is None
+    assert row["started_at"] is None and row["finished_at"] is None
+    assert bool(row["gc_execute"]) is execute
+
+
+def test_the_worker_never_claims_a_gc_job_paused_while_queued(conn) -> None:
+    gc_job, _ = jobs.enqueue_gc(conn, 440, execute=True)
+    later, _ = jobs.enqueue_prefill(conn, 730)
+    jobs.request_pause(conn, int(gc_job["id"]))
+
+    claimed = jobs.claim_next_job(conn)
+
+    assert claimed is not None and claimed["id"] == later["id"]
+    assert jobs.claim_next_job(conn) is None, "the paused GC job stays parked"
+    assert jobs.get_job(conn, int(gc_job["id"]))["status"] == jobs.STATUS_PAUSED
+
+
+def test_pause_all_with_auto_gc_jobs_leaves_nothing_to_claim(conn) -> None:
+    """The prod 2026-11-01 shape: a running prefill plus the execute GC jobs
+    auto-GC queued after earlier prefills. Pause all = queued first (GC
+    included), running prefill last; the worker must then find nothing."""
+    running = jobs.enqueue_prefill(conn, 440)[0]
+    assert jobs.claim_next_job(conn)["id"] == running["id"]
+    gc_ids = [
+        int(jobs.enqueue_gc(conn, appid, execute=True)[0]["id"])
+        for appid in (730, 570, 620)
+    ]
+    queued_prefill = int(jobs.enqueue_prefill(conn, 400)[0]["id"])
+
+    for job_id in [*gc_ids, queued_prefill]:
+        assert jobs.request_pause(conn, job_id).outcome == jobs.CONTROL_IMMEDIATE
+    assert (
+        jobs.request_pause(conn, int(running["id"])).outcome == jobs.CONTROL_REQUESTED
+    )
+    jobs.park_paused(conn, int(running["id"]), "[stub] partial")
+
+    assert jobs.claim_next_job(conn) is None
+    statuses = [
+        jobs.get_job(conn, i)["status"]
+        for i in [int(running["id"]), *gc_ids, queued_prefill]
+    ]
+    assert statuses == ["paused"] * 5
+
+
+def test_a_resumed_gc_job_keeps_its_id_and_mode_and_is_claimed_first(conn) -> None:
+    gc_job, _ = jobs.enqueue_gc(conn, 440, execute=True)
+    jobs.request_pause(conn, int(gc_job["id"]))
+    later, _ = jobs.enqueue_prefill(conn, 730)
+
+    result = jobs.resume_job(conn, int(gc_job["id"]))
+
+    assert result.outcome == jobs.CONTROL_RESUMED
+    assert result.job["id"] == gc_job["id"]
+    assert "SteamPrefill" not in result.detail, "GC wording, not the prefill one"
+    assert "mode it was queued with" in result.detail
+    claimed = jobs.claim_next_job(conn)
+    assert claimed["id"] == gc_job["id"]
+    assert claimed["type"] == jobs.JOB_TYPE_GC
+    assert bool(claimed["gc_execute"]) is True
+    assert int(later["id"]) > int(gc_job["id"])
+
+
+def test_a_gc_job_paused_while_queued_deduplicates_gc_in_the_same_mode(conn) -> None:
+    """Auto-GC after a later prefill absorbs into the paused job instead of
+    stacking a second deleting run behind the operator's pause."""
+    job, _ = jobs.enqueue_gc(conn, 440, execute=True)
+    jobs.request_pause(conn, int(job["id"]))
+
+    again, created = jobs.enqueue_gc(conn, 440, execute=True)
+
+    assert created is False and again["id"] == job["id"]
+
+
+def test_cancelling_a_gc_job_paused_while_queued_says_nothing_was_deleted(conn) -> None:
+    job, _ = jobs.enqueue_gc(conn, 440, execute=True)
+    jobs.request_pause(conn, int(job["id"]))
+
+    result = cancel_now(conn, int(job["id"]))
+
+    assert result.job["status"] == jobs.STATUS_CANCELLED
+    assert result.detail == jobs.CANCELLED_PAUSED_GC_MESSAGE
+    assert "SteamPrefill" not in result.detail
+    assert jobs.get_job(conn, int(job["id"]))["log_excerpt"] == (
+        jobs.CANCELLED_PAUSED_GC_MESSAGE
+    )
+
+
+def test_a_paused_gc_job_cannot_be_paused_again(conn) -> None:
     job, _ = jobs.enqueue_gc(conn, 440, execute=False)
+    jobs.request_pause(conn, int(job["id"]))
 
     result = jobs.request_pause(conn, int(job["id"]))
 
     assert result.outcome == jobs.CONTROL_CONFLICT
-    assert "cannot be paused" in result.detail
-    assert jobs.get_job(conn, int(job["id"]))["status"] == jobs.STATUS_QUEUED
+    assert "already paused" in result.detail
 
 
 def test_pause_racing_the_workers_claim_resolves_cleanly(db_path: str) -> None:
@@ -666,6 +775,68 @@ def test_pausing_a_queued_job_over_http_is_immediate(client: TestClient) -> None
     second = client.post(f"/v1/jobs/{job_id}/pause", headers=AUTH)
     assert second.status_code == 409
     assert "already paused" in second.json()["detail"]
+
+
+def test_pausing_and_resuming_a_queued_gc_job_over_http(
+    client: TestClient, settings: Settings
+) -> None:
+    """WP PAUSE-ALL-GC-1 through the endpoints: queued GC 200 immediate,
+    resume 200 resumed, and a running GC job still 409."""
+    init_db(settings.db_path)
+    conn = get_connection(settings.db_path)
+    try:
+        job_id = int(jobs.enqueue_gc(conn, 440, execute=True)[0]["id"])
+    finally:
+        conn.close()
+
+    response = client.post(f"/v1/jobs/{job_id}/pause", headers=AUTH)
+    assert response.status_code == 200, response.text
+    assert response.json() == {
+        "job_id": job_id,
+        "status": "paused",
+        "outcome": "immediate",
+        "detail": jobs.PAUSED_QUEUED_GC_MESSAGE,
+    }
+    listed = next(
+        entry
+        for entry in client.get("/v1/jobs", headers=AUTH).json()
+        if entry["id"] == job_id
+    )
+    assert listed["status"] == "paused" and listed["gc_execute"] is True
+
+    resumed = client.post(f"/v1/jobs/{job_id}/resume", headers=AUTH)
+    assert resumed.status_code == 200, resumed.text
+    assert resumed.json()["status"] == "queued"
+    assert resumed.json()["outcome"] == "resumed"
+
+    conn = get_connection(settings.db_path)
+    try:
+        assert jobs.claim_next_job(conn)["id"] == job_id
+    finally:
+        conn.close()
+    refused = client.post(f"/v1/jobs/{job_id}/pause", headers=AUTH)
+    assert refused.status_code == 409
+    assert "running 'gc' job and cannot be paused" in refused.json()["detail"]
+    assert get_job(client, job_id)["status"] == "running"
+
+
+def test_delete_cache_is_409_while_a_gc_job_is_paused_with_its_own_reason(
+    client: TestClient, settings: Settings
+) -> None:
+    client.put("/v1/mapping/441", json={"appid": 440}, headers=AUTH)
+    conn = get_connection(settings.db_path)
+    try:
+        job_id = int(jobs.enqueue_gc(conn, 440, execute=True)[0]["id"])
+        jobs.request_pause(conn, job_id)
+    finally:
+        conn.close()
+
+    response = client.delete("/v1/cache/440", headers=AUTH)
+
+    assert response.status_code == 409
+    detail = response.json()["detail"]
+    assert "paused GC job" in detail
+    assert "throw that progress away" not in detail, "no partial-download claim"
 
 
 def test_resuming_a_job_that_is_not_paused_is_409_over_http(client: TestClient) -> None:
@@ -1407,6 +1578,58 @@ def test_auto_gc_deduplicates_against_an_operators_pending_gc_job(
     finally:
         conn.close()
     assert "already queued" in "\n".join(log_parts)
+
+
+def test_auto_gc_into_a_paused_gc_job_says_it_waits_for_a_resume(
+    tmp_path: Path, cache_root: Path
+) -> None:
+    """WP PAUSE-ALL-GC-1: "already queued" would suggest it runs next."""
+    from vault_api.worker import PrefillWorker
+    from vault_api.prefill_summary import PrefillSummary
+
+    settings = make_settings(tmp_path, cache_root, auto_gc="execute")
+    init_db(settings.db_path)
+    conn = get_connection(settings.db_path)
+    try:
+        existing, _ = jobs.enqueue_gc(conn, 440, execute=True)
+        jobs.request_pause(conn, int(existing["id"]))
+
+        log_parts: list[str] = []
+        PrefillWorker(settings)._maybe_queue_auto_gc(
+            conn,
+            job_id=1,
+            appid=440,
+            summary=PrefillSummary(
+                updated=1, up_to_date=0, total_bytes_text=None, parse_ok=True
+            ),
+            log_parts=log_parts,
+        )
+
+        rows = gc_jobs_for(conn, 440)
+        assert [r["id"] for r in rows] == [existing["id"]]
+        assert rows[0]["status"] == jobs.STATUS_PAUSED, "auto-GC does not resume it"
+    finally:
+        conn.close()
+    text = "\n".join(log_parts)
+    assert f"GC job {existing['id']} is paused (resume it to run)" in text
+    assert "already queued" not in text
+
+
+@pytest.mark.parametrize("paused_execute", [True, False])
+def test_a_paused_gc_job_never_dedupes_across_modes(
+    conn, paused_execute: bool
+) -> None:
+    """WP PAUSE-ALL-GC-1 (N6): the per-(app, mode) rule holds for a GC job
+    paused while queued, in both directions."""
+    paused, _ = jobs.enqueue_gc(conn, 440, execute=paused_execute)
+    jobs.request_pause(conn, int(paused["id"]))
+
+    other, created = jobs.enqueue_gc(conn, 440, execute=not paused_execute)
+
+    assert created is True
+    assert other["id"] != paused["id"]
+    assert other["status"] == jobs.STATUS_QUEUED
+    assert jobs.get_job(conn, int(paused["id"]))["status"] == jobs.STATUS_PAUSED
 
 
 def test_auto_gc_failure_never_flips_a_successful_prefill(

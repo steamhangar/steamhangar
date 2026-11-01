@@ -251,10 +251,12 @@ export function gameDisplayName(game) {
  * running/paused/verify; the real API has no `verify` status, WP
  * WEB-FEAT-6 derives that kind from a running job instead — a queued job
  * shows in the Downloads FIFO queue,
- * WP 4a.5, not on the Library card). GC jobs are excluded too: pause/resume
- * and the download pill are prefill-only concepts (api/README.md job
- * control table: pause on a GC job is `409`), so a GC job for this appid
- * must never drive its library card into a "running" download state. */
+ * WP 4a.5, not on the Library card). GC jobs are excluded too: the
+ * download pill and its pause/resume are prefill-only concepts (a running
+ * GC job answers `409` to pause; a queued one can be parked by "Pause all"
+ * since WP PAUSE-ALL-GC-1 and is resumed from the Downloads page), so a GC
+ * job for this appid must never drive its library card into a "running"
+ * or "paused" download state. */
 const LIVE_JOB_STATUSES = new Set(["running", "paused"]);
 
 /**

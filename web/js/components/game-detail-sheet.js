@@ -192,7 +192,7 @@ import { buildDepotPresentation, DEPOT_TAG } from "../lib/depot-presentation.js"
 import { findTrackedJob, detailJobActions, DETAIL_JOB_ACTION } from "../lib/detail-job.js";
 import { confirmedCurrentWording, CONFIRMED_CURRENT_WORDING } from "../lib/detail-wording.js";
 import { lastUpdateDownloadedText } from "../lib/decision-support.js";
-import { GC_STATE, GC_EVENT, idleGcState, reduceGcFlow } from "../lib/gc-flow.js";
+import { GC_STATE, GC_EVENT, GC_PAUSED_TEXT, idleGcState, reduceGcFlow } from "../lib/gc-flow.js";
 import { buildDetailStructuralKey } from "../lib/detail-render-plan.js";
 import { pushModal, popModal } from "../lib/modal-stack.js";
 import { appTitle, fillMissingNames, ownedNamesByAppid } from "../lib/owned-library.js";
@@ -2145,7 +2145,7 @@ function renderGcSection() {
     case GC_STATE.POLLING_DRY_RUN: {
       const p = document.createElement("p");
       p.className = "hint";
-      p.textContent = "Checking for orphaned chunks…";
+      p.textContent = gs.paused ? GC_PAUSED_TEXT : "Checking for orphaned chunks…";
       gcSectionEl.appendChild(p);
       break;
     }
@@ -2180,7 +2180,7 @@ function renderGcSection() {
     case GC_STATE.POLLING_EXECUTE: {
       const p = document.createElement("p");
       p.className = "hint";
-      p.textContent = "Deleting orphaned chunks…";
+      p.textContent = gs.paused ? GC_PAUSED_TEXT : "Deleting orphaned chunks…";
       gcSectionEl.appendChild(p);
       break;
     }
