@@ -245,6 +245,32 @@ def test_an_unknown_address_is_a_new_device_until_it_was_swept(setup) -> None:
     assert row["known"] is True
 
 
+def test_an_address_listed_only_under_the_runner_is_not_a_known_client(setup) -> None:
+    """NITS-API-1 (NOW-LOADING-1 review nit): ``addrs_listed`` reads the client
+    side only. NEW was the runner 10 days ago (its window ended 2 days ago);
+    its only hourly row lies inside that window, so the Clients page does not
+    list it and its client traffic now is a new device."""
+    _settings, client, _clock, conn, log = setup
+    marked = NOW - timedelta(days=10)
+    runner_identity._extend_period(conn, NEW, marked)  # noqa: SLF001
+    bucket = marked.replace(minute=0, second=0, microsecond=0)
+    conn.execute(
+        "INSERT INTO client_traffic (tier, bucket_at, client_addr, requests, bytes_served, last_seen) "
+        "VALUES ('1h', ?, ?, 1, 500, ?)",
+        (iso(bucket), NEW, iso(marked)),
+    )
+    conn.commit()
+    append_log(log, chunk(2, 800, addr=NEW))
+    (row,) = sources(client)
+    assert row["kind"] == "client" and row["key"] == f"addr:{NEW}"
+    assert row["known"] is False
+    # The same row outside any runner window: the Clients page lists it.
+    conn.execute("DELETE FROM runner_address_periods WHERE addr = ?", (NEW,))
+    conn.commit()
+    (row,) = sources(client)
+    assert row["known"] is True
+
+
 def test_a_named_address_is_known_before_its_first_sweep(setup) -> None:
     _settings, client, _clock, conn, log = setup
     client_names.set_name(conn, client_names.KEY_TYPE_IP, NEW, "Console")

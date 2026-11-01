@@ -87,3 +87,16 @@ def test_unmapped_counts_helper_ignores_mapped_and_empty_depots(
     record_only(conn, 10, 13)
     assert cache_completeness.unmapped_depot_counts(conn, {11: 5, 12: 5, 13: 0}) == {10: 1}
     assert cache_completeness.unmapped_depot_counts(conn, {}) == {}
+
+
+def test_unmapped_counts_helper_narrows_to_one_app(conn: sqlite3.Connection) -> None:
+    """NITS-API-1 (UNMAPPED-FLAG-1 review nit): the detail route asks for one
+    app only (``AND appid = ?``), the other apps' rows are not read."""
+    record_only(conn, 10, 12)
+    record_only(conn, 20, 22)
+    record_only(conn, 20, 23)
+    sizes = {12: 5, 22: 5, 23: 5}
+    assert cache_completeness.unmapped_depot_counts(conn, sizes) == {10: 1, 20: 2}
+    assert cache_completeness.unmapped_depot_counts(conn, sizes, appid=20) == {20: 2}
+    assert cache_completeness.unmapped_depot_counts(conn, sizes, appid=10) == {10: 1}
+    assert cache_completeness.unmapped_depot_counts(conn, sizes, appid=99) == {}

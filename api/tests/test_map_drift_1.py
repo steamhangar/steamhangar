@@ -10,6 +10,8 @@ Guarantees pinned here, by name:
 4. Idempotent: a second pass removes nothing.
 5. One summary line with found/removed/skipped counters at startup.
 6. An unjudgeable disk (no depot cache) keeps every row.
+7. Fail-safe per depot (NITS-API-1): an unreadable depot directory and an
+   unusable depot id (``DeletionGuardError``) each keep their row.
 """
 
 from __future__ import annotations
@@ -22,6 +24,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from tests.test_oracle import enabled_settings
+from vault_api import manifest_ingest
 from vault_api.db import get_connection, init_db
 from vault_api.depot_manifests import get_depot_manifest, upsert_depot_manifest
 from vault_api.main import create_app
@@ -139,6 +142,51 @@ def test_startup_cleans_and_logs_counters_once(
     conn = get_connection(settings.db_path)
     try:
         assert _present(conn, UNTOUCHED) and _present(conn, MAPPED)
+        assert not _present(conn, ORPHAN)
+    finally:
+        conn.close()
+
+
+def test_an_unreadable_depot_directory_keeps_its_row(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """NITS-API-1: any OSError but "not found" means "there may be bytes"."""
+    settings = _settings(tmp_path)
+    conn = _conn(settings)
+    try:
+        _row(conn, ORPHAN)
+        _row(conn, EMPTY_DIRS)
+        locked = Path(settings.cache_root) / "depot" / str(ORPHAN)
+        locked.mkdir()
+        (Path(settings.cache_root) / "depot" / str(EMPTY_DIRS)).mkdir()
+        real_scandir = manifest_ingest.os.scandir
+
+        def scandir(path):
+            if Path(path) == locked:
+                raise PermissionError(13, "Permission denied", str(path))
+            return real_scandir(path)
+
+        monkeypatch.setattr(manifest_ingest.os, "scandir", scandir)
+        result = remove_orphan_depot_manifests(conn, settings)
+
+        assert result == OrphanCleanupResult(found=2, removed=1, skipped=1)
+        assert _present(conn, ORPHAN), "an unreadable directory must never make a row deletable"
+        assert not _present(conn, EMPTY_DIRS)
+    finally:
+        conn.close()
+
+
+def test_an_unusable_depot_id_keeps_its_row(tmp_path: Path) -> None:
+    """NITS-API-1: ``depot_dir_path`` refuses id 0 (DeletionGuardError); the row stays."""
+    settings = _settings(tmp_path)
+    conn = _conn(settings)
+    try:
+        _row(conn, 0)
+        _row(conn, ORPHAN)
+        result = remove_orphan_depot_manifests(conn, settings)
+
+        assert result == OrphanCleanupResult(found=2, removed=1, skipped=1)
+        assert _present(conn, 0), "an unusable depot id is left for the operator"
         assert not _present(conn, ORPHAN)
     finally:
         conn.close()

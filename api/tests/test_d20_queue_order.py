@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
+import threading
 from pathlib import Path
 
 import pytest
@@ -205,6 +206,109 @@ def test_running_paused_finished_jobs_cannot_be_moved(conn) -> None:
         assert result.outcome == jobs.CONTROL_CONFLICT, job_id
     assert jobs.move_queued_job(conn, 9999, 0).outcome == jobs.CONTROL_UNKNOWN
     assert jobs.queue_positions(conn) == {other: 0}
+
+
+def test_a_move_that_loses_to_the_claim_conflicts_and_changes_nothing(conn, db_path) -> None:
+    """NITS-API-1: the deterministic loser path of the claim-vs-move race.
+
+    The operator's client read the queue (the job is next to run), the worker
+    claims it, then the move arrives: CONTROL_CONFLICT, the running job keeps
+    its row, and no other job's key is rewritten.
+    """
+    a, b, c_ = queue(conn, 1, 2, 3)
+    assert list(jobs.queue_positions(conn)) == [a, b, c_]  # what the client saw
+    worker = get_connection(db_path)
+    try:
+        assert int(jobs.claim_next_job(worker)["id"]) == a
+    finally:
+        worker.close()
+    result = jobs.move_queued_job(conn, a, 2)
+    assert result.outcome == jobs.CONTROL_CONFLICT
+    assert result.job["status"] == jobs.STATUS_RUNNING
+    assert keyed_rows(conn) == 0
+    assert claim_order(conn) == [b, c_]
+
+
+def test_moves_racing_the_claim_never_lose_or_double_claim_a_job(db_path: str) -> None:
+    """NITS-API-1 (D20 review nit): claim and move race on their own connections.
+
+    Before every claim the worker lets the mover read the queue order; the
+    mover then moves (alternating "last to the front" and "next-to-run to the
+    back") while the worker claims, so each move races a claim that may take
+    the very job being moved. Both run in BEGIN IMMEDIATE: every move either
+    reorders a still-queued job or answers CONTROL_CONFLICT for a job the
+    claim already took; no job is lost, none is claimed twice, and no
+    ``database is locked`` error escapes.
+    """
+    writer = get_connection(db_path)
+    try:
+        ids = queue(writer, *range(1, 41))
+    finally:
+        writer.close()
+
+    claimed: list[int] = []
+    outcomes: list[tuple[str, str]] = []
+    errors: list[BaseException] = []
+    turn = threading.Semaphore(0)
+    order_read = threading.Event()
+    done = threading.Event()
+
+    def claimer() -> None:
+        connection = get_connection(db_path)
+        try:
+            while True:
+                turn.release()
+                order_read.wait(timeout=5)
+                order_read.clear()
+                job = jobs.claim_next_job(connection)
+                if job is None:
+                    return
+                claimed.append(int(job["id"]))
+        except BaseException as exc:  # noqa: BLE001 - surfaced via assert below
+            errors.append(exc)
+        finally:
+            done.set()
+            turn.release()
+            connection.close()
+
+    def mover() -> None:
+        connection = get_connection(db_path)
+        try:
+            while True:
+                turn.acquire(timeout=5)
+                if done.is_set():
+                    return
+                order = list(jobs.queue_positions(connection))
+                order_read.set()
+                if not order:
+                    continue
+                if len(outcomes) % 2:
+                    result = jobs.move_queued_job(connection, order[0], len(order))
+                else:
+                    result = jobs.move_queued_job(connection, order[-1], 0)
+                status = str(result.job["status"]) if result.job else ""
+                outcomes.append((result.outcome, status))
+        except BaseException as exc:  # noqa: BLE001
+            errors.append(exc)
+        finally:
+            order_read.set()
+            connection.close()
+
+    threads = [threading.Thread(target=claimer), threading.Thread(target=mover)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=60)
+
+    assert not errors, errors
+    assert not any(thread.is_alive() for thread in threads)
+    assert sorted(claimed) == sorted(ids), "every job claimed exactly once"
+    assert outcomes, "the mover never ran; the race was not exercised"
+    for outcome, status in outcomes:
+        if outcome == jobs.CONTROL_IMMEDIATE:
+            assert status == jobs.STATUS_QUEUED
+        else:
+            assert outcome == jobs.CONTROL_CONFLICT and status != jobs.STATUS_QUEUED
 
 
 # --- HTTP ------------------------------------------------------------------

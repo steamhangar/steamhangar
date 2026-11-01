@@ -817,17 +817,26 @@ def app_figure(
 
 
 def unmapped_depot_counts(
-    conn: sqlite3.Connection, depot_bytes: Mapping[int, int]
+    conn: sqlite3.Connection,
+    depot_bytes: Mapping[int, int],
+    *,
+    appid: int | None = None,
 ) -> dict[int, int]:
     """``{appid: n}`` for every app with ``n`` > 0 unmapped depots (module
     header, "Unmapped depots"): recorded manifest for the app, no
     ``depot_app_map`` row for the depot under any app, bytes on disk. One
-    statement for all apps."""
-    counts: dict[int, int] = {}
-    for row in conn.execute(
+    statement for all apps; ``appid`` narrows it to one app (the detail
+    route, NITS-API-1) instead of scanning every recorded manifest."""
+    sql = (
         "SELECT appid, depotid FROM depot_manifests dm WHERE NOT EXISTS "
         "(SELECT 1 FROM depot_app_map m WHERE m.depotid = dm.depotid)"
-    ):
+    )
+    params: tuple[int, ...] = ()
+    if appid is not None:
+        sql += " AND dm.appid = ?"
+        params = (appid,)
+    counts: dict[int, int] = {}
+    for row in conn.execute(sql, params):
         appid = deletion.coerce_positive_id(row["appid"])
         depotid = deletion.coerce_positive_id(row["depotid"])
         if appid is None or depotid is None or depot_bytes.get(depotid, 0) <= 0:

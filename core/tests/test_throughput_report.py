@@ -249,6 +249,19 @@ class ProbeLogTests(unittest.TestCase):
         self.assertEqual(probes[2][0], 1760000010.0)
         self.assertEqual(probes[3][2], "")
 
+    def test_parse_probe_rejects_nan_inf_and_negative(self):
+        # NITS-API-1 (TP-REPORT-2 review nit): float() takes these, the report must not.
+        probes, bad = tpr.parse_probe([
+            "1760000000.10 nan 200",
+            "1760000000.10 inf 200",
+            "1760000000.10 -0.5 200",
+            "inf 0.1 200",
+            "nan 0.1 200",
+            "1760000000.10 0.0 200",
+        ])
+        self.assertEqual((len(probes), bad), (1, 5))
+        self.assertEqual(probes[0][1], 0.0)
+
     def test_probe_section_numbers(self):
         out = tpr.probe_section(*tpr.parse_probe(self.PROBES))
         self.assertIn("== Heartbeat (outside probe) ==", out)

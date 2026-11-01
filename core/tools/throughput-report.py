@@ -46,6 +46,7 @@ proof; the numbers above them are the evidence.
 from __future__ import annotations
 
 import argparse
+import math
 import statistics
 import sys
 import time
@@ -326,7 +327,8 @@ HB_BLIND = ("  (nginx-side time only: queueing before nginx accepts/reads the re
 
 def parse_probe(lines: Iterable[str]) -> tuple[list[tuple[float, float, str]], int]:
     """Outside-probe lines -> ([(epoch, seconds, http code or '')], malformed count).
-    Format: "<epoch or ISO-8601> <time_total s> [<http code>]"; '#' lines skipped."""
+    Format: "<epoch or ISO-8601> <time_total s> [<http code>]"; '#' lines skipped.
+    A non-finite time or duration (nan/inf) or a negative duration is malformed."""
     out: list[tuple[float, float, str]] = []
     bad = 0
     for raw in lines:
@@ -339,8 +341,11 @@ def parse_probe(lines: Iterable[str]) -> tuple[list[tuple[float, float, str]], i
             except ValueError:
                 d = datetime.fromisoformat(f[0].replace("Z", "+00:00"))
                 ts = (d if d.tzinfo else d.replace(tzinfo=timezone.utc)).timestamp()
-            out.append((ts, float(f[1]), f[2] if len(f) > 2 else ""))
-        except (ValueError, IndexError):
+            secs = float(f[1])
+            if not (math.isfinite(ts) and math.isfinite(secs)) or secs < 0:
+                raise ValueError("non-finite or negative probe value")
+            out.append((ts, secs, f[2] if len(f) > 2 else ""))
+        except (ValueError, IndexError, OverflowError):
             bad += 1
     return out, bad
 

@@ -908,13 +908,16 @@ def addrs_seen_since(
 
 
 def addrs_listed(
-    conn: sqlite3.Connection, addrs: Iterable[str], since: str
+    conn: sqlite3.Connection, addrs: Iterable[str], since: str, scope: Scope = ALL
 ) -> set[str]:
     """Which of ``addrs`` have a line in the hourly tier from ``since`` on
     (``addrs_seen_since`` for a few given addresses, by primary key; WP
     NOW-LOADING-1: the Clients page lists exactly those agentless
-    addresses)."""
+    addresses). ``scope`` as in ``addrs_seen_since``: the client side passes
+    ``clients_scope`` so an address listed only under the runner card does
+    not count as a known client (NITS-API-1)."""
     wanted = sorted(set(addrs))
+    where, scope_params = scope.sql()
     found: set[str] = set()
     for offset in range(0, len(wanted), 500):
         chunk = wanted[offset : offset + 500]
@@ -922,9 +925,9 @@ def addrs_listed(
         for row in conn.execute(
             f"""
             SELECT DISTINCT client_addr FROM client_traffic
-            WHERE tier = '1h' AND client_addr IN ({placeholders}) AND bucket_at >= ?
+            WHERE tier = '1h' AND client_addr IN ({placeholders}) AND bucket_at >= ?{where}
             """,
-            (*chunk, since),
+            (*chunk, since, *scope_params),
         ):
             found.add(str(row["client_addr"]))
     return found

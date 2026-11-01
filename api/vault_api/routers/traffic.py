@@ -1031,8 +1031,12 @@ def _loading_sources(
         if client_parts:
             owners = agent_reports.address_owners(conn, peer_hops.forwarding_hop_filter())
             name_map = client_names.ip_names(conn)
+            # Client side only, as the Clients page lists it (NITS-API-1).
             listed = traffic.addrs_listed(
-                conn, [a for a in client_parts if a not in owners], listing_since
+                conn,
+                [a for a in client_parts if a not in owners],
+                listing_since,
+                traffic.clients_scope(runner_identity.windows(conn)),
             )
         app_ids = {apps[0] for apps in depot_map.values() if len(apps) == 1}
         if job is not None:
@@ -1171,7 +1175,7 @@ def _series_point(
     swept = live_tier.LiveTotals(
         requests=point.totals.requests, bytes_served=point.totals.bytes_served
     )
-    if when is not None and bucket is not None and live_tier.prefer_ring(bucket.all, swept):
+    if bucket is not None and live_tier.prefer_ring(bucket.all, swept):  # bucket implies when
         whole, run = bucket.all, bucket.runner
         seconds: float = spec.bucket_seconds
         if now_epoch is not None and when <= now_epoch < when + spec.bucket_seconds:
