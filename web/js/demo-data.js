@@ -846,6 +846,14 @@ const DEMO_DIST_FILES = [
   ["sha256sums", "SHA256SUMS", 900],
 ];
 
+/** WP RELEASE-SPLIT-1b: `clients` of GET /v1/dist and GET /v1/settings
+ * (vault_api/client_versions.py). The demo vault bundles agent and app of
+ * its own version, so no demo agent card warns. */
+function demoClients() {
+  const one = { version: DEMO_DIST_VERSION, build: DEMO_DIST_VERSION, minimum: DEMO_DIST_VERSION, same_build: [DEMO_DIST_VERSION] };
+  return { agent: { ...one, same_build: [...one.same_build] }, app: { ...one, same_build: [...one.same_build] } };
+}
+
 function handleGetDist() {
   const releaseBase = `https://github.com/steamhangar/steamhangar/releases/download/v${DEMO_DIST_VERSION}/`;
   return {
@@ -857,6 +865,7 @@ function handleGetDist() {
     artifacts: DEMO_DIST_FILES.map(([id, name, size], i) => ({
       id,
       name,
+      version: DEMO_DIST_VERSION,
       local: true,
       size,
       sha256: (i + 1).toString(16).padStart(2, "0").repeat(32),
@@ -865,6 +874,7 @@ function handleGetDist() {
       url: `/dist/${name}`,
       source: "local",
     })),
+    clients: demoClients(),
   };
 }
 
@@ -1543,6 +1553,7 @@ function handleGetSettings() {
   return {
     readonly: settingsReadonly,
     server_version: DEMO_SERVER_VERSION,
+    clients: demoClients(),
     settings: describeDemoSettings(),
     core_apply: demoCoreApply(),
   };

@@ -1,6 +1,8 @@
 # ADR-0031: Component versions under one product version
 
-Status: Accepted (operator, 2026-10-18); written 2026-11-01
+Status: Accepted (operator, 2026-10-18); written 2026-11-01; amended
+2026-11-01 (operator decisions ENFORCE-RC22 Weg B: enforce from rc22;
+AGENT-RC22 Weg A: the agent is rebuilt as 0.1.0-rc22)
 
 Date: 2026-11-01
 
@@ -85,7 +87,15 @@ revised the same day: no separate component tags, no own numbering).
    - `reuse` says how an unchanged component's artifacts are reused:
      `retag` (images), `release-assets` (files attached from the recorded
      release), or `none` (not wired yet, the component is rebuilt).
+   - `minimum_version` (agent and app only, optional; RELEASE-SPLIT-1b)
+     is the oldest client the server still supports; it must not be newer
+     than `version`. Both start at `0.1.0-rc17` (the build every alias in
+     point 7 maps to).
    - `enforce` is the switch for the whole mechanism (below).
+   - Readers of an OLDER tag's manifest take only
+     `components.<name>.version` from it, whatever its `schema`
+     (RELEASE-SPLIT-1b), so a schema change cannot fail the next tag
+     run; a missing or malformed version there is an error.
 
 4. **Detection rule.** At release time
    `.github/scripts/component-versions.py plan` diffs the trees of the
@@ -108,6 +118,22 @@ revised the same day: no separate component tags, no own numbering).
    With enforce on, the manifest in a tagged tree always tells the truth
    about that release.
 
+   **Stale-manifest guard (RELEASE-SPLIT-1b).** Every plan also replays
+   the previous tag's own plan (that tag's manifest paths, the versions
+   recorded at the tag before it) and compares it with what the previous
+   tag recorded (`previous_check` output: `match`, `mismatch`,
+   `no-manifest`, `first-tag`, `unreadable`). With enforce on, anything
+   but `match`, `no-manifest` (the previous tag predates the manifest; the
+   committed versions come from the history table below) or `first-tag`
+   fails the `component-plan` job (exit 2, "stale-manifest guard"): a
+   dry-run tag whose release commit skipped `write` would otherwise make
+   the next enforcing release reuse an outdated artifact. In dry run the
+   verdict is only reported. Accepting `no-manifest` and `first-tag` is
+   the deliberate bootstrap exception: rc22, the first enforcing release,
+   has a previous tag (`v0.1.0-rc21.1`) without a manifest, so there is
+   nothing to replay and it starts from the committed manifest, whose
+   versions come from the git history table below.
+
    **Release checklist (from rc22).** Before tagging `v<new>`:
    1. `python3 .github/scripts/component-versions.py write --version <new>
       --previous-tag <prev>`
@@ -116,6 +142,12 @@ revised the same day: no separate component tags, no own numbering).
    3. commit `.github/components.json` in the release commit, then tag
       that commit.
 
+   Recovery: if a tag's release commit skipped `write` while enforce was
+   on, that tag's manifest is stale and the guard fails the next
+   enforcing plan. The next tag must then be one dry-run tag
+   (`"enforce": false`, release commit runs `write`); the tag after it
+   may enforce again.
+
 6. **Reuse of an unchanged component** (by tag and digest):
    - server images: the recorded tag (`<image>:<recorded version>`) is
      resolved to its manifest-list digest, and that digest gets the new
@@ -123,30 +155,66 @@ revised the same day: no separate component tags, no own numbering).
      tag (that one names the commit an image was built from). Compose's
      `${VAULT_IMAGE_TAG}` pins keep working with the new product version,
      and the release body lists the digest, which is the old one.
-   - agent files and APK: attached to the new release from the recorded
-     release (the files named in `artifacts`), checked against the
-     recorded `SHA256SUMS` / APK SHA-256, not rebuilt; an attached
-     APK skips the CI-SIGN-PIN-1 certificate check with a summary line
-     (it was checked when it was built). Wired in RELEASE-SPLIT-1b.
-   - vault-api bakes the agent files and APK of their recorded versions,
-     fetched from the release that built them and digest-pinned, instead
-     of this run's builds (today DIST-1a). Until that lands (1b), the
-     vault-api image is rebuilt in every run, also when the server is
-     unchanged; rebuilding an image to bake new client files does not
-     change the server's recorded version.
+   - agent files and APK (RELEASE-SPLIT-1b): the jobs `agent-reuse` and
+     `android-reuse` replace `agent-build` / `android-build` for an
+     unchanged client. They download the files named in `artifacts` from
+     the release of the recorded version (`gh release download` with the
+     run's read-only `GITHUB_TOKEN`; no other token is needed) and
+     `.github/scripts/release-assets.py verify` checks them, failing
+     closed: every file must match GitHub's own sha256 asset digest (a
+     file without one is refused), the SHA-256 the release body records
+     in its verify block when it records one (`agent-binaries` writes
+     those lines from 1b on: `<sha256>  SHA256SUMS` and
+     `<sha256>  steamhangar-app-v<version>.apk`), and for the agent
+     `SHA256SUMS` must list exactly the other files with matching hashes.
+     They upload the files under the builders' artifact names
+     (`release-agent`, `release-apk`), so the release jobs attach them to
+     the new release unchanged, under their original versioned names. A
+     reused APK skips the CI-SIGN-PIN-1 certificate check with a summary
+     line (it was checked when it was built).
+   - vault-api bakes the agent files and APK of their recorded versions
+     (from the reuse download or this run's build, whichever the plan
+     chose) and is rebuilt in every run, also when the server is
+     unchanged: a retag of the server's recorded vault-api image would
+     carry the client files of THAT release. Rebuilding an image to bake
+     client files does not change the server's recorded version. The
+     clients' versions are build args (`VAULT_AGENT_VERSION` /
+     `_BUILD` / `_MINIMUM`, `VAULT_APP_*`; `_VERSION` = component version,
+     `_BUILD` = the version stamped on the baked files, i.e. the run's
+     version when rebuilt and the recorded one when reused), so
+     `vault_api/dist.py` names and links each file by its own version.
+   - Job gating: `publish`, `android-release` and `agent-binaries` run on
+     `!cancelled()` and accept per client exactly one of "the builder
+     succeeded" or "the plan said do not build (builder skipped) and the
+     reuse job succeeded"; a failed builder or reuse job, or a builder
+     skipped for any other reason, stops the release.
 
 7. **Alias list** (implemented in RELEASE-SPLIT-1b). Agent builds
    `0.1.0-rc18` to `0.1.0-rc21.1` are the rc17 source with another
    version stamp. A small alias list in the server maps them to
    `0.1.0-rc17`, so the Clients "version differs" hint does not flag them.
    The roadmap named rc18 to rc20.2; git shows rc21 and rc21.1 unchanged
-   too (table below), so the list covers rc18 to rc21.1.
+   too (table below), so the list covers rc18 to rc21.1
+   (`vault_api/client_versions.py` `AGENT_BUILD_ALIASES`, only existing
+   tags; a test checks it against the git history when the tags are
+   present).
 
 8. **Minimum versions** (RELEASE-SPLIT-1b). The Clients hint compares an
    agent with the bundled agent version (after the alias list), not with
    the server version. The server states a minimum agent and app version;
    below it the hint says an update is needed. (This pulls that part of
    the v0.4.0 "Weg B for agents" forward; the OS report stays in v0.4.0.)
+   `GET /v1/dist` and `GET /v1/settings` carry the same `clients` object:
+   per client `{version, build, minimum, same_build}` (`same_build` =
+   component version, build stamp and, for the agent, the aliases of the
+   component version), `null` for a local build. The web and Android
+   Clients pages read it from `GET /v1/settings` (the request they already
+   make for `server_version`): an agent version in `same_build` is
+   current, one below `minimum` "is older than the minimum", any other
+   differs from "the server's agent"; without `clients` (a server before
+   1b) they compare with the server version as before. Versions compare in
+   natural pre-release order (`rc9` < `rc17` < `rc21.1` < `rc22` <
+   release), the same rule in the script, the web and the app.
 
 9. **About and release notes** list each component with its version and
    "unchanged since ..." where it applies (RELEASE-SPLIT-1c).
@@ -162,10 +230,69 @@ revised the same day: no separate component tags, no own numbering).
   component is still built. With `enforce: true` the server's vault-core,
   vault-dns and vault-proxy legs retag instead of building; agent and app
   (`reuse: none`) are still rebuilt.
-- **1b:** vault-api bakes the recorded agent/APK; agent and app get
-  `reuse: release-assets`; alias list; minimum versions; then `enforce`
-  is switched on.
-- **1c:** About page and release notes per component.
+- **1b (done 2026-11-01):** vault-api bakes the recorded agent/APK;
+  agent and app get `reuse: release-assets`; alias list; minimum
+  versions; tolerant previous-manifest read; stale-manifest guard.
+  `enforce` is `true` from the rc22 tag on (operator decision
+  2026-11-01 ENFORCE-RC22 Weg B, section "Switching enforce on" below).
+  rc22 still rebuilds all three components (operator decision 2026-11-01
+  AGENT-RC22 Weg A): SAMPLE-IP-1 changed two help/error strings in
+  `agent/go/cmd/vault-agent/hosts.go` and `agent/go/hostsfile/hostsfile.go`
+  that are compiled into the binary, so the agent honestly becomes
+  `0.1.0-rc22`. Agents rc17 to rc21.1 then show "differs from the
+  server's agent" once (they are at or above the minimum `0.1.0-rc17`).
+- **1c:** About page and release notes per component. Decision
+  ABOUT-VERSION-1 (roadmap, operator 2026-11-01: Weg A): `/v1/about`
+  shows the product version as the main line and the component list with
+  "unchanged since ..." below it.
+
+## Rehearsing the reuse path and switching enforce on
+
+**Rehearsals (required before the rc22 tag, the first enforcing tag).**
+A `workflow_dispatch` from the rc22 HEAD exercises no reuse path, because
+all three components changed since `v0.1.0-rc21.1`. Two runs, both of
+`publish.yml` with `workflow_dispatch` on a `wp/` branch with
+`"enforce": true` (never on a `v*` tag ref: a dispatch on a tag ref
+publishes like a tag push; off a tag nothing is pushed or attached):
+
+1. **Reuse rehearsal** on a throwaway `wp/` branch whose commit restores
+   the agent paths and the app paths of the manifest (`agent/go/`, the
+   agent packaging files, `app/app/src/main/`, the app Gradle files and
+   wrapper, ...) to their `v0.1.0-rc21.1` content; the server stays
+   changed. The plan must show `agent_build=false` and `app_build=false`;
+   the reuse jobs download and verify the recorded releases, `publish`
+   builds vault-api with the reused files. Check the run summary:
+   component plan table, the "reused, NOT rebuilt" sections, and the
+   baked-downloads listing of vault-api with the recorded file names.
+   The operator deletes the branch afterwards (the devbox may not delete
+   remote branches).
+2. **Plain rehearsal** from HEAD (all three components changed): checks
+   the all-build path with enforce on.
+
+The server's retag path (unchanged server) resolves the recorded images
+with an anonymous `docker buildx imagetools inspect` of
+`ghcr.io/steamhangar/<image>:<recorded version>` (off a tag only
+"rehearsal: would run ... imagetools create" is printed); that needs the
+ghcr packages to be **public** (they are meant to be, see the S6 note in
+publish.yml); a private package fails the retag step.
+
+**Switching enforce on (operator decision 2026-11-01, ENFORCE-RC22
+Weg B).** Reuse is enforced from the rc22 tag on: `.github/components.json`
+carries `"enforce": true` in the rc22 release commit. The original rule
+(switch on only after a dry-run tag whose check printed "versions match
+the plan") is waived for rc22 because no tag before it can satisfy it:
+`v0.1.0-rc21.1` has no manifest. rc22 therefore bootstraps from the
+committed manifest (versions from the history table below), and the
+stale-manifest guard accepts `no-manifest` and `first-tag` as that
+deliberate exception. Every later enforcing release is guarded
+mechanically: its plan fails when the previous tag's manifest does not
+match a replayed plan. Preconditions for the rc22 tag:
+
+1. both rehearsals above passed (reuse rehearsal on a restored `wp/`
+   branch, plain rehearsal from HEAD), enforce on;
+2. the ghcr packages are public (anonymous `imagetools inspect`);
+3. the release checklist (section 5) ran: `write`, then `check` prints
+   "versions match the plan", manifest committed in the release commit.
 
 ## History (git, per component paths of the manifest)
 

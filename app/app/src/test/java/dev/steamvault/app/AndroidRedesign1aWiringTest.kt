@@ -73,20 +73,22 @@ class AndroidRedesign1aWiringTest {
         assertCalledFrom(screen, "visibleClients(data?.clients.orEmpty(), agentRows, removedAt, nowMs)", "ClientsScreen")
         assertCalledFrom(screen, "merged = merged,", "ClientsScreen")
         assertCalledFrom(screen, "if (removedAt.isNotEmpty()) poll.refreshOnce()", "ClientsScreen")
-        assertCalledFrom(screen, "serverVersion = readServerVersion(settingsRepository)", "ClientsScreen")
-        assertCalledFrom(screen, "settingsRepository.get().server_version", "readServerVersion")
+        // RELEASE-SPLIT-1b: one settings read gives server_version and clients.
+        assertCalledFrom(screen, "agentRef = readAgentVersionRef(settingsRepository)", "ClientsScreen")
+        assertCalledFrom(screen, "agentVersionRef(s.server_version, s.clients)", "readAgentVersionRef")
         assertCalledFrom(controller, "removedAt = removedAt.filterValues { now - it <= REMOVED_HIDE_MS } + (clientId to now)", "confirmRemove")
         assertCalledFrom(controller, "refreshOnce()\n            delay(PollingIntervals.CLIENTS_MS)", "pollForPage")
     }
 
     @Test
     fun `MUTATION PIN -- tiles, devices head, cards and the empty state are drawn`() {
-        assertCalledFrom(screen, "summaryTiles(merged, range, serverVersion)", "ClientsBody")
+        assertCalledFrom(screen, "summaryTiles(merged, range, serverVersion, agentRef)", "ClientsBody")
         assertCalledFrom(screen, "item(key = \"tiles\") { if (tiles.isNotEmpty()) SummaryTiles(tiles) }", "ClientsBody")
         // MUTATION PIN (round-3 golden): the tiles item exists before the first
         // answer, so the list never opens scrolled past it.
         assertCalledFrom(screen, "if (!poll.unsupported) {\n            item(key = \"tiles\")", "ClientsBody")
         assertCalledFrom(screen, "clientCardView(it, range, serverVersion, nowMs,", "ClientsBody")
+        assertCalledFrom(screen, "removeErrors[a.client_id] }, agentRef)", "ClientsBody")
         assertCalledFrom(screen, "SectionLabel(DEVICES_HEADING,", "DevicesHead")
         assertCalledFrom(screen, "cards.isEmpty() -> item(key = \"empty\") { EmptyState() }", "ClientsBody")
         assertCalledFrom(screen, "text = NO_CLIENTS_TEXT,", "EmptyState")

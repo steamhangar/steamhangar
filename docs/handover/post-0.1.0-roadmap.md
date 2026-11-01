@@ -177,6 +177,27 @@ Antrag filed and the rollout on the operator's stack checked.
       printed "versions match the plan"): a dry-run tag with a stale
       manifest would make the first enforce release retag an outdated
       image.
+  - done in RELEASE-SPLIT-1b (2026-11-01): `agent-reuse` / `android-reuse`
+    jobs (download from the recorded release, verified against GitHub's
+    asset digests, the release body's new SHA-256 lines and SHA256SUMS,
+    `.github/scripts/release-assets.py`), `!cancelled()` gating of
+    `publish`, `android-release`, `agent-binaries`, vault-api bakes the
+    clients' artifact versions (`VAULT_AGENT_*`/`VAULT_APP_*` build args),
+    tolerant previous-manifest read, stale-manifest guard (enforce fails
+    the plan), `minimum_version` (agent, app: 0.1.0-rc17), `clients` in
+    `GET /v1/dist` and `GET /v1/settings`, alias list rc18..rc21.1 ->
+    rc17, Clients hint against the bundled agent (web + Android).
+    Operator decision 2026-11-01 ENFORCE-RC22 Weg B: `enforce: true` from
+    the rc22 tag on (rc22 bootstraps from the committed manifest, since
+    v0.1.0-rc21.1 has none). AGENT-RC22 Weg A (2026-11-01): rc22
+    rebuilds all three components, the agent becomes 0.1.0-rc22
+    (SAMPLE-IP-1 changed two compiled help/error strings). Required
+    before the tag: two `workflow_dispatch` rehearsals with enforce on, a
+    reuse rehearsal on a throwaway `wp/` branch whose commit restores the
+    manifest's agent and app paths to `v0.1.0-rc21.1` (agent/app reused;
+    operator deletes the branch afterwards) and a plain one from HEAD;
+    ghcr packages public (ADR-0031). ABOUT-VERSION-1 decided (Weg A);
+    open: 1c (About and release notes).
 
 ### Version rules (ADR-0029, user decisions 2026-10-18)
 
@@ -409,6 +430,22 @@ once decided (the decision then lives in the item it belongs to).
   **Decided 2026-11-01: Weg B.** Operator's reason: the Android screen is
   only reachable once the app is already set up, so a pairing flow there
   adds nothing; device setup stays on the web.
+- **ABOUT-VERSION-1** (RELEASE-SPLIT-1b, 2026-11-01; for 1c): which
+  version `GET /v1/about` (and the About pages) show as THE version when
+  the run's product version (`VAULT_VERSION`, baked into vault-api, which
+  is rebuilt in every release because it bakes the client files) differs
+  from the server component's recorded version (server unchanged since an
+  older release, ADR-0031). Weg A (recommended): the product version
+  stays the main version ("SteamHangar 0.1.0-rc23"), plus a component list
+  "server 0.1.0-rc22 (unchanged since), agent 0.1.0-rc17, app 0.1.0-rc23";
+  it answers "which release am I running" and matches the tag, the
+  compose `VAULT_IMAGE_TAG` and the release page. Weg B: the server
+  component version is the main version and the product version a
+  secondary "release" line; closer to "what changed when", but the shown
+  number then differs from the image tag the operator pulled.
+  **Decided 2026-11-01: Weg A** (product version as the main line,
+  component list with "unchanged since" below), implemented in
+  RELEASE-SPLIT-1c.
 - **D18 GitHub org** (v0.2.0): ask GitHub for the inactive `GameHangar`
   name, pick a free org, or keep `steamhangar` and rename product and repo
   only. See D18.

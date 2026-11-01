@@ -1107,9 +1107,17 @@ jobs:
           file: ${{ matrix.dockerfile }}
           platforms: ${{ matrix.platforms }}
           push: false
+          # WP RELEASE-SPLIT-1b: the bundled-client keys publish.yml passes,
+          # empty here (a CI build bundles no client, like a local build).
           build-args: |
             VAULT_VERSION=${{ steps.version.outputs.version }}
             VAULT_COMMIT=${{ steps.version.outputs.commit }}
+            VAULT_AGENT_VERSION=
+            VAULT_AGENT_BUILD=
+            VAULT_AGENT_MINIMUM=
+            VAULT_APP_VERSION=
+            VAULT_APP_BUILD=
+            VAULT_APP_MINIMUM=
 
   verify-stack:
     name: deploy / verify-stack

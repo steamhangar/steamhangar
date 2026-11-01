@@ -94,6 +94,7 @@ import { FEED_TEXT, feedNote, feedState, isRange, joinNotes, refreshFailedText }
 import {
   AGENTLESS_NOTE,
   NO_CLIENTS_TEXT,
+  agentVersionRef,
   clientCardModel,
   clientName,
   clientsSummaryText,
@@ -122,8 +123,10 @@ function errorText(err) {
  * (feed disabled or unsupported), kept while an answer is pending. */
 const state = { range: "7d", data: null, error: null, unsupported: false, noFigures: false };
 
-/** `server_version` of `GET /v1/settings`, read on each visit; null while
- * unknown (no outdated-agent warning then). */
+/** What agent versions are checked against: `server_version` and (since
+ * RELEASE-SPLIT-1b) `clients.agent` of `GET /v1/settings`, read on each
+ * visit (`agentVersionRef`); null while unknown (no outdated-agent warning
+ * then). */
 let serverVersion = null;
 
 /** Inline remove errors by client_id (kept across list rebuilds). */
@@ -622,7 +625,7 @@ export function renderClients() {
     poll.refresh();
     api.getSettings().then(
       (s) => {
-        serverVersion = s && typeof s.server_version === "string" ? s.server_version : null;
+        serverVersion = s && typeof s.server_version === "string" ? agentVersionRef(s.server_version, s.clients) : null;
         paint();
       },
       () => {

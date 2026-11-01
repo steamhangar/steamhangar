@@ -29,12 +29,14 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict
 
 from vault_api.auth import require_api_key
+from vault_api.client_versions import client_versions_out
 from vault_api.dist import (
     APK_ALIAS,
     DIST_URL_PREFIX,
     DistCatalog,
     is_release_version,
     release_base_url,
+    release_url,
 )
 
 files_router = APIRouter(tags=["dist"])
@@ -77,8 +79,11 @@ class ArtifactOut(BaseModel):
     #: agent-linux-arm64, install-task, run-vault-agent, uninstall-task,
     #: systemd-service, systemd-timer, sha256sums.
     id: str
-    #: The release asset name for this server's version.
+    #: The release asset name: the server's version, or since WP
+    #: RELEASE-SPLIT-1b the bundled client's own version (``version``).
     name: str
+    #: The release this file belongs to (RELEASE-SPLIT-1b).
+    version: str
     #: True when the vault serves the file itself.
     local: bool
     #: Size in bytes and SHA-256 (lowercase hex) of the local copy; null
@@ -87,12 +92,28 @@ class ArtifactOut(BaseModel):
     sha256: str | None
     #: ``/dist/<name>`` (path only, relative to the vault origin) when local.
     local_url: str | None
-    #: The GitHub Release asset of the same version; null when the server
-    #: version is not a published release.
+    #: The GitHub Release asset of the file's own version; null when the
+    #: server version is not a published release.
     release_url: str | None
     #: Where to download from: ``local_url`` if local, else ``release_url``.
     url: str | None
     source: Literal["local", "release", "none"]
+
+
+class ClientVersionOut(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    version: str
+    build: str
+    minimum: str | None
+    same_build: list[str]
+
+
+class ClientsOut(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    agent: ClientVersionOut | None
+    app: ClientVersionOut | None
 
 
 class DistOut(BaseModel):
@@ -111,6 +132,11 @@ class DistOut(BaseModel):
     #: ``/dist/steamhangar-app.apk`` while the APK is baked in, else null.
     apk_alias_url: str | None
     artifacts: list[ArtifactOut]
+    #: WP RELEASE-SPLIT-1b: the bundled agent and app (component version,
+    #: build version of the files, minimum, same_build), null each for a
+    #: local build. Same object as ``GET /v1/settings``'s ``clients``.
+    clients: ClientsOut
+
 
 
 @index_router.get("/v1/dist", response_model=DistOut)
@@ -123,20 +149,21 @@ def get_dist_index(request: Request) -> DistOut:
     for art in catalog.artifacts():
         local = art.path is not None
         local_url = f"{DIST_URL_PREFIX}{art.spec.name}" if local else None
-        release_url = f"{base}{art.spec.name}" if base else None
+        rel_url = release_url(build, art.spec)
         if art.spec.id == "app-android" and local:
             apk_local = True
         items.append(
             ArtifactOut(
                 id=art.spec.id,
                 name=art.spec.name,
+                version=art.spec.version,
                 local=local,
                 size=art.size,
                 sha256=art.sha256,
                 local_url=local_url,
-                release_url=release_url,
-                url=local_url or release_url,
-                source="local" if local else ("release" if release_url else "none"),
+                release_url=rel_url,
+                url=local_url or rel_url,
+                source="local" if local else ("release" if rel_url else "none"),
             )
         )
     return DistOut(
@@ -146,4 +173,5 @@ def get_dist_index(request: Request) -> DistOut:
         release_base=base,
         apk_alias_url=f"{DIST_URL_PREFIX}{APK_ALIAS}" if apk_local else None,
         artifacts=items,
+        clients=ClientsOut.model_validate(client_versions_out(catalog.clients)),
     )

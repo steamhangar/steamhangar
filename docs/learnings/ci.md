@@ -107,3 +107,16 @@ at the end, under a dated heading, one entry each with the WP that proved it.
   in dry run and fails only once enforced; and a gate must fail closed on
   empty outputs, or a skipped builder skips `publish` and the tag run ends
   green with nothing published.
+
+### 2026-11-01 RELEASE-SPLIT-1b
+
+- A rehearsal only proves the path the plan takes: from a HEAD where every
+  component changed, `workflow_dispatch` never runs the reuse jobs. To
+  rehearse reuse, restore the component paths to the previous tag on a
+  throwaway branch so the plan says `*_build=false`.
+- Before calling a component "unchanged except tests", diff its manifest
+  paths, not the directory: SAMPLE-IP-1 also changed two compiled strings
+  in the agent, so rc22 really is a new agent build.
+- Gates that accept a skipped builder must tie that acceptance to the
+  plan's `*_build == 'false'` AND the reuse job's success, or a skipped
+  builder ends the tag run green with missing assets.

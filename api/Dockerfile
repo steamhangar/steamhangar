@@ -323,6 +323,30 @@ ENV VAULT_BUILD_VERSION="${VAULT_VERSION}" \
 LABEL org.opencontainers.image.version="${VAULT_VERSION}" \
       org.opencontainers.image.revision="${VAULT_COMMIT}"
 
+# --- Bundled clients (WP RELEASE-SPLIT-1b, ADR-0031) -------------------------
+# The agent files and APK baked into /app/dist and the client versions the
+# server states (GET /v1/dist and GET /v1/settings, `clients`), set by
+# publish.yml from the component plan: `*_VERSION` is the component version
+# (the release in which the client last changed), `*_BUILD` the version
+# stamped on the baked files (this release's version when the client was
+# rebuilt, the recorded one when its files were reused), `*_MINIMUM` the
+# oldest client this server supports (`minimum_version` in
+# .github/components.json). A local build leaves them empty: the server
+# then states no bundled client and the clients compare with the server
+# version as before. Declared after VER-1's block for the same cache reason.
+ARG VAULT_AGENT_VERSION=
+ARG VAULT_AGENT_BUILD=
+ARG VAULT_AGENT_MINIMUM=
+ARG VAULT_APP_VERSION=
+ARG VAULT_APP_BUILD=
+ARG VAULT_APP_MINIMUM=
+ENV VAULT_CLIENT_AGENT_VERSION="${VAULT_AGENT_VERSION}" \
+    VAULT_CLIENT_AGENT_BUILD="${VAULT_AGENT_BUILD}" \
+    VAULT_CLIENT_AGENT_MINIMUM="${VAULT_AGENT_MINIMUM}" \
+    VAULT_CLIENT_APP_VERSION="${VAULT_APP_VERSION}" \
+    VAULT_CLIENT_APP_BUILD="${VAULT_APP_BUILD}" \
+    VAULT_CLIENT_APP_MINIMUM="${VAULT_APP_MINIMUM}"
+
 # EXACTLY ONE uvicorn worker, on purpose and permanently. vault-api runs a single
 # background job-queue thread per process and repairs orphaned 'running' jobs at
 # startup; a second process would fail the first one's genuinely running job and
