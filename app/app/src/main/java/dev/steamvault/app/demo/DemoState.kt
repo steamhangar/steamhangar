@@ -8,6 +8,10 @@ import dev.steamvault.app.net.model.PlayerSummariesRelayOut
 import dev.steamvault.app.net.model.PlayerSummaryEntry
 import dev.steamvault.app.net.model.BlockingJobOut
 import dev.steamvault.app.net.model.CacheDeletionOut
+import dev.steamvault.app.net.model.CacheSummaryOut
+import dev.steamvault.app.net.model.StorageBalanceOut
+import dev.steamvault.app.net.model.TopConsumerOut
+import dev.steamvault.app.net.model.UnmappedDepotsOut
 import dev.steamvault.app.net.model.ClientOut
 import dev.steamvault.app.net.model.DeleteMemberOut
 import dev.steamvault.app.net.model.DeletePlanOut
@@ -225,6 +229,92 @@ class DemoState private constructor(
         val members = listOf(game) + games.filter { it.parentAppid == game.appid }
         val depots = members.flatMap { it.depots }.associateBy { it.depotid }
         return if (depots.isEmpty()) null else depots.values.sumOf { it.sizeBytes }
+    }
+
+    /**
+     * WP ANDROID-RC21-1-TWINS: `GET /v1/cache/summary` (demo), read only by
+     * the Expert panel's storage balance card. Every depot on disk once;
+     * the balance is a port of the web demo's `demoStorageBalance`: a game
+     * with an own figure counts as measured (its depots and its
+     * expected/present bytes), every other depot on disk is unmeasured, the
+     * demo has no unmapped depots, the residual is 0 by construction. Same
+     * warning rule as the API (15 % or 50 GiB). No golden shows the card
+     * (the Expert panel is in no screenshot).
+     */
+    @Synchronized
+    fun cacheSummary(): CacheSummaryOut {
+        val allDepots = LinkedHashMap<Int, Long>()
+        for (g in games) for (d in g.depots) allDepots.putIfAbsent(d.depotid, d.sizeBytes)
+        val onDisk = allDepots.values.sum()
+        val measured = HashSet<Int>()
+        var planned = 0L
+        var present = 0L
+        for (g in games) {
+            val f = ownFigure(g) ?: continue
+            val fresh = g.depots.filter { it.depotid !in measured }
+            if (f.presentBytes >= f.expectedBytes) {
+                val bytes = fresh.sumOf { it.sizeBytes }
+                planned += bytes
+                present += bytes
+            } else if (fresh.size == g.depots.size) {
+                planned += f.expectedBytes
+                present += f.presentBytes
+            }
+            for (d in g.depots) measured.add(d.depotid)
+        }
+        var measuredDisk = 0L
+        var unmeasured = 0L
+        var unmeasuredDepots = 0L
+        for ((depotid, bytes) in allDepots) {
+            if (depotid in measured) {
+                measuredDisk += bytes
+            } else if (bytes > 0) {
+                unmeasured += bytes
+                unmeasuredDepots += 1
+            }
+        }
+        val oldBuilds = maxOf(0L, measuredDisk - present)
+        val unexplained = onDisk - present - oldBuilds - unmeasured
+        val concern = oldBuilds + kotlin.math.abs(unexplained)
+        val gib = 1_073_741_824.0
+        val warning = onDisk > 0 && (concern > 0.15 * onDisk || concern > 50 * gib)
+        // One decimal without a locale (demo code may not import java.util).
+        fun oneDecimal(v: Double): String {
+            val tenths = kotlin.math.round(v * 10).toLong()
+            return "${tenths / 10}.${tenths % 10}"
+        }
+        val reason = if (warning) {
+            "Old builds take ${oneDecimal(concern / gib)} GB " +
+                "(${kotlin.math.round(100.0 * concern / onDisk).toLong()} % of ${oneDecimal(onDisk / gib)} GB on disk), " +
+                "above the 15 % / 50.0 GB threshold. Garbage collection reclaims old builds; Auto-GC only cleans a game after its own prefill."
+        } else {
+            null
+        }
+        val consumers = games
+            .map { g -> TopConsumerOut(appid = g.appid, name = g.name, size_bytes = g.depots.sumOf { it.sizeBytes }) }
+            .filter { it.size_bytes > 0 }
+            .sortedByDescending { it.size_bytes }
+            .take(5)
+        return CacheSummaryOut(
+            total_bytes = onDisk,
+            top_consumers = consumers,
+            unmapped_depots = UnmappedDepotsOut(count = 0, size_bytes = 0),
+            free_disk_bytes = 500_000_000_000,
+            storage_balance = StorageBalanceOut(
+                on_disk_bytes = onDisk,
+                planned_bytes = planned,
+                present_bytes = present,
+                measured_depots = measured.count { it in allDepots }.toLong(),
+                old_builds_bytes = oldBuilds,
+                unmeasured_bytes = unmeasured,
+                unmeasured_depots = unmeasuredDepots,
+                unmapped_bytes = 0,
+                unmapped_depots = 0,
+                unexplained_bytes = unexplained,
+                warning = warning,
+                warning_reason = reason,
+            ),
+        )
     }
 
     @Synchronized

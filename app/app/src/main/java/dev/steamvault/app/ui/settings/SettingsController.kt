@@ -5,6 +5,10 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import dev.steamvault.app.net.error.VaultApiError
 import dev.steamvault.app.net.model.AboutOut
+import dev.steamvault.app.net.model.CacheSummaryOut
+import dev.steamvault.app.repo.CacheRepository
+import dev.steamvault.app.ui.settings.logic.StorageBalanceView
+import dev.steamvault.app.ui.settings.logic.storageBalanceView
 import dev.steamvault.app.net.steam.SteamId64
 import dev.steamvault.app.repo.AboutRepository
 import dev.steamvault.app.repo.SteamRelayRepository
@@ -107,6 +111,9 @@ class SettingsController(
     private val aboutRepository: AboutRepository,
     /** WP D16: the expert switch, stored per device (the section panel is per visit). */
     private val viewPrefs: SettingsViewPreferences = InMemorySettingsViewPreferences(),
+    /** WP ANDROID-RC21-1-TWINS: `GET /v1/cache/summary` for the Expert
+     * panel's storage balance card; `null` = no card. */
+    private val cacheRepository: CacheRepository? = null,
 ) {
     var loading by mutableStateOf(true)
         private set
@@ -449,6 +456,31 @@ class SettingsController(
             aboutErrorDetail = e.detail ?: e.message
         } finally {
             aboutLoading = false
+        }
+    }
+
+    // ---- Storage balance (WP ANDROID-RC21-1-TWINS, web STORAGE-BALANCE-1) ----
+
+    /** The last `GET /v1/cache/summary` answer, or `null` before the first one. */
+    var cacheSummary by mutableStateOf<CacheSummaryOut?>(null)
+        private set
+
+    /** The Expert panel's "Storage balance" card, or `null` (hidden): no
+     * answer yet, an older server without `storage_balance`, or a malformed one. */
+    val storageBalance: StorageBalanceView? get() = storageBalanceView(cacheSummary)
+
+    /**
+     * Fetches the summary for the storage balance card; called each time
+     * the Expert panel opens (the web repaints from its cache poll). A
+     * failed fetch keeps the last figures (web: an `{error}` tick keeps the
+     * last figures, same rule as the rail foot).
+     */
+    suspend fun loadCacheSummary() {
+        val repo = cacheRepository ?: return
+        try {
+            cacheSummary = repo.summary()
+        } catch (_: VaultApiError) {
+            // keep the last figures
         }
     }
 

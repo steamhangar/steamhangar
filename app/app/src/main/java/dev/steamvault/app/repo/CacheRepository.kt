@@ -2,6 +2,7 @@ package dev.steamvault.app.repo
 
 import dev.steamvault.app.net.VaultApiClient
 import dev.steamvault.app.net.model.CacheDeletionOut
+import dev.steamvault.app.net.model.CacheSummaryOut
 import dev.steamvault.app.net.model.DeletePlanOut
 import dev.steamvault.app.net.model.GcJobRef
 import dev.steamvault.app.net.model.RepairOut
@@ -11,8 +12,8 @@ import dev.steamvault.app.net.model.RepairOut
  * bulk delete) and `POST /v1/cache/{appid}/gc` (WP 4b.6 brief: detail
  * sheet's GC action). Same thin "typed name for the client call" shape as
  * [GamesRepository]/[JobsRepository]/[MappingRepository]. `GET
- * /v1/cache/summary` still has no caller (no WP needs it yet), same "add it
- * with the WP that needs it" rule the other repositories document.
+ * /v1/cache/summary` ([summary]) has one caller since WP
+ * ANDROID-RC21-1-TWINS: the Settings Expert panel's storage balance card.
  */
 interface CacheRepository {
     suspend fun delete(appid: Int): CacheDeletionOut
@@ -43,6 +44,12 @@ interface CacheRepository {
      * Defaulted so a test double that never repairs needs no body. */
     suspend fun repair(appid: Int, execute: Boolean = false): RepairOut =
         throw UnsupportedOperationException("repair is not implemented by this repository")
+
+    /** WP ANDROID-RC21-1-TWINS: `GET /v1/cache/summary` (the storage
+     * balance card). Defaulted so a test double that never reads it needs
+     * no body. */
+    suspend fun summary(): CacheSummaryOut =
+        throw UnsupportedOperationException("summary is not implemented by this repository")
 }
 
 class VaultCacheRepository(private val client: VaultApiClient) : CacheRepository {
@@ -52,4 +59,5 @@ class VaultCacheRepository(private val client: VaultApiClient) : CacheRepository
     override suspend fun deleteWithPackages(appid: Int, members: List<Int>): CacheDeletionOut =
         client.deleteCacheWithPackages(appid, members)
     override suspend fun repair(appid: Int, execute: Boolean): RepairOut = client.repairCache(appid, execute)
+    override suspend fun summary(): CacheSummaryOut = client.cacheSummary()
 }

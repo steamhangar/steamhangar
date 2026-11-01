@@ -65,7 +65,9 @@ import dev.steamvault.app.repo.JobsRepository
 import dev.steamvault.app.repo.ScheduleRepository
 import dev.steamvault.app.repo.SettingsRepository
 import dev.steamvault.app.repo.TrafficRepository
+import dev.steamvault.app.ui.status.StatusKind
 import dev.steamvault.app.ui.traffic.RangeChips
+import dev.steamvault.app.ui.traffic.logic.EtaSmoother
 import dev.steamvault.app.ui.traffic.TrafficPoll
 import dev.steamvault.app.ui.traffic.TrafficRanges
 import dev.steamvault.app.ui.traffic.logic.emptyHistoryText
@@ -188,14 +190,17 @@ fun DownloadsScreen(
     // The ranges chosen last survive a tab switch (WP D15d review, web parity).
     val statsPoll = remember(trafficRepository) { downloadsStatsPoll(trafficRepository, ranges.statistics) }
     val historyFilter = remember(trafficRepository) { HistoryFilter(trafficRepository, ranges.history) }
+    // WP JOB-SIZE-1: smoothed ETA speeds, one per visit and cleared each
+    // time the screen starts (web nit: no rate kept across visits).
+    val etaSmoother = remember(trafficRepository) { EtaSmoother() }
     LaunchedEffect(lifecycleOwner, statsPoll) {
         lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            etaSmoother.clear()
             statsPoll.pollForever()
         }
     }
     LaunchedEffect(historyFilter) { historyFilter.load() }
     val historyDelete = remember(historyRepository) { historyRepository?.let { HistoryDeleteFlow(it) } }
-    val speedLines = jobSpeedLines(statsPoll)
 
     val gamesByAppid = remember(controller.games) { controller.games.associateBy { it.appid } }
     // WP APP-FIX-2: titles in appTitle's order -- vault name, then the owned
@@ -216,6 +221,11 @@ fun DownloadsScreen(
     val pausedModels = remember(partition, gamesByAppid, ownedNames) {
         partition.paused.map { buildJobCardModel(it, gamesByAppid, JobCardMode.HELD, ownedNames) }
     }
+    // WP JOB-SIZE-1: no ETA on a Verifying card (web `card.dataset.dk === KIND.VERIFY`).
+    val verifyingJobIds = remember(activeModels) {
+        activeModels.filter { it.kind == StatusKind.VERIFY }.map { it.jobId }.toSet()
+    }
+    val speedLines = jobSpeedLines(statsPoll, verifyingJobIds, etaSmoother)
     val queueModels = remember(partition, gamesByAppid, ownedNames) {
         partition.queued.mapIndexed { index, job -> buildQueueRowModel(job, index + 1, gamesByAppid, ownedNames) }
     }
@@ -364,7 +374,7 @@ private fun DownloadsBody(
     controller: DownloadsController,
     scope: CoroutineScope,
     statsPoll: TrafficPoll<StatsAnswer>,
-    speedLines: Map<Int, String>,
+    speedLines: Map<Int, JobSpeedLine>,
     historyFilter: HistoryFilter,
     ranges: TrafficRanges,
     historyDelete: HistoryDeleteFlow? = null,
@@ -602,7 +612,7 @@ private fun EmptyLine(text: String) {
 @Composable
 private fun JobCard(
     model: JobCardModel,
-    speedLine: String?,
+    speedLine: JobSpeedLine?,
     busy: Boolean,
     onPause: () -> Unit,
     onResume: () -> Unit,
@@ -634,12 +644,16 @@ private fun JobCard(
             }
 
             // WP D15d (D13 SPEED-1): the job's speed at the cache.
+            // WP JOB-SIZE-1: the web's tooltip (jobSpeedNote) is read by
+            // TalkBack after the line.
             if (speedLine != null) {
                 Text(
-                    text = speedLine,
+                    text = speedLine.text,
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(top = 6.dp),
+                    modifier = Modifier
+                        .padding(top = 6.dp)
+                        .semantics { contentDescription = "${speedLine.text}. ${speedLine.note}" },
                 )
             }
 
