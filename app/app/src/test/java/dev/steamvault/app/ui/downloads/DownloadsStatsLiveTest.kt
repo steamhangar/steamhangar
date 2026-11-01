@@ -2,7 +2,6 @@ package dev.steamvault.app.ui.downloads
 
 import dev.steamvault.app.demo.DemoState
 import dev.steamvault.app.demo.DemoTrafficRepository
-import dev.steamvault.app.demo.demoLive
 import dev.steamvault.app.net.model.ClientsOverviewOut
 import dev.steamvault.app.net.model.JobSummary
 import dev.steamvault.app.net.model.LiveOut
@@ -60,6 +59,14 @@ class DownloadsStatsLiveTest {
         poll.selectRange(this, "live")
         testScheduler.advanceUntilIdle()
         assertEquals("back on live: the summary is fetched again at once", listOf("live", "throughput:1h"), repo.calls)
-        assertEquals(demoLive(now).range, poll.data!!.series.range)
+        val back = poll.data!!
+        assertEquals("the answer is the merged live one, not the dropped 6 h one", "live", back.throughput.range)
+        assertEquals("live", back.series.range)
+        assertTrue(back.series.points.isNotEmpty())
+
+        repo.calls.clear()
+        now += 3_000L
+        poll.refreshOnce()
+        assertEquals("the re-fetched summary is held again for 30 s", listOf("live"), repo.calls)
     }
 }

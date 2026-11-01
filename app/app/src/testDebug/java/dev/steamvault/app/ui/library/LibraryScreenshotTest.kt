@@ -219,17 +219,21 @@ class LibraryScreenshotTest {
      */
     private fun assertOneControlRow() {
         val density = composeRule.activity.resources.displayMetrics.density
-        fun centreDp(description: String): Float {
-            val b = composeRule.onNode(hasContentDescription(description)).fetchSemanticsNode().boundsInRoot
+        fun centreDp(description: String, substring: Boolean = false): Float {
+            val b = composeRule.onNode(hasContentDescription(description, substring = substring)).fetchSemanticsNode().boundsInRoot
             return (b.top + b.bottom) / 2f / density
         }
         val select = centreDp(SELECT_DESCRIPTION)
         val filters = centreDp(FILTERS_DESCRIPTION)
         val layout = centreDp(LAYOUT_GRID2_DESCRIPTION)
+        // NITS-APP-1: the sort button too ("Sort: Name"; the direction
+        // toggle says "Sort direction: ...", so the prefix is unique).
+        val sort = centreDp(SORT_DESCRIPTION_PREFIX, substring = true)
         assertTrue(
-            "Filters (${filters}dp), Select (${select}dp) and the layout toggle (${layout}dp) are not on one row",
+            "Sort (${sort}dp), Filters (${filters}dp), Select (${select}dp) and the layout toggle (${layout}dp) are not on one row",
             kotlin.math.abs(select - filters) <= LAYOUT_TOLERANCE_DP &&
-                kotlin.math.abs(select - layout) <= LAYOUT_TOLERANCE_DP,
+                kotlin.math.abs(select - layout) <= LAYOUT_TOLERANCE_DP &&
+                kotlin.math.abs(select - sort) <= LAYOUT_TOLERANCE_DP,
         )
     }
 
@@ -640,6 +644,9 @@ class LibraryScreenshotTest {
 
         /** `R.string.library_select_mode`, the Select button's spoken label. */
         const val SELECT_DESCRIPTION = "Select games"
+
+        /** The sort button's spoken label starts with this (web `.sortg select`). */
+        const val SORT_DESCRIPTION_PREFIX = "Sort: "
 
         /** `R.string.library_layout_grid2`. */
         const val LAYOUT_GRID2_DESCRIPTION = "2-column grid"

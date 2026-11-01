@@ -33,6 +33,7 @@ import dev.steamvault.app.storage.CredentialStore
 import dev.steamvault.app.storage.InMemorySettingsViewPreferences
 import dev.steamvault.app.storage.SettingsViewPreferences
 import dev.steamvault.app.ui.settings.logic.CoreApplyLine
+import dev.steamvault.app.ui.settings.logic.EXPERT_SECTION_ID
 import dev.steamvault.app.ui.settings.logic.RiskyItem
 import dev.steamvault.app.ui.settings.logic.SettingsLayout
 import dev.steamvault.app.ui.settings.logic.SettingDraft
@@ -565,4 +566,4 @@ class SettingsController(
 enum class LibraryIdMessage { ABSENT, ENV_ONLY, READONLY, INVALID, SERVER }
 
 /** The Expert section's id (shown only while the switch is on). */
-internal const val EXPERT_SECTION = "expert"
+internal const val EXPERT_SECTION = EXPERT_SECTION_ID

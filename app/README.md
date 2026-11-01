@@ -4179,8 +4179,10 @@ machine would not match CI's pixels anyway (fonts, native graphics build).
 
 **Profiles.** 411 dp (Pixel reference) and 360 dp wide, font scale 1.0 and
 1.3, Robolectric SDK 35, all at 420 dpi; plus `night` at 411 dp / 1.0 (the
-theme is single-dark, so it should equal its `notnight` twin -- it guards
-against the app starting to read the system setting) and the List layout
+theme is single-dark, so it must equal its `notnight` twin -- it guards
+against the app starting to read the system setting; `NightGoldenTwinTest`
+compares the two goldens pixel for pixel, so a refresh cannot silently
+accept a differing night shot) and the List layout
 at 360 dp / 1.3. Six images:
 
 | Test | Width | Font | Other |

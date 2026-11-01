@@ -223,6 +223,29 @@ class OnboardingLibraryIdTest {
         assertTrue("the finished lookup clears its busy flag", !c.libraryLookupBusy)
     }
 
+    @Test
+    fun `MUTATION PIN -- a double tap before the lookup runs keeps the job Finish waits for`() = runTest {
+        val c = tested(stored = STORED)
+        c.libraryIdInput = STORED
+        server.enqueue(
+            MockResponse().setBody("""{"configured":true,"game_count":1,"games":[{"appid":10,"name":"Alpha"}]}""")
+                .setBodyDelay(300, TimeUnit.MILLISECONDS),
+        )
+        server.enqueue(MockResponse().setBody("""{"configured":true,"players":[]}"""))
+        server.enqueue(MockResponse().setBody(settingsJson(STORED)))
+        // Two taps in the same frame: neither launched lookup has run yet,
+        // so the busy flag is still false for the second one (NITS-APP-1).
+        c.startLibraryLookup(this)
+        c.startLibraryLookup(this)
+        testScheduler.runCurrent()
+        assertTrue("the lookup must be running when Finish is tapped", c.libraryLookupBusy)
+
+        c.finishAfterPendingLookup()
+
+        assertEquals("Finish waited for the running lookup, not for a no-op second job", LibrarySaveNote.Saved(STORED), c.librarySave)
+        assertEquals(5, server.requestCount) // health, settings, relay x2, settings
+    }
+
     private companion object {
         const val STORED = "76561198042117903"
         const val SIGNED_IN = "76561198000000001"

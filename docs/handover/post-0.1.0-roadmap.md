@@ -1954,7 +1954,8 @@ and VERIFY-COLD-1 is prose in the Sunday-test box of the rc19.3 block.
   already moves a focused row with ArrowUp/ArrowDown. DOWNLOADS-1 must keep
   that path when it drops the arrow buttons; it is not a new follow-up.
 - **NITS-AUDIT-1 (small, rc22):**
-  - dead code `packagesAriaText` (app `ContentGroups.kt`);
+  - dead code `packagesAriaText` (app `ContentGroups.kt`; removed in
+    NITS-APP-1);
   - web test that "Update now" in the group sheet sends the package ids
     (`web/tests/game-detail-sheet-update.test.js`);
   - optional origin check in `isVaultReturnTo` (D11 review);
@@ -1962,7 +1963,8 @@ and VERIFY-COLD-1 is prose in the Sunday-test box of the rc19.3 block.
   - web `api.js` has no client-side request timeout;
   - Android tablet/foldable layout (WindowSizeClass) is unplanned;
   - TalkBack group semantics are unverified;
-  - `DownloadsStatsLiveTest` has a trivial last assertion;
+  - `DownloadsStatsLiveTest` has a trivial last assertion (replaced in
+    NITS-APP-1: the re-entered live range holds the re-fetched summary);
   - AGENT-FIX-2 follow-up: registry lookup in the Go agent itself;
   - CI-FIX-3 follow-up: pin the APK signing certificate fingerprint in CI;
   - `analyze.ps1` log format gap;

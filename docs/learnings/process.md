@@ -215,3 +215,9 @@ at the end, under a dated heading, one entry each with the WP that proved it.
   `{ deny }`** (not `isError`), and relative tool paths reach the `fs.stat`
   hook already resolved against the session directory (the mod folder in
   a test).
+
+### 2026-11-01 NITS-APP-1
+
+- A carried nit that survives only as a label ("D19WiringTest pin") cannot
+  be fixed with certainty later: when a nit is carried into the plan, keep
+  at least one sentence that says what is wrong and where.
