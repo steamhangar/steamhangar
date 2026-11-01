@@ -355,6 +355,9 @@ once decided (the decision then lives in the item it belongs to).
   FLAG_SECURE, sensitive clipboard) because it hands out the API key from
   the phone; Weg B (coder's and orchestrator's recommendation): drop it
   from Android parity, device setup stays on the web.
+  **Decided 2026-11-01: Weg B.** Operator's reason: the Android screen is
+  only reachable once the app is already set up, so a pairing flow there
+  adds nothing; device setup stays on the web.
 - **D18 GitHub org** (v0.2.0): ask GitHub for the inactive `GameHangar`
   name, pick a free org, or keep `steamhangar` and rename product and repo
   only. See D18.
