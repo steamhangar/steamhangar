@@ -1,7 +1,11 @@
 package dev.steamvault.app.ui.settings.logic
 
+import dev.steamvault.app.PRODUCT_NAME
 import dev.steamvault.app.net.error.VaultApiError
 import dev.steamvault.app.net.model.AboutComponentOut
+import dev.steamvault.app.net.model.AboutReleaseOut
+import dev.steamvault.app.ui.clients.logic.compareReleaseVersions
+import dev.steamvault.app.ui.clients.logic.isReleaseVersion
 
 /**
  * Settings → About: presentation of `GET /v1/about` (WP VER-2; Android
@@ -212,3 +216,54 @@ fun classifyAboutError(error: Throwable): AboutLoadFailure =
  * this app does not have.
  */
 fun aboutVersionText(version: String?): String? = version?.takeIf { it.isNotBlank() }
+
+// ---------------------------------------------------------------------
+// Product and component versions (WP RELEASE-SPLIT-1c, ADR-0031)
+// ---------------------------------------------------------------------
+
+/** The components of `release`, in the order the block lists them (web
+ * `RELEASE_LABELS`); the UI maps each to `settings_about_release_*`. */
+enum class AboutReleaseComponent(val wireName: String) {
+    SERVER("server"),
+    AGENT("agent"),
+    APP("app"),
+}
+
+/** One component line. [unchangedSince] is the component's version when it
+ * is older than the product (the UI then uses
+ * `settings_about_release_unchanged`), else `null`. */
+data class AboutReleaseRow(
+    val component: AboutReleaseComponent,
+    val version: String,
+    val unchangedSince: String?,
+)
+
+/** The block above the component rows: the product line (`null` when the
+ * product version is unknown) and the component lines. */
+data class AboutReleaseView(
+    val productLine: String?,
+    val rows: List<AboutReleaseRow>,
+)
+
+/** The main line, web `productLine`: "SteamHangar 0.1.0-rc23". */
+fun aboutProductLine(version: String): String = "$PRODUCT_NAME $version"
+
+/**
+ * Web `describeRelease`: `null` when there is nothing to show (a server
+ * before 1c sends no `release`; a local build no component versions). Only
+ * release versions are shown, in the fixed order server, agent, app;
+ * "unchanged since" uses the natural version order
+ * ([compareReleaseVersions]).
+ */
+fun aboutReleaseFor(release: AboutReleaseOut?): AboutReleaseView? {
+    if (release == null) return null
+    val product = release.version?.takeIf { isReleaseVersion(it) }
+    val rows = AboutReleaseComponent.entries.mapNotNull { component ->
+        val version = release.components.firstOrNull { it.name == component.wireName }?.version
+            ?.takeIf { isReleaseVersion(it) } ?: return@mapNotNull null
+        val since = if (product != null && compareReleaseVersions(version, product) == -1) version else null
+        AboutReleaseRow(component, version, since)
+    }
+    if (rows.isEmpty()) return null
+    return AboutReleaseView(product?.let(::aboutProductLine), rows)
+}

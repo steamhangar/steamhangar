@@ -801,6 +801,11 @@
     <string name="settings_about_note_vault_dns">Optional component. vault-api does not check it, so there is no status to show.</string>
     <string name="settings_about_dash_note">A dash means the component did not report this value.</string>
     <string name="settings_about_trademark">SteamHangar is a community project and is not affiliated with Valve Corporation. “Steam” is a trademark of Valve Corporation.</string>
+    <!-- RELEASE-SPLIT-1c (ADR-0031, ABOUT-VERSION-1 Weg A): product version line and component list; twin of web about-view.js RELEASE_LABELS / releaseValueText. -->
+    <string name="settings_about_release_server">Server</string>
+    <string name="settings_about_release_agent">Agent</string>
+    <string name="settings_about_release_app">App</string>
+    <string name="settings_about_release_unchanged">%1$s (unchanged since %2$s)</string>
 
     <!-- WP APP-FEAT-2 (AGENT-FEAT-1): a PC's presence as the SERVER computed
          it (never recomputed here), when it last reported, and the agent

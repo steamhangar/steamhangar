@@ -616,8 +616,14 @@ their open boxes (items 2, 7 and 11) are in section 12. Item 13 stays here.
         `agent_build=false`, `app_build=false`, "reused, NOT rebuilt"
         sections; the operator deletes the branch afterwards) and a plain
         one from HEAD (all-build path); ghcr packages public (ADR-0031).
-        Open: 1c (About and release notes, ABOUT-VERSION-1 decided
-        2026-11-01: Weg A).
+        Done in RELEASE-SPLIT-1c (ABOUT-VERSION-1 Weg A): `GET /v1/about`
+        `release` (product version + server/agent/app component versions;
+        server from the new `VAULT_SERVER_COMPONENT_VERSION` build arg),
+        About on web and Android shows "SteamHangar <product>" and a
+        Server/Agent/App list with "(unchanged since ...)", the release
+        body's verify block starts with a "Components" section (rebuilt /
+        unchanged since); tests `api/tests/test_release_split_1c.py`,
+        `web/tests/release-split-1c.test.js`, `ReleaseSplit1cAboutTest.kt`.
       - [ ] **VERIFY-FAST-1** (deploy/tests + devbox, decided 2026-10-18,
         Weg A) `verify-stack.sh` gets section selection (`VERIFY_SECTIONS`);
         `dev.sh verify` defaults to a lean set (1 config drift, 3 compose
@@ -715,10 +721,21 @@ their open boxes (items 2, 7 and 11) are in section 12. Item 13 stays here.
         `android-reuse` (publish.yml) that the release metadata read and
         the download are two separate reads (the digest check fails closed
         if the release changed in between).
-      - [ ] nit (RELEASE-SPLIT-1b second-pass review):
+      - [x] nit (RELEASE-SPLIT-1b second-pass review):
         `web/js/lib/dist-downloads.js` `appDownloadPlan` reports
         `version: index.version` (the server's) for an APK named with the
         app's own version (inconsistent once the APK is reused).
+        (fixed in RELEASE-SPLIT-1c: download plans report
+        `clientFilesVersion(index, "app")`; "none" keeps the server's)
+      - [ ] ABOUT-CORE-RETAG-1 (finding, RELEASE-SPLIT-1c): once the server
+        is unchanged and enforce retags vault-core, the retagged core image
+        records its OLD build version and commit, while vault-api (rebuilt
+        every release) has the new ones, so About shows vault-core "Check"
+        with "restart it so both run the same release" although nothing is
+        wrong. Candidate fix: treat a core version equal to
+        `release.components.server` as the same release (web
+        `coreComparison` + Android `aboutCoreComparison`, own note). Not hit
+        by rc22 (all three components rebuilt).
       - [ ] remaining nits: MAP-DRIFT-1 fail-safe tests, claim-vs-move race
         test, aria-live on queue move (fixed in NITS-WEB-1:
         `downloads-queue-reorder.test.js`), D19WiringTest pin,

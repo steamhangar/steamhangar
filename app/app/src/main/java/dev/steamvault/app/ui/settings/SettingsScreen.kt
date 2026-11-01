@@ -7,6 +7,9 @@ import dev.steamvault.app.ui.settings.logic.AboutDisplayStatus
 import dev.steamvault.app.ui.settings.logic.AboutLoadFailure
 import dev.steamvault.app.ui.settings.logic.AboutRow
 import dev.steamvault.app.ui.settings.logic.AboutNote
+import dev.steamvault.app.ui.settings.logic.AboutReleaseComponent
+import dev.steamvault.app.ui.settings.logic.AboutReleaseView
+import dev.steamvault.app.ui.settings.logic.aboutReleaseFor
 import dev.steamvault.app.ui.settings.logic.LibraryLookupError
 import dev.steamvault.app.ui.settings.logic.LibraryPreview
 import dev.steamvault.app.ui.settings.logic.aboutRowsFor
@@ -1063,6 +1066,9 @@ private fun AboutSection(controller: SettingsController, scope: kotlinx.coroutin
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         else -> {
+            // WP RELEASE-SPLIT-1c: product line and component versions
+            // above the rows (nothing for a server before 1c / local build).
+            aboutReleaseFor(controller.about?.release)?.let { AboutReleaseBlock(it) }
             for (row in aboutRowsFor(controller.about?.components.orEmpty())) {
                 AboutRowView(row)
             }
@@ -1082,6 +1088,40 @@ private fun AboutSection(controller: SettingsController, scope: kotlinx.coroutin
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
+}
+
+/**
+ * WP RELEASE-SPLIT-1c (ADR-0031, ABOUT-VERSION-1 Weg A), twin of web
+ * settings.js `buildReleaseBlock`: the product version as the main line
+ * ("SteamHangar 0.1.0-rc23"), then one line per component, label and
+ * version, "(unchanged since ...)" for a component older than the product.
+ * Each line is one TalkBack node ("Server, 0.1.0-rc22 (unchanged since
+ * 0.1.0-rc22)"), like a web `<dt>`/`<dd>` pair.
+ */
+@Composable
+private fun AboutReleaseBlock(view: AboutReleaseView) {
+    Column(modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
+        view.productLine?.let {
+            Text(it, style = MaterialTheme.typography.titleSmall, modifier = Modifier.semantics { heading() })
+        }
+        for (row in view.rows) {
+            val label = when (row.component) {
+                AboutReleaseComponent.SERVER -> stringResource(R.string.settings_about_release_server)
+                AboutReleaseComponent.AGENT -> stringResource(R.string.settings_about_release_agent)
+                AboutReleaseComponent.APP -> stringResource(R.string.settings_about_release_app)
+            }
+            val value = row.unchangedSince?.let {
+                stringResource(R.string.settings_about_release_unchanged, row.version, it)
+            } ?: row.version
+            Row(
+                modifier = Modifier.fillMaxWidth().semantics(mergeDescendants = true) {},
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Text(label, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(value, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
+            }
+        }
+    }
 }
 
 /**

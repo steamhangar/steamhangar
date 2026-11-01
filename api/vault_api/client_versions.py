@@ -29,6 +29,16 @@ needs an update.
 A local build sets none of them (empty build args): every client is
 ``None`` and the frontends fall back to comparing with the server version.
 A value outside the release grammar is treated as not set, never shown.
+
+**The server component (WP RELEASE-SPLIT-1c).** ``VAULT_SERVER_COMPONENT_VERSION``
+is the server component's version from the same plan (the release in which
+the server last changed). It is NOT the product version: vault-api is
+rebuilt in every release (it bakes the client files), so its
+``VAULT_BUILD_VERSION`` is always the product version, while the server's
+code may be unchanged since an older release. ``GET /v1/about`` states both
+as ``release`` (:func:`release_out`); the About pages show the product
+version as the main line and the three components below it (operator
+decision ABOUT-VERSION-1, Weg A).
 """
 
 from __future__ import annotations
@@ -107,6 +117,37 @@ def client_version(client: str, environ: Mapping[str, str] | None = None) -> Cli
     if not is_release(minimum):
         minimum = None
     return ClientVersion(version, build, minimum, _same_build(client, version, build))
+
+
+#: The env the api image bakes from the ``VAULT_SERVER_COMPONENT_VERSION``
+#: build arg (WP RELEASE-SPLIT-1c).
+SERVER_COMPONENT_VERSION_ENV = "VAULT_SERVER_COMPONENT_VERSION"
+
+#: The components of ``GET /v1/about`` ``release``, in order (ADR-0031).
+RELEASE_COMPONENTS = ("server", "agent", "app")
+
+
+def server_component_version(environ: Mapping[str, str] | None = None) -> str | None:
+    """The server component's version, or None when the image states none
+    (local build, a workflow_dispatch ``dev-<sha>`` plan) or it is unusable."""
+    env = os.environ if environ is None else environ
+    version = env.get(SERVER_COMPONENT_VERSION_ENV, "").strip()
+    return version if is_release(version) else None
+
+
+def release_out(product_version: str, server_version: str | None,
+                clients: Mapping[str, ClientVersion | None]) -> dict:
+    """The JSON shape of ``release`` in ``GET /v1/about``: the product
+    version (``None`` unless it is a release version, e.g. ``dev``) and
+    each component's version (``None`` when the image states none)."""
+    versions: dict[str, str | None] = {"server": server_version if is_release(server_version) else None}
+    for c in CLIENTS:
+        cv = clients.get(c)
+        versions[c] = None if cv is None else cv.version
+    return {
+        "version": product_version if is_release(product_version) else None,
+        "components": [{"name": n, "version": versions[n]} for n in RELEASE_COMPONENTS],
+    }
 
 
 def client_versions(environ: Mapping[str, str] | None = None) -> dict[str, ClientVersion | None]:

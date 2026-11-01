@@ -237,6 +237,8 @@ def test_publish_passes_exactly_the_two_build_args_from_build_version() -> None:
         ("VAULT_APP_VERSION", "${{ needs.component-plan.outputs.app_version }}"),
         ("VAULT_APP_BUILD", "${{ needs.component-plan.outputs.app_artifact_version }}"),
         ("VAULT_APP_MINIMUM", "${{ needs.component-plan.outputs.app_minimum }}"),
+        # RELEASE-SPLIT-1c: the server component's version (GET /v1/about).
+        ("VAULT_SERVER_COMPONENT_VERSION", "${{ needs.component-plan.outputs.server_version }}"),
     ]
 
 

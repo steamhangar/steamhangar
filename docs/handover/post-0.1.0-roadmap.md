@@ -197,7 +197,11 @@ Antrag filed and the rollout on the operator's stack checked.
     manifest's agent and app paths to `v0.1.0-rc21.1` (agent/app reused;
     operator deletes the branch afterwards) and a plain one from HEAD;
     ghcr packages public (ADR-0031). ABOUT-VERSION-1 decided (Weg A);
-    open: 1c (About and release notes).
+    1c done (About on web/Android with the component list, `release` in
+    `GET /v1/about`, "Components" block in the release body). Open
+    finding ABOUT-CORE-RETAG-1: a retagged vault-core reports the old
+    version, so About would show vault-core "Check" after the first
+    release with an unchanged server (PROJECT_PLAN rc22 block).
 
 ### Version rules (ADR-0029, user decisions 2026-10-18)
 

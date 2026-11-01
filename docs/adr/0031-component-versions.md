@@ -241,10 +241,20 @@ revised the same day: no separate component tags, no own numbering).
   that are compiled into the binary, so the agent honestly becomes
   `0.1.0-rc22`. Agents rc17 to rc21.1 then show "differs from the
   server's agent" once (they are at or above the minimum `0.1.0-rc17`).
-- **1c:** About page and release notes per component. Decision
-  ABOUT-VERSION-1 (roadmap, operator 2026-11-01: Weg A): `/v1/about`
-  shows the product version as the main line and the component list with
-  "unchanged since ..." below it.
+- **1c (done 2026-11-01):** About page and release notes per component.
+  Decision ABOUT-VERSION-1 (roadmap, operator 2026-11-01: Weg A):
+  `GET /v1/about` gains `release` = `{version, components: [{name,
+  version}]}` (product version; server, agent, app); the server's
+  component version comes from the new build arg
+  `VAULT_SERVER_COMPONENT_VERSION` (`server_version` of the plan;
+  `VAULT_VERSION` stays the product version). The About pages (web and
+  Android) show "SteamHangar <product>" as the main line and Server, Agent,
+  App below it, "(unchanged since <version>)" for a component older than
+  the product; a local build shows no list. The release body's verify block
+  starts with "## Components": each component with its version and
+  "rebuilt" or "unchanged since <version>" (", rebuilt" when a dry run still
+  built an unchanged one). Open: ABOUT-CORE-RETAG-1 (a retagged vault-core
+  reports its old version, see PROJECT_PLAN).
 
 ## Rehearsing the reuse path and switching enforce on
 

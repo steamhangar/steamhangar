@@ -2,6 +2,8 @@ package dev.steamvault.app.demo
 
 import dev.steamvault.app.net.model.AboutComponentOut
 import dev.steamvault.app.net.model.AboutOut
+import dev.steamvault.app.net.model.AboutReleaseComponentOut
+import dev.steamvault.app.net.model.AboutReleaseOut
 import dev.steamvault.app.net.model.ClientOut
 import dev.steamvault.app.net.model.InstalledOnEntry
 import dev.steamvault.app.net.model.OwnedGame
@@ -344,6 +346,12 @@ internal fun seedAbout(): AboutOut {
                 "Optional (compose profile dns); most setups use their own DNS rewrite instead. Not checked: vault-api has no " +
                     "network path to vault-dns (egress lock, ADR-0011), and a test query would itself be DNS traffic.",
             ),
+        ),
+        // WP RELEASE-SPLIT-1c: like web demo-data.js, one release whose
+        // three components all changed in it (the vault-api row's version).
+        release = AboutReleaseOut(
+            version = DEMO_SERVER_VERSION,
+            components = listOf("server", "agent", "app").map { AboutReleaseComponentOut(it, DEMO_SERVER_VERSION) },
         ),
     )
 }
