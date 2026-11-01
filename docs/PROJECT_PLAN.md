@@ -4116,10 +4116,33 @@ below carry their own later dates, item 12 is the current one).
         owned list, and the oracle name exists only for apps the update
         check sends (cached, not `not_owned`). Fix: fetch the oracle name for
         rows without any name (rate-limited, metadata only).
-      - [ ] measure on prod with the operator before cutting packages: the
-        depot_app_map rows of 3624140, 553850, 1716750; HD2 completeness
-        after GC job 260 (execute, 4.94 GB freed, 553853 keep 23700 / 6067
-        orphans, `needs_force` set for 553850 and 3624140).
+      - [x] measured on prod with the operator (2026-11-01, read-only
+        `docker exec ... python3 sqlite3 mode=ro`): `depot_app_map` maps
+        3624140 (Wanderburg) to 436781 (owner 436780), 553851 and 553854
+        (owner 553850 HD2) and 1716751 (owners 1716750 Ubisoft Connect and
+        3751950 AC Black Flag Resynced, which legitimately loaded it); each
+        true owner is still mapped and has a recorded manifest.
+        `cache_completeness` for 3624140: the four foreign pairs are
+        `no_target`, its own depot 3624141 is `ok` 562739696/562739696, so
+        the figure is unknown -> "Cached · not verified" (root cause
+        confirmed). Most likely source: prefill job 228 (2026-10-31
+        11:48-12:31Z, 43 min) while the true owners' depots were loaded
+        (manifests recorded 12:42Z and 13:02Z). HD2 shows "Current" after GC
+        job 260 (execute, 4.94 GB freed: old builds only). Until the fix: GC
+        for 3624140 stays safe (keep set includes every owner's recorded
+        manifest), but no Wanderburg verify.
+      - [ ] **PAUSE-ALL-GC-1** (api + web; scope pending operator) "Pause
+        all" pauses prefill jobs only; queued GC jobs answer 409 and run at
+        once (prod 2026-11-01: GC jobs 256-258 ran at 06:48:13 right after
+        "Pause all", looking like a cleared queue). With Auto-GC on execute,
+        "Pause all" must also hold queued GC jobs. Also: a dry-run GC job
+        reads "Garbage collected" in History although nothing was deleted.
+      - [ ] **JOB-SIZE-1** (api + web; scope pending operator) a first
+        download says "Speed not measured yet: the server does not know this
+        game's depots yet" (prod: Subnautica job 254); use the D19 depot
+        preview (expected depots and size from the oracle) for the job card.
+      - [ ] **RUNNER-NAME-1** (web + android; open decision) the operator
+        wants the "Prefill runner" row renamed so it is clear who loads.
       - [ ] close: release gate, tag `v0.1.0-rc21.1`
 
     - [ ] **rc22 — release hardening, no new features** (packages to be cut

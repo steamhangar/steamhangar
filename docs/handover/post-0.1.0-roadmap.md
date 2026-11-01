@@ -341,6 +341,16 @@ once decided (the decision then lives in the item it belongs to).
   FLAG_SECURE, sensitive clipboard) because it hands out the API key from
   the phone; Weg B (coder's and orchestrator's recommendation): drop it
   from Android parity, device setup stays on the web.
+- **RUNNER-NAME-1** (2026-11-01, rc21.1): name of the "Prefill runner" row.
+  Weg A (recommended): the product name from one constant, today
+  "SteamHangar", "GameHangar" after D18; Weg B: "GameHangar" now although
+  the rest still reads SteamHangar.
+- **RC21.1-SCOPE** (2026-11-01): PAUSE-ALL-GC-1, JOB-SIZE-1 and
+  RUNNER-NAME-1 in rc21.1 (recommended) or only the fixes (MAP-ATTRIB-1,
+  TOOL-NAMES-1, PAUSE-ALL-GC-1) with the rest in rc22.
+- **DIAG-DB-1** (2026-11-01): Antrag for `dev.sh diag db '<select>'`
+  (vault-api only, read-only URI, SELECT only, row limit) so the devbox can
+  measure prod data itself (recommended) or keep asking the operator.
 - **D18 GitHub org** (v0.2.0): ask GitHub for the inactive `GameHangar`
   name, pick a free org, or keep `steamhangar` and rename product and repo
   only. See D18.
