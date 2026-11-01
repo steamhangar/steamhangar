@@ -965,6 +965,14 @@ that vault-api makes on every install with no switch:**
    any app outside the set still protects its depots
    (api/README.md "Grouped delete"). GC and every automatic path still only
    gain protection from oracle data.
+   **WP TOOL-NAMES-1 (rc21.1, 2026-11-01):** the set of app ids sent widens
+   by one narrow class: a tracked app that no source names (blank
+   `apps.name`, no store name, no stored oracle name; e.g. a Steam tool or
+   config app without a store page) is asked about by the cover refresher
+   (`api/vault_api/oracle_names.py`), at most 2 per minute, once per app with
+   a per-app backoff (1 to 30 days) and a one-hour global pause after any
+   failure. Same client, URL, validation and log line as the update check;
+   off with the oracle switch.
 3. **Cover art.** The web UI's Content-Security-Policy allows exactly two
    external image hosts: `img-src 'self' data: https://cdn.akamai.
    steamstatic.com https://shared.akamai.steamstatic.com`

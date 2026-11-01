@@ -21,11 +21,14 @@ TOOL-APPS-2b).
   store type, ``related_items.parent_appid`` and ``name``. Written by
   ``record_store_results``.
 * ``steamcmd_api`` -- the manifest oracle (``oracle.py``), only while the
-  oracle is on. No extra oracle request is ever made for this (decision Q8,
-  Weg B): ``fill_from_oracle`` reads what the oracle already stored for
-  CACHED apps -- an app's own ``common.type``/``common.parent``/
+  oracle is on. ``fill_from_oracle`` makes no request (decision Q8, Weg B):
+  it reads what the oracle already stored -- for CACHED apps through the
+  update check -- an app's own ``common.type``/``common.parent``/
   ``common.name``, and the ``extended.listofdlc`` and depot ``dlcappid``
-  links of a cached parent (``linked``).
+  links of a cached parent (``linked``). The one extra request is for names
+  (WP TOOL-NAMES-1): ``oracle_names.py`` asks the oracle about tracked apps
+  that NO source names, a small rate-limited batch per refresher tick, and
+  stores the answer the ordinary way, so this fill picks the name up.
 
 **Merge on read, per field, store first:** each of type, parent and name is
 the store's value when the store gave one, else the oracle's. So a store

@@ -742,3 +742,10 @@ in the same `GetItems` request; the app ids sent are unchanged. The manifest
 oracle is not asked about any additional app (ADR-0022 Q8 B: classification
 uses the answers the update check already fetches for cached apps), so the
 2026-10-13 addendum's "it receives the cached app ids" stays true as written.
+
+## Note 2026-11-01 (WP TOOL-NAMES-1): no egress change, a few more app ids
+
+No host, filter or allowlist changes. The oracle now also receives the app id
+of tracked apps that no source names (rate-limited, ADR-0022 addendum
+2026-11-01), so "it receives the cached app ids" in the 2026-10-13 addendum
+now reads "the cached app ids, plus unnamed tracked apps".

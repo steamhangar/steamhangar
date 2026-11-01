@@ -134,8 +134,9 @@ vault-api makes outbound HTTPS requests to a third party** (default
 which games this vault tracks, and roughly when. No API key, no client id, no
 user identity and no Steam credentials are ever sent (ADR-0004: vault-api
 never has any). Since WP UPD-1 the oracle is on by default (the always-on
-update check needs it) and polls every cached app in the background, so the
-privacy trade-off is spelled out in api/README.md's "Manifest oracle" section
+update check needs it) and polls every cached app in the background (plus,
+since WP TOOL-NAMES-1, tracked apps no source names, rate-limited, see
+``oracle_names.py``), so the privacy trade-off is spelled out in api/README.md's "Manifest oracle" section
 and in both .env.example files, with ``VAULT_MANIFEST_ORACLE=off`` as the
 opt-out.
 """

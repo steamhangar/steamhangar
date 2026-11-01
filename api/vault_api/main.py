@@ -33,6 +33,7 @@ from vault_api.manifest_ingest import (
     remove_orphan_depot_manifests,
     repair_recorded_manifests,
 )
+from vault_api.oracle_names import OracleNameLookup
 from vault_api.routers import (
     about,
     agent,
@@ -431,8 +432,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # lifespan starts it, and a test can replace it before that.
     # WP TOOL-APPS-2a: the same thread fills app classification from the
     # oracle's stored answers, only while the oracle is on.
+    # WP TOOL-NAMES-1: and asks the oracle for the name of apps no source
+    # names, a small batch per tick; it checks the oracle switch itself.
     app.state.cover_art_refresher = CoverArtRefresher(
-        settings.db_path, oracle_enabled=settings.manifest_oracle_enabled
+        settings.db_path,
+        oracle_enabled=settings.manifest_oracle_enabled,
+        name_lookup=OracleNameLookup(settings),
     )
     # WP D10 COVER-CACHE-1: same reasoning; GET /v1/covers reads its cache_dir.
     app.state.cover_file_fetcher = CoverFileFetcher(settings.db_path)

@@ -76,6 +76,11 @@ whose ``next_check_at`` has passed, and asks once:
   offline vault sends at most one request per backoff step. The first
   failure of a streak is logged once at WARNING, repeats at DEBUG, and the
   recovery once at INFO -- an offline test instance stays quiet.
+
+After the store batch, the same tick fills app classification from the
+oracle's stored answers (``app_classification.fill_from_oracle``) and, while
+the oracle is on, asks the oracle about at most a couple of apps that no
+source names (``oracle_names.py``, WP TOOL-NAMES-1).
 """
 
 from __future__ import annotations
@@ -93,6 +98,7 @@ from urllib.parse import urlsplit
 from vault_api import app_classification, deletion, steam_relay, tool_apps
 from vault_api.db import get_connection
 from vault_api.jobs import TIMESTAMP_FORMAT
+from vault_api.oracle_names import OracleNameLookup
 
 logger = logging.getLogger(__name__)
 
@@ -478,6 +484,7 @@ class CoverArtRefresher:
         fetch: Callable[[Sequence[int]], bytes] | None = None,
         now: Callable[[], datetime] = _utcnow,
         oracle_enabled: bool = False,
+        name_lookup: OracleNameLookup | None = None,
     ) -> None:
         self._db_path = db_path
         self._fetch = fetch
@@ -486,6 +493,9 @@ class CoverArtRefresher:
         # the oracle's stored answers (``Settings.manifest_oracle_enabled``,
         # not DB-overridable, so the boot value is the effective one).
         self._oracle_enabled = oracle_enabled
+        # WP TOOL-NAMES-1: asks the oracle about apps no source names, a
+        # small batch per tick (``oracle_names.py``); None = never.
+        self._name_lookup = name_lookup
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self._streak = 0
@@ -520,23 +530,35 @@ class CoverArtRefresher:
     def tick(self) -> RefreshOutcome | None:
         """One step: one store batch unless paused after a failure, then the
         classification gap fill from the oracle's stored answers (no network,
-        so it runs while paused too; WP TOOL-APPS-2a)."""
+        so it runs while paused too; WP TOOL-APPS-2a), then the oracle name
+        lookup for apps still without any name, followed by a second fill so
+        a name it stored shows at once (WP TOOL-NAMES-1; its own pause and
+        backoff, independent of the store's)."""
         now = self._now()
         paused = self._paused_until is not None and now < self._paused_until
         conn = get_connection(self._db_path)
         try:
             outcome = None if paused else refresh_once(conn, now, self._fetch)
-            try:
-                app_classification.fill_from_oracle(
-                    conn, oracle_enabled=self._oracle_enabled
-                )
-            except sqlite3.Error:
-                logger.exception("App classification fill failed; trying again next tick.")
+            self._fill(conn)
+            if self._name_lookup is not None:
+                try:
+                    looked_up = self._name_lookup.run_once(conn, now)
+                except sqlite3.Error:
+                    logger.exception("Oracle name lookup failed; trying again next tick.")
+                else:
+                    if looked_up.answered:
+                        self._fill(conn)
         finally:
             conn.close()
         if outcome is not None:
             self._log(outcome, now)
         return outcome
+
+    def _fill(self, conn: sqlite3.Connection) -> None:
+        try:
+            app_classification.fill_from_oracle(conn, oracle_enabled=self._oracle_enabled)
+        except sqlite3.Error:
+            logger.exception("App classification fill failed; trying again next tick.")
 
     def _log(self, outcome: RefreshOutcome, now: datetime) -> None:
         if outcome.error is not None:
