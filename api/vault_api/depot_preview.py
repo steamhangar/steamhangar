@@ -267,6 +267,55 @@ def clear_preview(conn: sqlite3.Connection, appid: int) -> None:
         conn.execute("DELETE FROM depot_preview_state WHERE appid = ?", (appid,))
 
 
+@dataclass(frozen=True)
+class JobExpectation:
+    """WP JOB-SIZE-1: what a running first download is EXPECTED to load.
+
+    ``depotids`` are the preview's public-branch depots that no app has in
+    ``depot_app_map``: a depot the vault already maps to another app also
+    carries that app's traffic, so counting it would attribute foreign bytes
+    to this job (the MAP-ATTRIB-1 lesson). DLC depots without a public
+    manifest are never counted (no size, usually not loaded).
+    """
+
+    depotids: tuple[int, ...]
+    size_bytes: int | None
+    download_bytes: int | None
+
+
+def expectation_from(
+    conn: sqlite3.Connection, stored: StoredPreview
+) -> JobExpectation | None:
+    """The job card's expectation from a ready preview; ``None`` when none of
+    its depots can be attributed (fail-soft on a database error, too)."""
+    candidates = [d.depotid for d in stored.depots if d.manifest]
+    if not candidates:
+        return None
+    placeholders = ",".join("?" for _ in candidates)
+    try:
+        mapped = {
+            int(row[0])
+            for row in conn.execute(
+                f"SELECT DISTINCT depotid FROM depot_app_map WHERE depotid IN ({placeholders})",
+                candidates,
+            )
+        }
+    except sqlite3.Error as exc:
+        logger.warning("depot preview: could not read mappings for app %s: %s", stored.appid, exc)
+        return None
+    depotids = tuple(d for d in candidates if d not in mapped)
+    if not depotids:
+        return None
+    # The sizes cover exactly the depots that are counted: a depot left out
+    # above would otherwise keep "remaining" above 0 for the whole run.
+    counted = [d for d in stored.depots if d.manifest and d.depotid in depotids]
+    return JobExpectation(
+        depotids=depotids,
+        size_bytes=_sum(d.size_bytes for d in counted),
+        download_bytes=_sum(d.download_bytes for d in counted),
+    )
+
+
 def _is_fresh(stored: StoredPreview, now: datetime) -> bool:
     try:
         fetched = datetime.strptime(stored.fetched_at, jobs.TIMESTAMP_FORMAT).replace(
@@ -379,6 +428,24 @@ class DepotPreviewService:
         if stored.outcome == OUTCOME_OK and stored.depots:
             return STATE_READY
         return STATE_UNAVAILABLE
+
+    def job_expectation(
+        self, conn: sqlite3.Connection, appid: int, settings: Settings
+    ) -> JobExpectation | None:
+        """WP JOB-SIZE-1: the expected depots and size of a RUNNING first
+        download, or ``None`` when there is nothing honest to offer.
+
+        Goes through :meth:`lookup`, so every rule of the card open applies
+        unchanged: both switches (``enabled``), no query for an app with
+        observed depots, the TTL, the in-flight dedupe and the rate limit. The
+        query is the same single app id a card open sends. Read-only towards
+        ``depot_app_map``: the expectation only selects which per-depot bytes
+        the job card counts; MAP-ATTRIB-1 owns the mapping.
+        """
+        result = self.lookup(conn, appid, settings)
+        if result.state != STATE_READY or result.stored is None:
+            return None
+        return expectation_from(conn, result.stored)
 
     def _fetch_and_store(self, db_path: str, appid: int, settings: Settings) -> None:
         try:

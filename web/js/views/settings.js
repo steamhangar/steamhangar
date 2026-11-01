@@ -63,9 +63,15 @@
  *  - About — the component table from `GET /v1/about` (WP WEB-FEAT-3),
  *    fetched when this view opens and on Refresh, never polled; a 404 shows
  *    "server too old". The rail's version button opens and focuses it.
+ *  - Expert — a read-only "Storage balance" card at the end of the panel
+ *    (WP STORAGE-BALANCE-1, lib/storage-balance.js): kit tiles from the
+ *    store's "cache" snapshot (`GET /v1/cache/summary`, already polled for
+ *    the rail foot), plus the server's warning. Hidden while there is no
+ *    `storage_balance` (an older server).
  *
- * The settings form is not polled. The one store-singleton subscription
- * ("clients") only rewrites the About "checked ... ago" line.
+ * The settings form is not polled. The store-singleton subscriptions only
+ * rewrite the About "checked ... ago" line ("clients") and the Storage
+ * balance card ("cache").
  */
 
 import { api, isDemoMode } from "../api.js";
@@ -133,6 +139,12 @@ import {
   describeComponents,
   DASH_LABEL,
 } from "../lib/about-view.js";
+import {
+  STORAGE_BALANCE_ACCOUNTED,
+  STORAGE_BALANCE_NOTE,
+  STORAGE_BALANCE_TITLE,
+  storageBalanceView,
+} from "../lib/storage-balance.js";
 
 function errorText(err) {
   if (err && typeof err.detail === "string" && err.detail) return err.detail;
@@ -600,8 +612,63 @@ function buildExpertPanel(groups) {
     card.dataset.group = group.id;
     panel.appendChild(card);
   }
+  panel.appendChild(buildStorageBalanceCard());
   return panel;
 }
+
+// ---------------------------------------------------------------------
+// Storage balance (WP STORAGE-BALANCE-1): a read-only card at the end of
+// the Expert panel, painted from the store's "cache" snapshot (GET
+// /v1/cache/summary, already polled for the rail foot). Hidden while there
+// is nothing honest to show, including an older server without the field.
+// ---------------------------------------------------------------------
+
+let balanceCard = null;
+
+function buildStorageBalanceCard() {
+  const card = fcard(STORAGE_BALANCE_TITLE);
+  card.dataset.group = "storage-balance";
+  card.hidden = true;
+  // The content sits directly in the card (kit `.fcard` grid gap between
+  // warning, tiles and note); a repaint replaces everything after the h3.
+  balanceCard = { card, title: card.firstChild };
+  paintStorageBalance(store.snapshot("cache"));
+  return card;
+}
+
+function paintStorageBalance(summary) {
+  if (!balanceCard) return;
+  const view = storageBalanceView(summary);
+  balanceCard.card.hidden = view === null;
+  if (view === null) {
+    balanceCard.card.replaceChildren(balanceCard.title);
+    return;
+  }
+  const nodes = [];
+  if (view.warning) {
+    const warn = warnBox(view.warning);
+    warn.dataset.role = "balance-warning";
+    nodes.push(warn);
+  }
+  const tiles = el("div", "tiles");
+  for (const t of view.tiles) {
+    const tile = el("div", t.hi ? "tile hi" : "tile");
+    tile.dataset.balance = t.key;
+    const value = el("span", "v", t.value);
+    if (t.sub) value.append(el("small", null, t.sub));
+    tile.append(el("span", "k", t.label), value, el("span", "n", t.note));
+    tiles.appendChild(tile);
+  }
+  const note = view.accounted ? `${STORAGE_BALANCE_ACCOUNTED} ${STORAGE_BALANCE_NOTE}` : STORAGE_BALANCE_NOTE;
+  nodes.push(tiles, el("p", "hint", note));
+  balanceCard.card.replaceChildren(balanceCard.title, ...nodes);
+}
+
+// An `{error}` tick keeps the last figures (same rule as the rail foot).
+store.subscribe("cache", (payload) => {
+  if (!mounted() || !payload || payload.error) return;
+  paintStorageBalance(payload.item);
+});
 
 // ---------------------------------------------------------------------
 // Expert switch and its placement
@@ -1455,6 +1522,7 @@ function resetPanelState() {
   els.gcWarn = null;
   els.expertRow = null;
   els.navEl = null;
+  balanceCard = null;
 }
 
 function fullRender() {
@@ -1580,6 +1648,7 @@ onViewChange((view) => {
   if (view === "settings") return;
   sectionEl = null;
   aboutEls = null;
+  balanceCard = null;
   if (resizeObserver) resizeObserver.disconnect();
   resizeObserver = null;
   // A rail click that navigated here and then away before Settings loaded

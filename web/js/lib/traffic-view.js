@@ -447,6 +447,18 @@ function hitRateDetail(summary) {
 
 /** Tooltip of a job card's speed line. */
 export const JOB_SPEED_NOTE = "Exclusive depots only: bytes on depots that belong to this game alone, from every address.";
+/** WP JOB-SIZE-1: the tooltip while a first download counts expected depots. */
+export const JOB_SPEED_EXPECTED_NOTE =
+  "Expected depots: the server has not mapped this game yet, so the speed and size count the prefill runner's bytes on the depots the oracle expects (an estimate until the download ends).";
+
+/**
+ * The tooltip of a job's speed line (WP JOB-SIZE-1).
+ * @param {object | null | undefined} entry one `jobs[]` element
+ * @returns {string}
+ */
+export function jobSpeedNote(entry) {
+  return entry && entry.expected === true ? JOB_SPEED_EXPECTED_NOTE : JOB_SPEED_NOTE;
+}
 
 /**
  * WP TILE-INTERNET: all-scope miss bytes. The server's `internet_bytes`;
@@ -568,6 +580,106 @@ export function seriesStartText(series, nowMs = Date.now()) {
   return fixed;
 }
 
+/** WP JOB-SIZE-1: a first download's size is the oracle's expectation. */
+export const EXPECTED_SIZE_NOTE = " (expected size)";
+/** WP JOB-SIZE-1 (ETA): no estimate in a job's first seconds (unstable). */
+export const JOB_ETA_MIN_AGE_MS = 20_000;
+/** WP JOB-SIZE-1 (ETA): an estimate above a day says nothing useful. */
+export const JOB_ETA_MAX_SECONDS = 86_400;
+
+/** WP JOB-SIZE-1 (ETA): weight of the newest speed sample in the EMA. */
+export const ETA_SMOOTHING = 0.3;
+
+/**
+ * One EMA step over the ETA speed. A missing or non-positive sample resets
+ * (`null`): there is no speed to estimate with, and the next real sample
+ * starts afresh instead of being dragged down by a stale zero.
+ * @param {number | null | undefined} previous
+ * @param {number | null | undefined} sample
+ * @param {number} [alpha]
+ * @returns {number | null}
+ */
+export function smoothEtaRate(previous, sample, alpha = ETA_SMOOTHING) {
+  if (typeof sample !== "number" || !Number.isFinite(sample) || sample <= 0) return null;
+  if (typeof previous !== "number" || !Number.isFinite(previous) || previous <= 0) return sample;
+  return previous + alpha * (sample - previous);
+}
+
+/**
+ * Per-job smoothed ETA speeds across throughput polls (WP JOB-SIZE-1). The
+ * live runner speed is a ~15-20 s window polled every few seconds; the EMA
+ * keeps the ETA from jumping on every poll. `observe` advances each job once
+ * per new answer object (a repaint with the same answer does not count as a
+ * sample) and forgets jobs the answer no longer lists.
+ */
+export class EtaSmoother {
+  constructor(alpha = ETA_SMOOTHING) {
+    this.alpha = alpha;
+    this.rates = new Map();
+    this.last = null;
+  }
+
+  /** @param {{jobs?: Array<object>} | null | undefined} throughput */
+  observe(throughput) {
+    if (!throughput || throughput === this.last) return;
+    this.last = throughput;
+    const next = new Map();
+    for (const job of throughput.jobs || []) {
+      const rate = smoothEtaRate(this.rates.get(job.job_id), job.eta_bytes_per_second, this.alpha);
+      if (rate !== null) next.set(job.job_id, rate);
+    }
+    this.rates = next;
+  }
+
+  /** @param {number} jobId @returns {number | null} */
+  rate(jobId) {
+    return this.rates.has(jobId) ? this.rates.get(jobId) : null;
+  }
+}
+
+/**
+ * Seconds a running job still needs, or `null` when there is nothing honest
+ * to say (WP JOB-SIZE-1): `remaining_bytes / eta_bytes_per_second`. The
+ * server matches the divisor to the remainder (`preview`: the runner's total
+ * speed over chunks still to request; `completeness`: its MISS speed over
+ * bytes still to fetch) and takes it from the live tier, or from a swept
+ * window only when that started with the job. `rate` is the smoothed speed
+ * (`EtaSmoother`); without it the entry's own value is used. Never for a
+ * Verifying card, a job younger than 20 s, a zero or unknown speed, nothing
+ * remaining, or more than a day.
+ * @param {object | null | undefined} entry one `jobs[]` element
+ * @param {{verifying?: boolean, nowMs?: number, rate?: number | null}} [opts]
+ * @returns {number | null}
+ */
+export function jobEtaSeconds(entry, { verifying = false, nowMs = Date.now(), rate } = {}) {
+  if (verifying || !entry) return null;
+  const remaining = entry.remaining_bytes;
+  const speed = rate === undefined ? entry.eta_bytes_per_second : rate;
+  if (!finiteNonNegative(remaining) || remaining <= 0) return null;
+  if (!finiteNonNegative(speed) || speed <= 0) return null;
+  const started = Date.parse(entry.started_at || "");
+  if (!Number.isFinite(started) || nowMs - started < JOB_ETA_MIN_AGE_MS) return null;
+  const seconds = remaining / speed;
+  if (!Number.isFinite(seconds) || seconds > JOB_ETA_MAX_SECONDS) return null;
+  return seconds;
+}
+
+/**
+ * "about 6 min left", "about 2 h 5 min left"; rounded up to whole minutes,
+ * always marked as approximate. `null` for anything that is not a positive
+ * finite number.
+ * @param {number | null | undefined} seconds
+ * @returns {string | null}
+ */
+export function formatEta(seconds) {
+  if (typeof seconds !== "number" || !Number.isFinite(seconds) || seconds <= 0) return null;
+  const minutes = Math.max(1, Math.ceil(seconds / 60));
+  if (minutes < 60) return `about ${minutes} min left`;
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  return rest ? `about ${hours} h ${rest} min left` : `about ${hours} h left`;
+}
+
 /** The speed line of a Verifying job card (WP DOWNLOADS-1, decided by the user). */
 export const VERIFY_SPEED_TEXT = "Verifying files, no download speed";
 
@@ -578,10 +690,10 @@ export const VERIFY_SPEED_TEXT = "Verifying files, no download speed";
  * job not listed, or the feed not `ok` (the header's note explains that).
  * @param {object | null | undefined} entry one `jobs[]` element
  * @param {string} state `feedState(...)` of the same answer
- * @param {{verifying?: boolean}} [opts] the card is a Verifying run
+ * @param {{verifying?: boolean, nowMs?: number, etaRate?: number | null}} [opts] the card is a Verifying run; the clock and the smoothed speed for the ETA
  * @returns {string | null}
  */
-export function jobSpeedText(entry, state, { verifying = false } = {}) {
+export function jobSpeedText(entry, state, { verifying = false, nowMs = Date.now(), etaRate } = {}) {
   // WP DOWNLOADS-1 (VERIFY-SPEED-TEXT-1): a Verify run compares files and
   // downloads nothing, so "not measured" would read as a fault. Without a
   // measured speed the line says what is happening instead; a speed the
@@ -602,7 +714,14 @@ export function jobSpeedText(entry, state, { verifying = false } = {}) {
   const speed = formatSpeed(entry.bytes_per_second);
   if (speed === null) return null;
   const sofar = formatTrafficBytes(entry.bytes_since_start);
-  return sofar ? `${speed} · ${sofar} loaded so far` : speed;
+  const eta = formatEta(jobEtaSeconds(entry, { verifying, nowMs, rate: etaRate }));
+  const tail = eta ? ` · ${eta}` : "";
+  // WP JOB-SIZE-1: a first download counts the oracle's expected depots and
+  // names their expected download size; marked, since the server has not
+  // mapped the game yet.
+  const total = entry.expected === true ? formatTrafficBytes(entry.expected_download_bytes) : null;
+  if (sofar && total) return `${speed} · ${sofar} of ~${total} loaded so far` + EXPECTED_SIZE_NOTE + tail;
+  return (sofar ? `${speed} · ${sofar} loaded so far` : speed) + tail;
 }
 
 // ---------------------------------------------------------------------

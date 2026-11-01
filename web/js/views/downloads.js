@@ -167,7 +167,8 @@ import {
   mergeNow,
   writeStoredStatsRange,
   jobSpeedText,
-  JOB_SPEED_NOTE,
+  jobSpeedNote,
+  EtaSmoother,
   mergeJobLists,
 } from "../lib/traffic-view.js";
 import { showToast } from "../components/toast.js";
@@ -1969,23 +1970,31 @@ function paintStats() {
   });
 }
 
+/** WP JOB-SIZE-1: smoothed ETA speeds across throughput polls. */
+const etaSmoother = new EtaSmoother();
+
 /** Patch every running job card's speed line (text only). */
 function paintJobSpeeds() {
   if (!mounted()) return;
   const t = traffic.throughput;
   const state = feedState(t);
   const entries = new Map(((t && t.jobs) || []).map((j) => [j.job_id, j]));
+  // WP JOB-SIZE-1: one EMA step per new throughput answer, not per repaint.
+  if (t && t.range === traffic.range) etaSmoother.observe(t);
   for (const card of els.activeBody.querySelectorAll(".job")) {
     const line = card.querySelector('[data-role="job-speed"]');
     if (!line) continue;
     // WP DOWNLOADS-1: a Verifying card says so, with or without statistics.
     const fresh = t && t.range === traffic.range;
-    const text = jobSpeedText(fresh ? entries.get(Number(card.dataset.jid)) : undefined, fresh ? state : "disabled", {
+    const entry = fresh ? entries.get(Number(card.dataset.jid)) : undefined;
+    const text = jobSpeedText(entry, fresh ? state : "disabled", {
       verifying: card.dataset.dk === KIND.VERIFY,
+      etaRate: entry ? etaSmoother.rate(entry.job_id) : null,
     });
     line.textContent = text || "";
     line.hidden = !text;
-    line.title = text ? JOB_SPEED_NOTE : "";
+    // WP JOB-SIZE-1: an expected-depot line says where its figures come from.
+    line.title = text ? jobSpeedNote(entry) : "";
   }
 }
 

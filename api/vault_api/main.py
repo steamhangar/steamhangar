@@ -28,6 +28,7 @@ from vault_api.store_details import StoreDetailsService
 from vault_api.db import get_connection, init_db
 from vault_api.dist import DistCatalog
 from vault_api.jobs import recover_stale_jobs
+from vault_api.map_attrib import cleanup_foreign_mappings
 from vault_api.manifest_ingest import (
     log_cache_dir_canary,
     remove_orphan_depot_manifests,
@@ -122,6 +123,28 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
             )
     except Exception:  # noqa: BLE001 - a repair must never stop the API
         logger.exception("Manifest repair failed; it is retried on the next start.")
+
+    # WP MAP-ATTRIB-1: once per database, remove mapping rows a prefill gave
+    # to the wrong app (depots another PC loaded during its run). Before the
+    # worker starts and before the orphan cleanup. Never fails startup.
+    try:
+        with closing(get_connection(settings.db_path)) as attrib_conn:
+            attrib = cleanup_foreign_mappings(attrib_conn, settings)
+        if attrib.removed or attrib.restored or attrib.skipped_no_oracle:
+            # WARNING when rows changed; INFO when pairs were only left for the
+            # operator (each change is also logged per pair by the step).
+            level = logging.WARNING if attrib.removed or attrib.restored else logging.INFO
+            logger.log(
+                level,
+                "Mapping cleanup: removed %d wrongly attributed (depot, app) pair(s) %s, "
+                "restored %d %s, left %d without oracle data for the operator "
+                "(WP MAP-ATTRIB-1).",
+                len(attrib.removed), sorted(attrib.removed),
+                len(attrib.restored), sorted(attrib.restored),
+                len(attrib.skipped_no_oracle),
+            )
+    except Exception:  # noqa: BLE001 - a cleanup must never stop the API
+        logger.exception("Mapping cleanup failed; it is retried on the next start.")
 
     # WP MAP-DRIFT-1: drop depot_manifests rows no app maps and no bytes back.
     # Every start (idempotent, no stamp); one summary line; never fails startup.
@@ -422,7 +445,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # WP UPD-1: ONE update-check runner, shared by the scheduler tick and
     # POST /v1/updates/check so the two triggers can never overlap.
     # Constructing it starts no thread; each run starts its own.
-    app.state.update_checker = UpdateCheckRunner(settings.db_path)
+    app.state.update_checker = UpdateCheckRunner(settings.db_path, size_cache=app.state.size_cache)
     app.state.scheduler = PrefillScheduler(
         settings,
         webhook_notifier=app.state.webhook_notifier,

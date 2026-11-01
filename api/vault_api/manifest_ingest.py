@@ -557,6 +557,22 @@ class _BinScan:
     vanished: list[str]
 
 
+def manifest_files_by_app(cache_dir: str) -> dict[int, set[int]] | None:
+    """``{app: depots}`` named by SteamPrefill's well-named ``.bin`` files,
+    both under the original and under the containing app of each file
+    (filename only, no payload read), or ``None`` when the directory cannot be
+    listed. Public for ``map_attrib`` (WP MAP-ATTRIB-1)."""
+    scan = _scan_bin_files(cache_dir)
+    if scan is None:
+        return None
+    named: dict[int, set[int]] = {}
+    for (original, depotid), group in scan.groups.items():
+        named.setdefault(original, set()).add(depotid)
+        for candidate in group:
+            named.setdefault(candidate.containing_appid, set()).add(depotid)
+    return named
+
+
 def _scan_bin_files(cache_dir: str, *, prefix: str = "") -> _BinScan | None:
     """List the well-named ``.bin`` files whose name starts with ``prefix``,
     grouped per ``(original_appid, depotid)``. ``None`` if the directory is

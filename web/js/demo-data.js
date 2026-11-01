@@ -1928,6 +1928,65 @@ function demoGroupFields(g) {
   };
 }
 
+/** WP STORAGE-BALANCE-1: `storage_balance` of GET /v1/cache/summary
+ * (api/README.md "Storage balance"). Demo approximation: a game with an own
+ * figure counts as measured (its depots and its expected/present bytes);
+ * every other depot on disk is unmeasured; the demo has no unmapped depots.
+ * Same warning rule as the API (15 % or 50 GB). */
+const DEMO_BALANCE_GB = 2 ** 30;
+function demoStorageBalance(allDepots) {
+  const onDisk = [...allDepots.values()].reduce((a, b) => a + b, 0);
+  const measured = new Set();
+  let planned = 0;
+  let present = 0;
+  for (const g of games) {
+    const f = demoOwnFigure(g);
+    if (!f) continue;
+    // Each depot once (the API counts per depot and manifest): a complete
+    // game adds only the depots no earlier game measured.
+    const fresh = g.depots.filter((d) => !measured.has(d.depotid));
+    if (f.present >= f.expected) {
+      const bytes = fresh.reduce((a, d) => a + (d.size_bytes ?? 0), 0);
+      planned += bytes;
+      present += bytes;
+    } else if (fresh.length === g.depots.length) {
+      planned += f.expected;
+      present += f.present;
+    }
+    for (const d of g.depots) measured.add(d.depotid);
+  }
+  let measuredDisk = 0;
+  let unmeasured = 0;
+  let unmeasuredDepots = 0;
+  for (const [depotid, bytes] of allDepots) {
+    if (measured.has(depotid)) measuredDisk += bytes;
+    else if (bytes > 0) {
+      unmeasured += bytes;
+      unmeasuredDepots += 1;
+    }
+  }
+  const oldBuilds = Math.max(0, measuredDisk - present);
+  const unexplained = onDisk - present - oldBuilds - unmeasured;
+  const concern = oldBuilds + Math.abs(unexplained);
+  const warning = onDisk > 0 && (concern > 0.15 * onDisk || concern > 50 * DEMO_BALANCE_GB);
+  return {
+    on_disk_bytes: onDisk,
+    planned_bytes: planned,
+    present_bytes: present,
+    measured_depots: [...measured].filter((d) => allDepots.has(d)).length,
+    old_builds_bytes: oldBuilds,
+    unmeasured_bytes: unmeasured,
+    unmeasured_depots: unmeasuredDepots,
+    unmapped_bytes: 0,
+    unmapped_depots: 0,
+    unexplained_bytes: unexplained,
+    warning,
+    warning_reason: warning
+      ? `Old builds take ${(concern / DEMO_BALANCE_GB).toFixed(1)} GB (${Math.round((100 * concern) / onDisk)} % of ${(onDisk / DEMO_BALANCE_GB).toFixed(1)} GB on disk), above the 15 % / 50.0 GB threshold. Garbage collection reclaims old builds; Auto-GC only cleans a game after its own prefill.`
+      : null,
+  };
+}
+
 function demoCompletenessFields(g) {
   const f = demoOwnFigure(g);
   return {
@@ -3153,6 +3212,7 @@ export async function demoRequest(method, path, { body, params } = {}) {
       top_consumers: topConsumers,
       unmapped_depots: { count: 0, size_bytes: 0 },
       free_disk_bytes: 500_000_000_000,
+      storage_balance: demoStorageBalance(allDepots),
     };
   }
 

@@ -428,6 +428,23 @@ class SizeCache:
                 # and the loop re-checks.
                 self._cond.wait()
 
+    def peek(self, cache_root: str) -> SizeSnapshot | None:
+        """The snapshot ``get()`` would serve, without any side effect: never
+        starts a walk and never waits (WP STORAGE-BALANCE-1, the update
+        check's balance line, which must not walk the disk or block a run).
+        An expired snapshot is returned as is (the caller reads its age from
+        ``computed_at``); ``None`` when there is no snapshot, it is for
+        another root, or it was invalidated."""
+        with self._cond:
+            snapshot = self._snapshot
+            if (
+                snapshot is not None
+                and self._snapshot_root == cache_root
+                and self._snapshot_generation == self._generation
+            ):
+                return snapshot
+            return None
+
     def invalidate(self) -> None:
         """Mark the snapshot as pre-change: the next ``get()`` blocks until a
         walk that started after this call has finished. Starts no walk

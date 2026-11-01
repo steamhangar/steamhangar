@@ -4098,7 +4098,7 @@ below carry their own later dates, item 12 is the current one).
       decision 2026-11-01: patch, not rc22, with every item below incl.
       PAUSE-ALL-GC-1, JOB-SIZE-1 and RUNNER-NAME-1; `dev.sh diag db` requested
       in Antrag A-20261101-02)
-      - [ ] **MAP-ATTRIB-1** (api) a prefill maps every depot whose directory
+      - [x] **MAP-ATTRIB-1** (473610f; three review rounds incl. a simulation on a full read-only prod export; attribution only with evidence, one-time cleanup removes 5 and restores 3 pairs on prod, see docs/handover/rc21-1-rollout-notes.md) (api) a prefill maps every depot whose directory
         changed during its run to the running app (`prefill.py`
         `diff_depots` / `apply_observed_mapping`, ~884-990), so traffic a PC
         loads in parallel lands on the wrong game. Prod evidence 2026-11-01:
@@ -4177,7 +4177,7 @@ below carry their own later dates, item 12 is the current one).
         Ubisoft Connect) gets a one-off oracle verdict from the name lookup
         and shows "Update available" it cannot act on until the not_owned
         window expires; consider hiding update_available for not_owned apps.
-      - [ ] **JOB-SIZE-1** (api + web) a first
+      - [x] **JOB-SIZE-1** (365b472; preview-based expected size and runner-scoped progress for a first download, ETA from the live runner speed with an EMA, per-source divisor; README privacy wording names the second trigger) (api + web) a first
         download says "Speed not measured yet: the server does not know this
         game's depots yet" (prod: Subnautica job 254); use the D19 depot
         preview (expected depots and size from the oracle) for the job card.
@@ -4188,7 +4188,7 @@ below carry their own later dates, item 12 is the current one).
         captions read the product name from one constant (operator decision
         2026-11-01: today "SteamHangar", "GameHangar" with D18), so it is
         clear who loads.
-      - [ ] **STORAGE-BALANCE-1** (api + web; operator decision 2026-11-01:
+      - [x] **STORAGE-BALANCE-1** (40fea0e; `storage_balance` in `/v1/cache/summary`, INFO line after each update check from a non-blocking size snapshot, expert card in Settings) (api + web; operator decision 2026-11-01:
         Weg A, a storage balance in the product, not a dev-only check) after
         every update check a log line and fields in `/v1/cache/summary`:
         planned (current manifests of measured apps, shared depots counted
@@ -4204,6 +4204,13 @@ below carry their own later dates, item 12 is the current one).
         not-owned apps, e.g. 378640-378649, 370000-370003, 2506210-2506280,
         436780, 1716750, 228980), plus 3 unmapped depots with 38.7 GB of
         latest manifests; old-build orphans not yet sized.
+        Implementation note (review 2026-11-01): "unexplained" is 0 by
+        construction (every depot dir in exactly one class) and can only go
+        negative; the warning therefore counts old builds + |unexplained|
+        (> 15 % of on disk or > 50 GiB) and will stay on on prod until GC has
+        reclaimed old builds (Auto-GC cleans a game only after its own
+        prefill). The balance line reads the size snapshot non-blocking
+        (`SizeCache.peek`) and is skipped when the snapshot was invalidated.
       - [ ] **MAP-LOSS-1** (api; finding 2026-11-01, MAP-ATTRIB-1 review) an
         app's OWN depot loses its mapping row although its own recorded
         manifest and the oracle name it (prod: Enshrouded 1203621, The
@@ -4214,6 +4221,21 @@ below carry their own later dates, item 12 is the current one).
       - [ ] nit (MAP-ATTRIB-1 review): one oracle_branch_manifests query per
         restore candidate; the inlined `apps` INSERT duplicates upsert_mapping
         on purpose (it commits inside BEGIN IMMEDIATE).
+      - [ ] nit (STORAGE-BALANCE-1 review): the balance line is skipped
+        when a job or GC invalidated the size snapshot and nothing read the
+        sizes since; the expert card is in no golden (Expert panel hidden in
+        every golden view).
+      - [ ] nit (JOB-SIZE-1 review): the live runner speed counts all of
+        the runner's depots, so a completeness ETA can run a little short;
+        a not-yet-applied runner period leaves runner-scoped figures at 0
+        for up to one sweep; `etaSmoother` keeps a rate across leaving and
+        re-entering Downloads (clear it on mount); the preview total
+        includes owned DLC and language depots (older D19 behaviour).
+      - [ ] **ANDROID-RC21-1-TWINS** (android; follow-ups of rc21.1 web
+        packages) STORAGE-BALANCE-1 expert card from `storage_balance`
+        (hidden when absent); JOB-SIZE-1 job card "of ~X (expected size)" and
+        the ETA with the same hide rules and EMA, the new JobThroughputOut
+        fields incl. `eta_bytes_per_second` / `eta_speed_source`.
       - [ ] close: release gate, tag `v0.1.0-rc21.1`
 
     - [ ] **rc22 — release hardening, no new features** (packages to be cut
