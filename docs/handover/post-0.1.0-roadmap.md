@@ -106,6 +106,10 @@ Antrag filed and the rollout on the operator's stack checked.
   first rc22 package (plan core + archive, LEARNINGS index, lean agent
   reads; Weg A) and DEV-FLOW-1 (Workflow tool for every rc22 package,
   artifact dashboard with a database instead of status messages).
+- **Added 2026-11-01 (Claude Code mods, user decisions):** DEV-MODS-1, four
+  dev mods (token meter, output trimming, read brake for the big docs,
+  zero-token `/ci` `/antraege` `/wp`), loaded as managed mods by the
+  operator (Weg A); waits for Claude Code >= 2.1.287 in the devbox.
 - **Entry:** rc21 tagged.
 - **Exit:** release gate; every open item 13 B box ticked or explicitly
   moved by the user; measurements written up (inbox note or ADR addendum).
