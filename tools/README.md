@@ -194,3 +194,16 @@ node --test web/tests/png-diff.test.js web/tests/web-serve.test.js web/tests/web
 
 The CI contract (jobs, pins, the executed validate / commit / push steps) is
 pinned by `api/tests/test_web_goldens_1_ci.py`.
+
+## Plan and learnings split check (WP DOC-DIET-1)
+
+`doc-lines-check.py` (Python 3 stdlib, the one non-Node tool here) proves
+that splitting `docs/PROJECT_PLAN.md` into the core plus
+`docs/plan-archive/`, and `docs/LEARNINGS.md` into the index plus
+`docs/learnings/<area>.md`, lost no line: it reads the pre-split files from
+git (`--old-ref`, default `wp/rc22-plan`) and checks every non-empty old line
+against the new files as a multiset; deliberate rewrites are listed in its
+`EXEMPT` table. It also prints the sizes against the targets and a start-read
+estimate. Run from the repo root: `python3 tools/doc-lines-check.py`
+(exit 0 = no line lost). The logic is pinned by
+`api/tests/test_doc_diet_1_lines_check.py`.

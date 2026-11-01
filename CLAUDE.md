@@ -21,10 +21,14 @@ model at call time — never by name in a file or brief.
 
 ## Shared learnings (mandatory)
 
-`docs/LEARNINGS.md` is the living list of project-proven findings. Every
-coder and reviewer reads it before their first task of a session; work
-package briefs reference it instead of repeating its content. The
-orchestrator appends newly distilled findings after each review cycle.
+`docs/LEARNINGS.md` is the index of project-proven findings; the entries
+live in one file per area under `docs/learnings/`. Every coder and reviewer
+reads the core plan (`docs/PROJECT_PLAN.md`), the learnings index and the
+area file(s) of the package before their first task of a session, never
+`docs/plan-archive/`, `docs/WORKPACKAGES.md` or other big docs whole (grep
+or read line ranges instead). Work package briefs name the areas instead of
+repeating their content. The orchestrator appends newly distilled findings
+to the matching area file after each review cycle.
 
 ## Roadmap rule (mandatory)
 

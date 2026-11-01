@@ -322,2103 +322,26 @@ is a later option for users who expose the API differently.
 
 ## 7. Phase Plan
 
-### Phase 0 — Feasibility PoC (CRITICAL, before anything else)
-**Goal: verify the central assumption before writing product code.**
-- [x] Test setup: nginx with `proxy_store` + hosts-file redirect
-      *(run natively on Windows instead of a container — deliberate decision:
-      develop natively first, containerize at end of Phase 1; see `poc/`)*
-- [x] Route a real Steam download through it and verify:
-  - [x] Does Steam consistently use the `/depot/<id>/chunk/<hash>` scheme?
-        *(2026-08-04: 187 real-client requests, 100% chunk/manifest
-        conformance, zero non-conforming URIs — see
-        `poc/steam-client-test/RESULTS-*.md`)*
-  - [x] Do range requests work cleanly with `proxy_store`?
-    (known risk: `proxy_store` only stores complete responses —
-    may need the `slice` module, or chunks may be small enough)
-    *(2026-08-04: the real Windows client sent ZERO Range headers
-    (~1 MiB chunks, full-body GETs); the CDN edge tested ignores Range
-    on miss and always returns full 200; warm-cache ranges served
-    natively. Production follow-up: strip client Range upstream +
-    store-only-200 guard — see `poc/RANGE-FINDINGS.md`)*
-  - [x] Cache hit on second download? Speed LAN-limited?
-        *(2026-08-04: 93/93 HIT after uninstall/reinstall, zero upstream
-        contact, disk-limited — 81.8 MiB served in ~1 s)*
-  - [x] **Miss-handling decision:** synchronous store vs. transparent
-    passthrough + async prefill (see pain-points section) — measure both
-    *(measured in `poc/MISS-HANDLING-FINDINGS.md`: perf difference within
-    noise. 2026-08-05 gate decision: HYBRID — store-on-miss (Phase 1)
-    plus miss-triggered prefill completion (Phase 3). See ADR-0001)*
-- [x] Run SteamPrefill against the PoC cache — does it fill correctly?
-      *(2026-08-04: SteamPrefill v3.7.1 auto-detected the cache via the
-      lancache-heartbeat contract and prefilled path-faithfully — layout
-      cross-check PASS, repeat requests served as HITs. Notable: 0 manifest
-      requests through the cache, and `?nocache=1` speed probes that
-      production vault-core should honor as a cache bypass — see
-      `poc/steamprefill/RESULTS-STEAMPREFILL-*.md`)*
-- [x] Verify behavior of the Linux/Steam Deck client (known upstream quirk:
-      does not perform the `lancache.steamcontent.com` lookup like Windows)
-      *(2026-08-05, Ubuntu 26.04/WSL2, current stable client: the quirk is
-      OUTDATED — the Linux client DOES perform lancache discovery and sent
-      3574 requests through the cache with real CDN Host headers, zero
-      Range headers. Cross-client sharing confirmed: chunks cached by the
-      Windows client served to the Linux client as HITs. A transient
-      upstream-IP outage also produced 502/stall evidence motivating
-      production upstream design (honor client Host header, short
-      connect timeouts, retry) — see
-      `poc/linux-client-test/RESULTS-20260805-083353.md`)*
-- **Abort criterion:** If `proxy_store` fails on range requests with no clean
-  workaround → fall back to Plan A (unmodified LanCache + a manager layer in
-  the spirit of lancache-manager; the rest of the project stays usable as-is)
+The full phase plan (every package, evidence note and decision) is archived
+verbatim in [`docs/plan-archive/`](plan-archive/README.md). References like
+"plan §7 Phase 3" in code and docs resolve through this table. Open boxes of
+the archived phases are listed in section 12 and ticked there.
 
-### Phase 1 — vault-core + vault-api (server MVP)
-- [x] Production-ready nginx config (log rotation, healthcheck) —
-      implements the Phase-0 requirements from ADR-0001: lancache
-      heartbeat, Range-strip + 200-only store guards (incl. retried-200
-      handling), nocache=1 bypass, client-Host upstream with short
-      timeouts/retry, store-on-miss
-      *(caveat: log rotation is documented, implemented with the
-      container in WP 1.9; tmp/ and cache/ must share one volume)*
-- [x] FastAPI skeleton, SQLite schema, depot mapping import
-      *(WP 1.2/1.3: skeleton with secure-by-default auth, schema v1,
-      manual mapping endpoints per ADR-0003; the prefill-driven mapping
-      import lands with the orchestration in the next package)*
-- [x] Prefill orchestration (SteamPrefill subprocess, job queue, one job at a time)
-      *(WP 1.4: selection-file driven — SteamPrefill has no app-id CLI;
-      hybrid miss-trigger itself remains Phase 3 per ADR-0001)*
-- [x] Size calculation + deletion incl. shared-depot protection
-      *(WP 1.5/1.6: TTL-cached sizes; deletion with path guards,
-      link-safe removal, execute-time shared recheck closing the
-      TOCTOU, settle-and-recheck against racing deletes; mapping rows
-      survive deletion by design. Opus + Fable double review)*
-- [x] Docker Compose (2 services + volume), .env convention, pinned image tags
-      *(WP 1.9: tag+digest-pinned images, preflight guards, json-file log
-      rotation, SteamPrefill v3.7.1 with TOFU checksum and a dedicated
-      HOME volume, 62-check container verification incl. real CDN
-      MISS/HIT through the Linux container. Opus + Fable double review)*
-- [x] Optional vault-dns container behind a Compose profile (`--profile dns`)
-      *(WP 1.9: envsubst entrypoint with IPv4 validation and address=/
-      local= re-assertion, fail-closed loopback default binding)*
-- [x] **MVP test: prefill a game via curl, query its size, delete it — no app**
-      *(2026-08-05, WP 1.7: full HTTP-only cycle against the real Steam
-      CDN through the resident vault-core — prefill 79.7 MiB via job
-      queue, size and summary internally consistent to the byte,
-      deletion freed exactly the app's size, disk verified. Evidence:
-      `core/tests/mvp/RESULTS-*.md`. Note: unattended real-account
-      prefills are blocked by the local permission classifier — the
-      run is operator-executed by design)*
-
-### Phase 2 — vault-agent (PC listener) — COMPLETE 2026-08-09
-- [x] ACF/VDF parser (appmanifest + libraryfolders, multiple drives)
-      *(WP 2.1 Python reference with spec-parity pins, ported to Go in
-      WP 2.1b per ADR-0005; reference implementation removed at close-out
-      (WP 2.6), embedded EAppState bit table preserved in go/acf/acf.go)*
-- [x] HTTP reporter with retry (tolerate VPN/network outages)
-      *(WP 2.2: 46/46 validation parity, ctx-cancellable backoff, 429
-      retryable, no secret in flag defaults)*
-- [x] Optional hosts-file mode (opt-in, admin rights, clean uninstall path)
-      *(WP 2.3: marker-block management with byte-exact preservation,
-      fail-closed backup, measured Windows ACL write strategy, UTF-16/
-      symlink refusal, SIGKILL/ENOSPC fault-injection evidence. Note:
-      Phase 0 proved CURRENT Linux clients also perform lancache
-      discovery, so hosts mode works beyond Windows; Opus + Fable
-      double review. Real-Windows verification done 2026-08-06: hosts
-      status on the live machine correctly reported the user's manual
-      Phase-0 entry as a conflict without touching anything)*
-- [x] Document Windows scheduled-task setup, optional installer script
-      *(WP 2.6: per-user task via install-task.ps1/uninstall-task.ps1,
-      API key in an owner-only env file, never on the command line
-      (verified with a canary key against schtasks + task XML),
-      icacls-before-write ACL, idempotent re-install, 36-assertion
-      real-machine harness; Python reference implementation removed per
-      ADR-0005 addendum, fixtures kept, EAppState bit table preserved
-      in go/acf/acf.go)*
-- [x] Linux/SteamOS agent variant (Steam Deck / Steam Machine): library
-      discovery under `~/.local/share/Steam`, systemd user service
-      packaging, SteamOS read-only-rootfs-friendly install (home dir only)
-      — see ADR-0002
-      *(WP 2.5: OnCalendar=*:0/30 + Persistent=true (monotonic timers
-      proved a silent no-op for catch-up), umask-077-first secret env
-      files)*
-- [x] vault-api: scheduler uses the installed list as the prefill set;
-      server-side diff of consecutive agent reports surfaces removed
-      titles (status update / optional cleanup hint, see ADR-0002)
-      *(WP 2.4 report chains ordered by rowid + WP 3.5 window sweeps)*
-
-### Phase 3 — Scheduler & Update Logic — COMPLETE 2026-08-09
-
-All packages merged: 3.1–3.6 (manifests, ingestion, summary, needs_force,
-scheduler, last-remnant), 3.7/3.8/3.8b (GC plan/execute/grace window),
-3.9 (oracle, branch session), 3.10 (event log), 3.11 (event sweep),
-3.12 (job control), 3.13 (webhooks). Suite at close: 1239 green.
-
-Closing plan (2026-08-09, user decision "implement everything"): remaining
-packages are 3.8b grace window (merged) · 3.9 oracle incl. open-beta
-branch manifests (ADR-0007 addendum B) · 3.10 vault-core cache-event log
-(ADR-0008) · 3.11 event sweep = miss-trigger + client hit stats/bypass ·
-3.12 job control + optional auto-GC · 3.13 webhooks. api/-packages run
-strictly serially; 3.10 (core/) runs in parallel.
-
-Branch-dispatch structure for ALL remaining phases (package briefs,
-parallel/serial decisions, merge discipline, open user decisions):
-`docs/WORKPACKAGES.md` (2026-08-09).
-
-- [x] Miss-triggered prefill completion: a cache miss on an unknown/partial
-      app queues a prefill job for that app (hybrid decision, ADR-0001;
-      feed design decided in ADR-0008 → WP 3.10 core log + WP 3.11 sweep)
-      *(WP 3.11: non-forced enqueues under cap → active-job → cooldown →
-      cached-and-current guards; unmapped/shared/manifest misses counted,
-      never triggered)*
-- [x] Job outcome honesty: a prefill run that observed zero depots and has
-      zero cached bytes must not end 'done' (WP 1.7 finding: SteamPrefill
-      exits 0 for unowned apps → green badge for a never-cached game)
-      *(WP 3.3: summary parsing with digits-and-separators row detection,
-      cp850-safe decode chain, 0/0 ⇒ error)*
-- [x] Job control: pause/resume/cancel (`DELETE /v1/jobs/{id}`,
-      pause = terminate the SteamPrefill subprocess, resume = re-run —
-      already-cached chunks replay as disk-speed HITs, so the cache
-      itself is the progress store; user feature decision 2026-08-06)
-      *(WP 3.12: distinct 'cancelled' terminal + 'paused' in
-      ACTIVE_STATUSES (a paused prefill keeps protecting its shared
-      depots), stop_request as a DB column cleared at every
-      terminal/parking transition, pause RELEASES the worker slot with
-      resume priority via the original job id (documented mockup
-      divergence — UI follows backend), cooperative GC cancellation,
-      VAULT_AUTO_GC hook, strict numeric env grammar (6 int + 2 float
-      settings, nan/inf rejected); schema v8; suite 895 green; Opus
-      PASS + Fable PASS)*
-- [x] Manifest comparison (stale detection)
-      *(ADR-0006: staleness via non-forced prefill (Tier 1), depot_manifests
-      latest-per-(app,depot) from WP 3.2 ingestion, needs_force lifecycle
-      with CAS-protected clear from WP 3.4)*
-- [x] Configurable cron window (e.g. 09:00–17:00, every 3 h)
-      *(WP 3.5: schedule_window parsing incl. overnight windows + 24:00 end,
-      OnCalendar-style sweeps from agent reports)*
-- [x] Manifest-based garbage collection (`/v1/cache/{appid}/gc`, optional
-      auto-GC after successful update prefill)
-      *(auto-GC half CLOSED — the earlier "still open" note below is
-      superseded: WP 3.12 shipped `VAULT_AUTO_GC=off|dry-run|execute`
-      (`worker.py::_maybe_queue_auto_gc`, re-read per job so a
-      `PATCH /v1/settings` applies without restart, key exposed by
-      ADR-0009 and wired through `deploy/compose.yaml` in WP D1). This
-      is NOT a Phase-4d blocker any more)*
-      *(WP 3.7 done: read-only GC core — `plan_gc()` with exact on-disk
-      orphan bytes, shared-depot UNION keep sets, ADR-0007 readiness gate,
-      uncached-app exclusion per ADR-0007 addendum, stored-manifest dedupe
-      candidates; 86 tests, mutation-tested fail-closed directions,
-      verified against the real PoC cache (0 orphans, research-doc parity).
-      Endpoint + execution = WP 3.8, Opus + Fable mandatory)*
-      *(WP 3.8 done: POST /v1/cache/{appid}/gc as queued job, dry-run by
-      default at every layer (StrictBool opt-in, NULL job rows read as
-      dry-run), execute-time re-plan by construction (run_gc takes no plan),
-      WP 1.6 guard path reused (safe_child_path, remove_file_settling),
-      keep-newest dedupe with byte-identity check, needs_force for touched
-      depots' owners, partial-failure honesty; schema v7; 687 tests green;
-      Opus PASS + Fable PASS. Optional auto-GC after update prefills still
-      open)*
-- [x] Beta-branch protection for GC (user decision 2026-08-09, ADR-0007
-      addendum): (A) recently-stored grace window via st_ctime as a
-      ChunkExclusion predicate; (B) open-beta branch manifests join the
-      keep set when the oracle (WP 3.9) is enabled
-      *(A: WP 3.8b merged. B: WP 3.9 done — opt-in manifest oracle
-      (`VAULT_MANIFEST_ORACLE=steamcmd_api`, default OFF, mutation-pinned),
-      own tables `oracle_app_state`/`oracle_branch_manifests` (schema v10,
-      `depot_manifests` never written — test-pinned), passworded/unknown
-      branches never stored, `public` excluded from the keep set, additive
-      post-gate union in `gc.py` via generic `extra_manifest_ids` (no oracle
-      import; orphans(on) ⊆ orphans(off)), fail-soft everywhere incl. broad
-      catch so an oracle error can never fail a GC job; stdlib urllib with
-      redirects refused + bounded read; three authed `/v1/oracle/*` routes.
-      Renumbered twice by rebases: WP 3.12 took v8, WP 3.11 took v9, so the
-      oracle tables are v10 — harmless, they add no column to either. 1193
-      tests green, 17 mutations killed by named tests, reviewer re-verified
-      with its own mutation set; Opus PASS ×3. Note: response shape modeled on
-      api.steamcmd.net, not yet verified against the live service — mismatch
-      degrades to oracle-off, documented in api/README)*
-      *(WP 4a.6 done 2026-08-11: web settings view over GET/PATCH
-      /v1/settings — per-key source/applies captions, only-changed-keys
-      PATCH bodies (mutation-pinned), per-field reset, readonly banner;
-      Steam identity per A+C — key entry/removal with masked last4,
-      typed key cleared from DOM on every path (pinned), SteamID64
-      validation with literal boundary fixtures incl. the BigInt
-      0x-hex kill, library preview with 409 setup guidance, ADR privacy
-      note; 3-step onboarding overlay with dialog semantics (focus trap
-      deferred to 4a.8, recorded); serverUrl setting removed (same-origin
-      by design); demo parity programmatically diffed against live
-      responses; 242 headless tests; Opus PASS + should-fix round)*
-- [x] Per-client hit statistics + bypass detection (`/v1/clients`)
-      *(WP 3.11, ADR-0008: event sweep with a persisted byte-offset cursor,
-      strict 9-field v1 parsing, miss-triggered prefill (cooldown + per-sweep
-      cap + unmapped/shared/manifest never trigger), per-address hit stats,
-      bypass detection failing toward NOT accusing; schema v9; new
-      `GET /v1/stats`. Rotation is best-effort — in the shipped containers
-      vault-api may read the log but not truncate it, which is handled,
-      counted and surfaced rather than fatal)*
-- [x] Optional generic webhook notifications (built as a generic webhook
-      feature, not vendor-specific. NOTE: the original wording claimed
-      "Discord/Slack/ntfy-compatible" — that overstates what shipped.
-      Generic JSON receivers and n8n consume the envelope directly;
-      Discord requires `{"content": …}`/`embeds` and needs a relay until
-      the Phase 6 format adapters land)
-      *(WP 3.13: five events — job.done/error/cancelled +
-      client.bypass_suspected/resolved (transition-only, state tracked in
-      both directions regardless of the delivery filter) — one generic
-      JSON schema, single delivery daemon thread with bounded drop-oldest
-      queue, measured zero worker latency against hanging receivers,
-      userinfo→Authorization-header conversion with redacted logging;
-      schema v10; suite 1102 green; Opus PASS + fix round)*
-
-### Phase 4 — Frontends (user decision 2026-08-06: web first, then app)
-
-#### Phase 4a — Web UI (served by vault-api as static files) — COMPLETE 2026-08-11
-
-All packages merged: 4a.1 (shell/static serving), 4a.2 (client/store),
-4a.3 (library), 4a.4 (detail sheet + delete/GC), 4a.5 (downloads),
-4a.6 (settings/onboarding/Steam identity) + 4a.6r (relay, api/),
-4a.7 (notifications/bypass), 4a.8 (e2e + a11y). Suite at close: 379
-headless web tests + 1461 api tests green. Every package: Sonnet coder
-→ Opus review with independent mutation batteries → PASS. Recorded
-mockup divergences live in WORKPACKAGES.md (user veto welcome).
-Remaining for real-world validation: the honest still-open list in
-web/tests/README.md (real screen reader, phone browser cover art, a
-library at the operator's real scale) — the first real-world rollout
-session covers it.
-
-- [x] SPA sharing the mockup's design language; zero extra deploy
-      complexity (vault-api serves it; works over Tailscale/LAN and on
-      phone browsers immediately)
-      *(WP 4a.1 done 2026-08-10: vault-api serves `web/` via exact GET+HEAD
-      routes + /css,/js StaticFiles mounts — /v1 routing parity pinned
-      empirically against a pre-change baseline (trailing-slash 307s, 405s);
-      strict CSP with zero inline script/style in web/; app shell with
-      3-view nav per frozen mockup, status-icon component incl.
-      reduced-motion, toasts; traversal pinned incl. %2e%2e forms; suite
-      1281 green; Opus FAIL→fix→PASS. Docker packaging of web/ is a
-      documented known gap until the packaging WP)*
-- [x] Same API surface as the app: library grid with badges + search,
-      download-to-cache/delete flows, jobs view, settings incl. vault name
-      *(WP 4a.2 done 2026-08-10: fetch wrapper with X-Api-Key + six-kind
-      error taxonomy + demo mode (fixtures 1:1 with the real Pydantic
-      shapes incl. ADR-0003 shared-depot semantics in demo deletes);
-      polling store with jobs-fast/games-clients-slow cadence, backoff
-      with load-bearing jitter floor, hidden-tab full park, nudge
-      coalescing + generation token (fork-free under nudge storms, pinned
-      headless); pure notification differ per mockup NOTES (first poll
-      silent, cancelled silent, update_ready gated on cached bytes,
-      bypass both directions); 60 headless Node tests; Opus
-      FAIL→fix→PASS with 10-mutation battery)*
-      *(WP 4a.3 done 2026-08-10: library view — grid 2/3/list, ANDed
-      search+chips (Failed replaces Update ready until the stale field
-      exists — recorded divergence in WORKPACKAGES.md), capsule pills,
-      multi-select with mockup-faithful bulk-download split and set-aware
-      multiPlan bulk delete (fail-closed on unresolvable owners), real
-      Steam cover art behind an exact-value CSP img-src pin with offline
-      fallback tiles, and round-7 patch-in-place for games ticks
-      (render-plan.js; node-identity verified live, icon subtree
-      untouched by instrumented proof); 135 headless Node tests; Opus
-      FAIL→fix→PASS, 7/7 render-plan + 16-mutation battery killed)*
-      *(WP 4a.5 done 2026-08-10: downloads view — Active/Paused as
-      independent sections per the recorded slot-release divergence
-      (paused holds no slot, queue hint says so), FIFO queue with
-      positions, history newest-first with lazy-fetched cached log
-      excerpts, pause/resume/cancel non-optimistic with error-taxonomy
-      toasts, nav queue-pip with aria-label, new neutral 'cancelled'
-      icon kind (recorded divergence), jobs-tick patch-in-place
-      (stop_request drift patches, status change rebuilds); 173 headless
-      Node tests; Opus PASS, 12/12 mutation battery killed)*
-      *(WP 4a.7 done 2026-08-11: bell + panel consuming the 4a.2 differ
-      (no re-derivation — first-poll-silent inherited), unread badge
-      clears on panel open per NOTES round 6, literal-pinned
-      navigate-to-target via the router incl. downloads job highlight;
-      app-shell bypass banner with WP 3.11's not-accusing wording;
-      clients sheet on real /v1/clients with patch-in-place both
-      directions pinned and the 4a.6 dialog semantics; bell-in-topbar +
-      session-only log recorded as divergences; original coder hung in
-      live verification and was replaced by a finisher who fixed two
-      real gaps; 286 headless tests; Opus PASS, 13/13 mutations)*
-      *(WP 4a.4 done 2026-08-11: game detail sheet on the 4a.7
-      sheet-dialog — four-state depot sharing (adopts the recorded
-      ORPHANED divergence), survives-deletion wording branch, job
-      control incl. queued, single-game delete via multiplan with
-      server-reported bytes, GC dry-run→plan→confirm→execute porting
-      the reviewed Android reducer (execute only via plan+confirm,
-      job-id-bound generation-guarded polling — fork-free), GC-totals
-      scrape with load-bearing after-header scoping and \b insurance
-      verified against gc_execute.py; update_ready notifications now
-      target the detail sheet (4a.7 TODO closed); includes the tracked
-      library.js mounted() fix (empty-grid-on-renavigation regression);
-      demo games routes gained the missing last_manifest_check; 351
-      headless tests; Opus PASS, 15/15 mutations)*
-- [x] Steam identity via Sign in with Steam (ADR-0004); library fetch per
-      the 2026-08-09 addendum (user decision A+C): opt-in server-side relay
-      because the Steam Web API sends no CORS headers — Android keeps the
-      device-local path
-      *(WP 4a.6r done 2026-08-10: opt-in relay — GET/PUT/DELETE
-      /v1/steam/key (32-hex validated, masked key_last4, never echoed) +
-      /v1/steam/owned-games + /v1/steam/player-summaries, all authed;
-      schema v12 single-row key table; oracle-style outbound HTTP with
-      host/scheme/path pinned by string-literal tests against the captured
-      Request; strict steamid64 + upstream-shape validation; 256-entry TTL
-      cache keyed per (endpoint, steamid), cleared on key change; 92 relay
-      tests, 13-mutation review set killed; suite 1375 green; Opus
-      FAIL→fix→PASS. Web-UI consumption follows in WP 4a.6)*
-
-#### Phase 4b — Android App — 4b.1–4b.10 MERGED 2026-08-17
-
-Open: tsnet (post-v1 by decision) and the honest on-device list in
-`app/README.md` — no emulator or phone was available in any implementation
-session, including the WP 4b.9 signing work (proven with a throwaway test
-keystore against Gradle/`apksigner` only, never against a real device
-install). WP 4b.10 closed the clients/bypass detail surface (4b.8 had
-routed bypass notifications to Settings for lack of one — see the PARTIAL
-checkbox below); WP 4b.9 closed the release-signing/APK-docs item and the
-`docs/WORKPACKAGES.md` review carry-over list (one item — the `security-
-crypto` GA re-check — resolved as "report + recommend, do not bump", per
-its own explicit instruction; the LogExcerpt truncation-marker carry-over
-item turned out to already be closed since WP 4b.5, a stale list entry
-rather than open work). Suite at close: 550 JVM tests, lint clean,
-`assembleDebug` green, `assembleRelease` verified both to fail actionably
-without a keystore and to produce a genuinely `apksigner`-verified APK with
-one.
-
-- [x] Kotlin/Compose project, Steam Web API integration (library + covers)
-      *(WP 4b.1 done 2026-08-10: self-contained app/ Gradle project —
-      pinned catalog (AGP 8.7.3, Kotlin 2.0.21, Compose BOM 2024.10.01,
-      SDK 35/min 26), checksum-pinned wrapper; dark theme byte-for-byte
-      from the mockup tokens; status-icon composable with all 10 kinds
-      incl. cancelled, reduced-motion via areAnimatorsEnabled +
-      ContentObserver; allowBackup=false + dataExtractionRules (future
-      API-key storage); 30 JVM tests incl. literal cross-frontend
-      wire-name contract; assembleDebug/test/lint green from cold build;
-      Opus PASS + should-fix round)*
-- [x] Connectivity-profile abstraction (one API-client interface, three
-      implementations: tsnet / system VPN / public domain)
-      *(two of three shipped — System-VPN and Public-domain; tsnet stays a
-      documented seam, see the post-v1 item below)*
-      *(WP 4b.2 done 2026-08-11: suspend OkHttp client for the full /v1
-      surface the app needs (no /v1/steam/* — ADR-0004 device-local
-      path), DTOs field-exact vs HEAD Pydantic incl. strict-Json fixture
-      pass + verbatim api-test anchor; six-kind error taxonomy with
-      literal cross-frontend pin; SystemVpn + PublicDomain profiles with
-      defence-in-depth against redirect key leaks — followRedirects AND
-      followSslRedirects false plus CleartextPolicyInterceptor at
-      application AND network level, each layer standalone-pinned after
-      the reviewer measured an https→http redirect forwarding X-Api-Key;
-      EncryptedSharedPreferences key storage; polling/backoff pure
-      functions in parity with the web store incl. the load-bearing
-      jitter floor; 124 JVM tests; Opus FAIL→fix→PASS→should-fix round;
-      tsnet stays a documented seam, post-v1)*
-      *(WP 4b.3 done 2026-08-11: Steam OpenID login — checkid_setup via
-      Custom Tab with steamvault:// return scheme, assertions
-      re-verified via check_authentication against pinned
-      steamcommunity.com with redirects refused and strict is_valid
-      parsing, signed-fields gate before trust; SteamID64 validator with
-      in-range Arabic-Indic mutation pin; on-device GetOwnedGames/
-      GetPlayerSummaries with the user's own key (never sent to
-      vault-api — allowlist-pinned), key-redacted error paths;
-      documented replay residual (no state binding — candidate 4b.7/
-      4b.9) and honest device-test list incl. 4b.7-blocked items; 219
-      JVM tests; Opus PASS, 12/12 security mutations dead after fix
-      round)*
-- [ ] tsnet Go module + gomobile build (`.aar`), auth-key handling
-      *(deliberately POST-V1: the profile abstraction from WP 4b.2 makes
-      this additive, and the System-VPN profile covers Tailscale via the
-      regular Tailscale app on day one)*
-- [x] Grid + badges + multi-select + trigger + polling
-      *(WP 4b.4 done 2026-08-11: library screen with grid 2/3/list +
-      persisted layout, ANDed search+chips (recorded chip set),
-      multi-select with bulk-download split and set-aware multiPlan bulk
-      delete — all four web logic modules ported semantics-exact
-      (reviewer: 12/12 mutations killed, zero cross-frontend drift);
-      3-item bottom nav per frozen mockup; Coil covers on a separate
-      OkHttp stack (API key cannot ride cover requests — by
-      construction, dependency noted); vault ⊎ Steam-owned merge with
-      honest synthesized rows (needs_force=false pinned); animation
-      preservation via stable GameCardModel equality + lazy keys;
-      "not connected" placeholder until 4b.7 lands the connection UI;
-      314 JVM tests; Opus PASS + should-fix round (string-resource
-      rule recorded in app/README))*
-      *(WP 4b.5 done 2026-08-11: downloads screen — Active/Paused as
-      independent sections with the web's verbatim slot-release wording,
-      FIFO queue with positions, history newest-first with session-
-      cached lazy log excerpts (truncation marker pinned to position 0),
-      non-optimistic pause/resume/cancel with prefill-only pause gating,
-      nav pip (queued|running|paused, foreground-only — recorded in the
-      device-test list); unknown job statuses route to History instead
-      of vanishing (recorded cross-frontend divergence, web backport in
-      4a.8); JobCardModel stability with the strongest pin yet
-      (stop_request drift changes ONLY the action field); 362 JVM
-      tests; Opus PASS, 12/12 parity mutations killed)*
-- [x] Delete flow with size display and confirmation; GC action per game
-      *(WP 4b.6 done 2026-08-11: detail sheet with four-state depot
-      sharing wording (ORPHANED added for the ADR-0003 last-remnant
-      case — recorded divergence), honest last_manifest_check wording
-      incl. the survives-deletion branch ("before the cache was
-      cleared", pinned); delete confirm reuses buildMultiPlan verbatim
-      (single-id ADR-0003 pins); GC flow as a pure reducer — dry-run →
-      plan → confirm → execute, execute reachable ONLY via
-      DryRunPlan→ConfirmExecute (parametrised no-op pins over all
-      states), job-id-bound polling both branches, log-scrape verified
-      against the real gc_execute.py emitter with after-header scoping;
-      fix round also repaired a dead "Check again" button via a
-      controller reset path; 407 JVM tests; Opus PASS + should-fix
-      round)*
-      *(WP 4b.7 done 2026-08-11: 3-step onboarding (profile choice,
-      base-URL+key with a REAL two-step connection check — health for
-      reachability, authed /v1/settings for key validity; optional
-      Steam step closes the setWebApiKey UI gap); settings screen over
-      GET/PATCH /v1/settings with the web's diff/presentation semantics
-      (only-changed-keys pinned, honest applies wording, readonly
-      banner with device-local Steam section correctly ungated);
-      disconnect wipes store + reopens first-run with no stale polls;
-      AND the recorded 4b.3 replay residual is CLOSED — per-login
-      192-bit CSPRNG state in return_to, single-use consume before any
-      network call, mutation-pinned in all directions; 492 JVM tests;
-      Opus PASS 8/8 mutations + nit round)*
-- [x] Bypass warnings surfaced in the UI
-      *(WP 4b.10 done 2026-08-17: closes the routing gap the WP 4b.8 note
-      below records ("recorded routing gap bypass→Settings until a clients
-      surface exists") — a real
-      `ui/clients/ClientsSheet.kt` backed by `GET /v1/clients`, Kotlin port
-      of `web/js/components/clients-sheet.js` + `lib/clients-view.js`'s
-      bypassing/healthy grouping and not-accusing wording, literal-pinned
-      against the web source (`ClientsCrossFrontendContractTest`); the WP
-      4b.8 bypass notification now opens this sheet directly
-      (`NotificationRouting.opensClientsSheetFor`) instead of routing to
-      Settings (`destinationFor` returns `null` for bypass events now, not
-      `Destination.SETTINGS`); a "Clients" button in Settings is the
-      second, non-notification entry point; `ClientRowModel`'s stats/
-      section field split pins the WP 4b.5-style "a drift-only tick must
-      not move the row" stability claim; 16 new/changed JVM tests (550
-      total). Recorded divergence (`docs/WORKPACKAGES.md` Phase 4a
-      cluster): unlike web's WP 4a.7 app-shell bypass banner, Android has
-      no persistent third entry point — the WorkManager differ already
-      covers the push half, and a banner is its own frozen-mockup-scope
-      decision, not a side effect of closing this routing gap; Opus PASS
-      (joint review with WP 4b.9, 4 should-fixes addressed))*
-      *(WP 4b.8 done 2026-08-11: background notifications via
-      WorkManager — 15-min constrained PeriodicWorkRequest with UPDATE
-      policy, Doze respected by design (no exact alarms/foreground
-      service); pure differ port of the web notifications semantics
-      (first-poll silent, cancelled silent, update_ready gated on
-      cached bytes, bypass both directions, the 4b.5 unknown-status
-      improvement); notify-then-persist idempotency with stable
-      per-event IDs + setOnlyAlertOnce; compact non-secret snapshot in
-      plain prefs with shared decodeSnapshotOrNull fail-soft (pinned on
-      the PRODUCTION path); foreground suppression gates posting only;
-      catch-all worker with CancellationException rethrow; recorded
-      routing gap bypass→Settings until a clients surface exists; 534
-      JVM tests; Opus PASS 8/9 mutations + fix round)*
-- [x] Document APK build (no Play Store requirement; F-Droid as a long-term goal)
-      *(WP 4b.9 done 2026-08-17: release signing config reading
-      storeFile/storePassword/keyAlias/keyPassword from a gitignored
-      `app/keystore.properties` (template committed at
-      `app/keystore.properties.example`) or four `VAULT_RELEASE_*` env
-      vars, never generating a keystore itself; a missing/incomplete
-      config fails `assembleRelease`/`bundleRelease`/`packageRelease`/
-      `packageReleaseBundle` immediately via `gradle.taskGraph.whenReady`
-      with an actionable Gradle error (review round 1 finding: the first
-      version only guarded the two aggregate tasks, and `packageRelease`
-      run directly bypassed it, producing a self-labelled
-      `app-release-unsigned.apk` with no `META-INF` signature and no
-      debug-key fallback — bounded severity, fixed by widening the
-      guarded set; `installRelease` stays listed too as a forward-compat
-      belt even though it is currently inert on its own); verified: fails
-      in ~1s with no keystore, and a throwaway `keytool`-generated test
-      keystore produced an APK independently confirmed signed via
-      `apksigner verify --verbose` (`Number of signers: 1`, v2 scheme);
-      `assembleDebug`/`test`/`lintDebug` proven unaffected either way
-      (re-run green with no keystore.properties present after the
-      signing-config change landed). `app/README.md`'s new "Release
-      build, signing, and distribution" section documents the `keytool`
-      command, the properties file, and the verification step; states
-      plainly no Play Store listing exists and F-Droid stays a long-term
-      goal, per this line item. Also closed the `docs/WORKPACKAGES.md`
-      Phase 4b carry-over list in the same pass: moved `IdentityScreen`
-      to `src/debug/` (GalleryScreen had already moved in WP 4b.4);
-      re-checked `security-crypto` 1.1.0-alpha — a GA 1.1.0 now exists
-      and is API-compatible (verified via the downloaded `.aar`'s
-      classes), reported + recommended in `gradle/libs.versions.toml`'s
-      comment, deliberately NOT bumped per the brief's own instruction;
-      found the LogExcerpt truncation-marker item already closed since
-      WP 4b.5 (stale carry-over entry, not open work); made the WP 4b.8
-      notification-icon-reuse note a final v1 decision rather than a
-      standing "revisit" pointer. 550 JVM tests (unchanged from WP
-      4b.10 — no new test files, packaging/config/doc work only), lint
-      clean, `assembleDebug` green; Opus PASS, no blockers (joint review
-      with WP 4b.10) — 4 should-fixes addressed (S1 above; S2 the
-      recorded-divergence note on the checkbox above; S3 `.gitignore`
-      widened to `*.p12`/`*.pfx`/`*.bks` plus a root-level `keystore
-      .properties` belt; S4 reworded a self-contradictory "no keystore,
-      anywhere, ever" README line to distinguish the shipped build from
-      the throwaway verification keystore), plus nit fixes (stale KDoc
-      links, the AGP v2/v3-default overclaim, a stale WORKPACKAGES.md
-      truncation-marker line))*
-
-#### Phase 4c — Manual update check (both frontends, user decision 2026-08-10)
-
-A user-triggered "check my cached games for updates now", so the vault can be
-told from outside the LAN (from work, over Tailscale) to pull whatever is new
-— the point is arriving home to a game that is already playable, not merely
-knowing that an update exists.
-
-**The check IS the fill.** SteamPrefill v3.7.1 has no `--dry-run` (verified
-against `prefill --help`), and it does not need one: a non-forced run costs
-~3 s and zero bytes for an up-to-date app, and downloads only the changed
-chunks when stale (`docs/research/phase3-manifests.md`). So one action
-answers the question and resolves it. Consequence for the UI: the affordance
-must be worded honestly (`Check & update`, not `Check`) — pressing it can
-consume real bandwidth. A check that only reports without filling is not
-available at any reasonable cost, and would be the less useful half anyway.
-
-- [x] Backend gap: `GET /v1/games` exposes `last_prefill_at` but NOT
-      `apps.last_manifest_check`. Surface it in `GameSummary`/`GameDetail`
-      — ADR-0006 tier 1 semantics are "current as of <timestamp>", which is
-      only honest if that timestamp is visible. NOTE the shipped write rule
-      (WP 3.3, verified in this WP): the column is stamped ONLY by a run
-      that CONFIRMED the app already current (done + Updated==0 +
-      UpToDate>0) — not on every run, not on done-with-updates. The UI must
-      label it "confirmed current at X", never "checked at X", and the
-      value survives a cache deletion (unlike `last_prefill_at`)
-      *(mini-WP done 2026-08-10: field in both models, verbatim/null
-      semantics with byte-for-byte round-trip pin, README honesty-table
-      pointer; suite 1379 green; Opus PASS, 6/6 reviewer mutations killed)*
-- [x] Enqueue endpoint question, decided (2026-08-17, WP 4c-api): `POST
-      /v1/prefill` already takes a LIST of app ids and dedupes against
-      `queued`/`running`/`paused` jobs, so an impatient double-tap converges
-      on one job — but the open question was whether a server-side "select
-      all cached apps" convenience route is worth it anyway. **Decision:
-      ship it.** Robust for very large libraries (no frontend needs to
-      enumerate `GET /v1/games` and filter by size first) and directly
-      callable by external automation (n8n, a shell script over the
-      tailnet) without already knowing the app id list. Cost accepted along
-      with it: new write-capable API surface Phase 6's scoped keys must
-      cover explicitly (recorded in `api/README.md`'s Auth section)
-      *(WP 4c-api done: `POST /v1/prefill/cached`, no body — selects every
-      app with cache content (disk-and-mapping truth, one bulk query, no
-      per-app N+1) and enqueues through the SAME `jobs.enqueue_prefill`
-      `POST /v1/prefill` uses, identical dedupe and response shape; "non-
-      forced" is `apps.needs_force`'s existing per-app decision, not a new
-      flag, and its lifecycle table in api/README.md was corrected in the
-      fix round to also name GC execute (not only deletion) as a writer.
-      Fix round (Opus FAIL→fix→PASS): added the primary-guarantee test the
-      first pass shipped without — a multi-depot app plus an ADR-0003
-      shared depot, asserting exactly one response entry per app — after
-      the reviewer's mutation (per-depot instead of per-app selection) went
-      undetected by the original 12 tests; that mutation is now killed by
-      name (`test_multi_depot_apps_and_an_adr_0003_shared_depot_yield_
-      exactly_one_entry_per_app`, verified by re-applying it and watching
-      it fail, then reverting). Also added a route-level paused-dedupe
-      test, fixed two dangling docstring test-file references, renamed a
-      misleadingly-named test, and documented the cold-size-cache latency,
-      the silently-ignored request body, and the mid-loop 5xx case. Suite
-      1475 green (14 new tests). See api/README.md "Check & update all
-      cached games" for the full, corrected contract. Frontend trigger UI
-      and the pull-to-refresh divergence below are separate, unticked,
-      packages that consume this route)*
-- [x] Trigger in the web frontend (WP 4c-web, 2026-08-17/18): a
-      library-header action over all cached games, plus the existing
-      per-game and multi-select paths
-      *(`web/js/views/library.js` gained a "Check & update all cached
-      games" button in its own full-width header row, calling the new
-      `api.prefillCached()` (`POST /v1/prefill/cached`, `web/js/api.js`).
-      Mixed-outcome partition/wording, the forced-run heads-up, the
-      mid-loop-5xx "re-read GET /v1/jobs" recovery signal, and the
-      in-flight guard are pure, DOM-free functions in `web/js/lib/
-      cached-prefill-outcome.js` (web/tests/cached-prefill-outcome.test.js):
-      a paused dedupe is never worded as queued/started and an empty
-      selection is never worded as a failure, both mutation-tested by name.
-      Demo mode (`web/js/demo-data.js`) gained the same route, refactored to
-      share the exact per-appid enqueue helper `POST /v1/prefill` already
-      used — no second enqueue mechanism — with dedicated fixtures for the
-      paused-dedupe and empty-selection cases
-      (web/tests/demo-data-cached-prefill.test.js). Opus round 1: FAIL (one
-      blocker, four should-fixes), all fixed and re-verified in round 2:
-      (blocker) the forced-run note was computed by the view from its OWN
-      `GET /v1/games` snapshot and appended unconditionally — live-
-      reproduced as `"Nothing cached to check. (1 forced...)"` with zero
-      jobs queued — composition moved into `cached-prefill-outcome.js`,
-      gated on the response's own `queued` bucket being non-empty and
-      scoped to only those appids, two named regression tests, both
-      mutation-verified against the reviewer's exact reproduction string;
-      (S1) a fourth bucket, `alreadyQueued` ("N already queued"), for a
-      dedupe against a job the worker has not yet claimed — the common
-      double-press case, previously mis-worded "already in progress" —
-      with a real demo fixture (pause then resume) exercising it end to
-      end; (S2) every string now says "check & update" in full ("queued for
-      check & update", "Checking & updating…", incl. the busy label's
-      accessible name); (S3) the divergence (new header row absent from
-      the frozen mockup; the `doRefresh()` resolution) recorded in
-      `docs/WORKPACKAGES.md`'s Phase 4a register alongside the project's
-      other recorded UI divergences; (S4) the in-flight-guard mutation test
-      now asserts synchronously so a broken guard fails in under 1ms
-      instead of hanging the suite. Suite 414 green (35 new tests). The
-      Android half of this trigger is a separate, still-open work
-      package.)*
-- [x] Trigger in the Android frontend (WP 4c-app, 2026-08-18): the same
-      action, a Kotlin port of the web trigger's pure logic
-      *(`ui/library/logic/CachedPrefillOutcome.kt` ports
-      `web/js/lib/cached-prefill-outcome.js`'s five functions verbatim —
-      partition into `queued`/`alreadyQueued`/`alreadyRunning`/
-      `alreadyPaused` (with the unknown-status catch-all landing in
-      `alreadyRunning`, never dropped), the wording/forced-note composer
-      (`summarizeCachedPrefillOutcome`), the mid-loop-5xx "re-read jobs"
-      signal (`describeCachedPrefillError`), and the in-flight guard
-      (`CheckAndUpdateAction`). `LibraryController.checkAndUpdateCachedGames`
-      wires it through `VaultApiClient.prefillCached()`
-      (`POST /v1/prefill/cached`, no body ever — reusing the same
-      `postEmpty` plumbing `pauseJob`/`resumeJob` already use) and a new,
-      end-aligned button in its own `fillMaxWidth()` row directly below
-      `LibraryScreen.kt`'s search/layout toolbar — the row's CONTAINER
-      spans the width, the button itself does not (unlike web's own
-      `width:100%` button), and the placement order also differs from web's
-      (web: tools → check row → search; Android: search → layout/select →
-      check row) — said plainly rather than reusing web's "full-width
-      header row" description for a materially different layout. Both of
-      `docs/WORKPACKAGES.md`'s recorded WP 4c-web decisions are adopted
-      verbatim, per that entry's instruction: the button wording rule
-      ("check & update", never bare "check"; superseded, see ADR-0006
-      addendum 2026-10-13) and pull-to-refresh staying
-      passive-only (this screen has no pull-to-refresh gesture at all, so
-      the rule is satisfied by omission). `warn` stays paused-only, pinned
-      by an explicit
-      alreadyQueued-must-not-warn assertion (the gap the web port shipped
-      without). Suite 591 green (41 new tests: the four-bucket partition
-      incl. the unknown-status catch-all, both ported BLOCKER REGRESSION
-      cases, the in-flight guard's synchronous assertion, and a literal
-      cross-frontend wording-contract test file, hand-transcribed against
-      the web source, never derived from the Kotlin functions under test).
-      No emulator/device in this environment — `lintDebug`/`assembleDebug`
-      both green is the build evidence; see app/README.md's honest
-      on-device list for what could not be verified here.)*
-- [x] Mockup divergence to resolve in design: `doRefresh()`
-      (`vault-app-mockup-NOTES.md`) only reloads what vault-api already
-      knows. The update check asks Steam and must NOT be silently folded into
-      pull-to-refresh — a gesture that can start downloads is a trap
-      *(Resolved on the web frontend, WP 4c-web, 2026-08-17: kept strictly
-      separate. `store.refreshNow()` (this app's `doRefresh()` equivalent,
-      wired to pull-to-refresh's `visibilitychange` nudge in
-      `web/js/store.js`) still only re-polls vault-api and never calls
-      `POST /v1/prefill/cached` — the new "Check & update" button is the
-      ONLY control that does. `refreshNow()` is still called AFTER a
-      successful check, same as every other mutating action in
-      `library.js`, purely to pull the resulting job rows onto screen
-      sooner — never as a substitute for the Steam-contacting call itself.
-      Decision recorded in `web/js/views/library.js`'s module header and
-      (review round 1, S3) `docs/WORKPACKAGES.md`'s Phase 4a divergence
-      register. Resolved on the Android frontend too, WP 4c-app,
-      2026-08-18, by omission rather than by an explicit carve-out:
-      `ui/library/` has no pull-to-refresh gesture at all
-      (`LibraryController.pollGamesForever`/`pollJobsForever` are
-      fixed-cadence foreground polls only, never triggered by a swipe), so
-      there is no gesture for `POST /v1/prefill/cached` to be folded into
-      in the first place — the same rule holds with nothing extra to
-      write.)*
-- [x] Guardrails (backend half, WP 4c-api): a user-initiated check
-      deliberately bypasses the WP 3.11 miss-trigger cooldown (the user
-      pressed the button) — structural, not conditional: `POST
-      /v1/prefill/cached` never imports `event_sweep`/consults
-      `miss_trigger_state` at all, mutation-tested (adding a cooldown check
-      fails the pinning test by name) — but stays bounded by worker slots
-      (one worker, plan §3) and job dedupe (the same rule every prefill
-      request follows). A 50-game library is ~2.5 min of serial Steam
-      logins, so progress belongs in the Jobs view, never behind a spinner
-      — the endpoint returns `202` immediately by construction. The
-      frontend half (routing an actual button press to this endpoint) is
-      done in both UIs — the web and Android trigger items above
-- Remote use ("check from work") needs no extra work: 4a is served over
-  Tailscale/LAN by design, 4b has the connectivity-profile abstraction
-- Complements Phase 6's `app.updated` webhook: that is the passive/push
-  half (get pinged when the nightly sweep finds something), this is the
-  active/pull half (ask right now)
-
-#### Phase 4d — Persisted settings + "keep the cache current" sweep mode
-
-Two coupled items (user decision 2026-08-10). The sweep mode is the feature;
-persisted settings are what makes it a switch in the UI rather than a
-Compose edit plus restart.
-
-**Settings persistence — Plan B (chosen over env-only).** Today EVERY
-setting is env-only (`VAULT_NAME`, `VAULT_SCHEDULE_*`, `VAULT_WEBHOOK_*`)
-and `GET /v1/schedule` is read-only; there is no settings write endpoint at
-all. A settings screen that can toggle anything therefore needs a new layer.
-
-- [x] Settings table whose values override the env defaults, plus
-      `GET`/`PATCH /v1/settings`. Needs an ADR: precedence rules (env vs DB
-      — which wins, and how an operator forces a value back), validation
-      reusing the same strict grammars `config.py` applies at startup
-      (a bad value must fail at PATCH time, not hours later in the
-      scheduler thread), and which settings stay deliberately env-only
-      *(settings-WP done 2026-08-10, ADR-0009: schema v13 settings table;
-      db>env>default via one accessor; PATCH all-or-nothing transaction,
-      null clears, startup grammars reused (webhook-URL scheme check is
-      the documented API-only exception), env-only allowlist,
-      VAULT_SETTINGS_READONLY 403 lock, webhook-URL userinfo redacted;
-      scheduler thread now starts unconditionally so schedule keys are
-      genuinely next_sweep (B1 pinned end-to-end through the real
-      lifespan); webhook keys honestly restart-required; suite 1461
-      green; Opus FAIL→fix→PASS, 13-mutation battery + A/B thread-cost
-      measurement)*
-- [x] Phase 4a's settings screen builds on this rather than displaying
-      read-only values with "set this env var" hints
-      *(the web settings view shipped in WP 4a.6, commit ff9798a; WP 4d-web,
-      commit c825625, drives it through `GET/PATCH /v1/settings` —
-      `web/js/api.js` `getSettings`/`patchSettings`)*
-
-**Sweep target set — installed PLUS cached (default-on since WP SWEEP-1,
-2026-08-22 — opt-in as originally shipped by WP 4d below).** Today the
-nightly sweep targets the union of *installed* lists from fresh agent
-reports (`scheduler.compute_targets`: "Intersected with nothing else", plan
-A8) PLUS, by default, every app that already holds cache content on disk. A
-game that sits in the cache but is currently installed nowhere — or whose
-PC has been quiet longer than `VAULT_SCHEDULE_CLIENT_STALE_DAYS` — used to
-never be refreshed and silently rot; it now is, out of the box.
-
-**Update (WP SWEEP-1, operator decision 2026-08-22):** the checklist and
-evidence log directly below are WP 4d's own historical record and are left
-as they were written — they describe an opt-in, off-by-default feature,
-which is what WP 4d actually shipped and what was true until this date. It
-no longer describes the shipped default. The operator asked for "keep the
-cache current" to be the out-of-the-box behavior rather than something an
-installer has to discover, was shown the cost this section itself names
-(bandwidth/disk on games nobody asked for, a real behaviour change on
-upgrade) twice, and chose the new default anyway.
-`DEFAULT_SWEEP_INCLUDE_CACHED` flipped to `True` PAIRED with
-`DEFAULT_AUTO_GC` flipping to `execute` in the same change — shipping the
-cached-apps sweep on without
-also shipping real garbage collection on would be exactly the "keeps itself
-current straight into a full disk" condition `scheduler.cached_sweep_gc_risk`
-(named two bullets below) exists to warn about, not a smaller, safer step.
-See `docs/adr/0014-sweep-cached-and-auto-gc-default-on.md` for the full
-argument, the upgrade impact, and the two-line opt-out
-(`VAULT_SWEEP_INCLUDE_CACHED=false` / `VAULT_AUTO_GC=off`, env or `PATCH
-/v1/settings` — both keys remain fully overridable either way, ADR-0009).
-Making that pairing actually run out of the box needed a scheduler window,
-so the same package also ships `VAULT_SCHEDULE_WINDOW=03:00-07:00` /
-`TZ=UTC` as the default Compose configuration (WP SWEEP-1 follow-up,
-2026-08-22) — see that ADR's "Shipping an enabled nightly schedule" section
-for the full argument.
-The same window, by default, also lifts the optional upstream rate cap
-(WP TH-1a/TH-1b, ADR-0015, §11 item 10): `VAULT_UPSTREAM_RATE_WINDOW`
-falls back to `VAULT_SCHEDULE_WINDOW` in `deploy/compose.yaml`, and `TZ`
-is forwarded to vault-core so both are read on the same clock.
-
-- [x] New target-set mode adding every cached app to the sweep. Cheap by
-      construction: ~3 s and zero bytes per app that is already current
-      (see 4c), real traffic only for actual deltas
-      *(WP 4d-backend done: `scheduler.compute_targets(..., include_cached=,
-      cache_root=)` unions `scheduler.cached_appids` with the installed set,
-      deduped by construction (`set[int]`); enqueued through the existing
-      `jobs.enqueue_prefill` dedupe path, no second mechanism. Computed
-      independently of client freshness, so a cached app whose only client is
-      `VAULT_SCHEDULE_CLIENT_STALE_DAYS`-stale is still swept — tested
-      explicitly. Review-round fix (blocker B1, real-`DELETE`-rig
-      measurement, user decision "narrow the definition"): "cached" for THIS
-      purpose is narrower than `GET /v1/games`'s `size_bytes` — an app counts
-      only if it holds a depot NO OTHER tracked app also maps (reusing
-      `deletion.plan_deletion`'s existing exclusive/shared split, not a
-      second definition), because the generous definition kept an app
-      "cached" via a shared/protected depot even after its own content was
-      deleted, silently re-downloading it. `sizes.app_size_bytes` itself is
-      unchanged)*
-- [x] Opt-in, and off by default — it spends bandwidth on games nobody has
-      asked for, which must be the operator's explicit choice
-      *(`VAULT_SWEEP_INCLUDE_CACHED` / `Settings.sweep_include_cached`,
-      default `False`; pinned by mutation at both the `compute_targets`
-      parameter default and the `Settings` field default, each with its own
-      named test)*
-- [x] The backend half (an env var + the widened target set) can land
-      independently of the settings layer; only the UI switch depends on it
-      *(landed on top of ADR-0009: `sweep_include_cached` is in
-      `settings_store.OVERRIDABLE_SPECS`, `applies: "next_sweep"`,
-      PATCH-validated with `config.parse_strict_bool` — reused, not
-      reinvented, and shared with `VAULT_SETTINGS_READONLY`'s startup
-      grammar; `GET /v1/schedule` reports the effective value additively,
-      end-to-end-pinned through a real bare-boot lifespan + PATCH + a real
-      background sweep (review-round should-fix S2, same shape as ADR-0009's
-      own B1 pin). The Phase 4a UI switch closed 2026-08-22 as WP 4d-web
-      (commit c825625): toggle + GC-risk warning + three-way last-sweep
-      status in the web Settings view, all read from served state, never
-      recomputed; review FAILed round 1 on two one-field-over-claim
-      blockers (a crashed sweep would have read "has not completed a run
-      yet" forever; the warning asserted activity a configuration
-      predicate cannot support) — both reworded to state-only copy. Also
-      closed the demo-fixture drift class: a text-scrape guard pins
-      web/js/demo-data.js's stated defaults to api/vault_api/config.py's
-      real ones, labelling VALUE vs GRAMMAR drift. The Android half of
-      the sweep surface shipped the same day as part of WP AG-3, commit
-      0a3bfc5 — see §11 item 4)*
-- [x] **Pair with auto-GC** (still open in Phase 3): every kept-current game
-      adds fresh chunks while the old manifest's chunks become orphans. A
-      vault that keeps itself current without collecting garbage keeps
-      itself current straight into a full disk. These two ship together or
-      the growth must at least be surfaced
-      *(surfaced, not auto-paired, per the backend brief: auto-GC is never
-      silently enabled and the sweep is never refused when unresolved — the
-      operator decides. `scheduler.cached_sweep_gc_risk` names the condition
-      once; `PrefillScheduler` logs a one-time `WARNING` on the transition
-      into it and a matching `INFO` all-clear on the way back out (not per
-      tick, not per process — re-fires on a fresh transition, mutation-
-      tested); `GET /v1/schedule`'s new `sweep_cached_gc_risk` field exposes
-      the identical condition for a future UI banner. Review-round fix
-      (blocker B2, user decision "nothing is being reclaimed"): `dry-run`
-      counts as risky too — it reports what could be freed and frees
-      nothing, so only `VAULT_AUTO_GC=execute` actually clears the flag.
-      api/README.md's "Auto-GC" section documents the coupling)*
-
-  Evidence (WP 4d-backend, 2026-08-17, fix round 2026-08-18):
-  `api/vault_api/scheduler.py` (`cached_appids` now built on
-  `deletion.plan_deletion`/`load_mapping_rows`, `compute_targets
-  (include_cached=, cache_root=)` — `cache_root` now REQUIRED when the mode
-  is on, `cached_sweep_gc_risk`, `warn_once_if_cached_sweep_without_gc` with
-  its INFO all-clear), `api/vault_api/config.py` (`VAULT_SWEEP_INCLUDE_CACHED`,
-  `config.parse_strict_bool`), `api/vault_api/settings_store.py`
-  (`sweep_include_cached` in `OVERRIDABLE_SPECS`, now eight overridable
-  keys), `api/vault_api/routers/schedule.py` (`sweep_include_cached`,
-  `sweep_cached_gc_risk` on `GET /v1/schedule`, additive; module docstring
-  corrected — should-fix S3). Suite 1554 green. Mutations run and killed by
-  name across both rounds: default-off ×2, mode-off-byte-identical,
-  auto-GC-risk logic (both the off/execute boundary and the dry-run-is-risky
-  B2 fix), warn-once-not-every-tick, union-dedupe ×2,
-  cached-app-survives-staleness, the B1 exclusive-vs-shared regression
-  (reviewer's own real-`DELETE` fixture), the S1 always-log-when-on line, and
-  the S1 required-`cache_root` guard. Not done: the Phase 4a settings-screen
-  switch (UI, out of scope per the brief); forwarding
-  `VAULT_SWEEP_INCLUDE_CACHED` through `deploy/compose.yaml` is now a
-  deliberate non-goal, not a pending handoff — WP P1 (`da79aca`) established
-  that DB-overridable settings (this one, `VAULT_SCHEDULE_*`,
-  `VAULT_WEBHOOK_URL`/`EVENTS`) are NOT env-forwarded by design, `PATCH
-  /v1/settings` being the one supported path; `deploy/.env.example` documents
-  the key with that framing instead of a commented assignment line.
-
-- [x] **WP 4f — one definition of "which apps hold cache content"** (gap
-      measured by the WP 4d reviewer on one post-delete state, 2026-08-18: the
-      sweep's `cached_appids` said `[730]`, the "Check & update all cached
-      games" button's own selection said `[440, 730]` — a game the operator
-      just deleted, one button press away from the re-download-after-delete
-      behaviour Plan A exists to prevent. User decision, 2026-08-18: "the
-      user's decision applies to both paths")
-      *(WP 4f done, api/-side, two review rounds — Opus FAIL → fix → PASS:
-      one shared bulk function, `deletion.appids_with_cache_content`, fed by
-      a new single-statement join query
-      (`deletion.load_all_mapping_rows_with_owner_state`);
-      `scheduler.cached_appids` and `routers/jobs.py`'s `POST
-      /v1/prefill/cached` selection are now both thin wrappers around it — no
-      duplicated predicate, structurally pinned by
-      `tests/test_wp4f_shared_cache_content_definition.py` (swap the shared
-      function for a fake, both callers return exactly its result) and by
-      mutation (breaking the shared function fails tests in BOTH
-      `tests/test_scheduler.py` and `tests/test_prefill_cached.py`, verified
-      by re-applying the mutation and watching it fail, then reverting).
-      Adopted `exclusive + remnant` (ADR-0003 addendum, now with its own
-      2026-08-18 note recording this reuse), widening WP 4d's
-      `exclusive`-only rule: two apps sharing ALL their depots with each
-      other and nothing else, both otherwise uncached, are now visible
-      (`tests/test_cache_delete.py::test_appids_with_cache_content_mutual_
-      sharing_pair_becomes_visible`) while the B1 fixture (a co-owner that
-      DOES have content) still excludes the deleted app, pinned unchanged.
-      Fix round closed two unpinned fail-closed arms (B1, docs/LEARNINGS.md's
-      standing WP-3.6 rule): `LEFT JOIN apps` -> `JOIN apps` silently dropped
-      a co-owner with no `apps` row entirely instead of protecting via it
-      (`test_appids_with_cache_content_a_co_owner_with_no_apps_row_
-      protects_the_depot`), and moving the `depot_groups` append below the
-      owner-coercion guard dropped a poisoned co-owner row the same way
-      (`test_appids_with_cache_content_a_poisoned_co_owner_appid_protects_
-      the_depot`) — both mutations re-applied and confirmed to fail these
-      tests by name, then reverted. Also added the HTTP-level regression
-      test the divergence actually needs (S1): a real
-      `DELETE /v1/cache/{appid}` with a cached co-owner, then
-      `POST /v1/prefill/cached` must not reselect the deleted app
-      (`test_a_deleted_app_whose_only_surviving_content_is_a_shared_
-      protected_depot_is_not_reselected` — reverting the route to its
-      pre-WP-4f generous rule left every OTHER test in that file green,
-      confirmed by re-running against the reverted route). Cost: measured on
-      a synthetic 300-app/260-depot mixed-sharing library, the old
-      per-app-query shape (301 statements, including the initial candidate
-      query — matching WP 4d's own historical figure once counted the same
-      way) became ONE statement; separately measured, the in-memory
-      reconstruction is genuinely quadratic in owners-per-depot, NOT
-      negligible (fix round correction, S4) — up to ~3.6 s on a library with
-      a large shared depot (1000 apps × 10 fully-shared depots), which
-      matters most inside `POST /v1/prefill/cached`'s synchronous selection
-      step (its own "202 immediately" contract does not cover this cost);
-      inside the 3-hour-cadence background sweep the same cost is genuinely
-      negligible. Both existing statement-count pins
-      (`test_selecting_cached_apps_is_not_a_per_app_query` at 500 apps,
-      route-level; still 500 exclusively-owned apps, no sharing) plus a new one
-      directly on the shared function
-      (`test_appids_with_cache_content_is_one_statement_regardless_of_app_
-      count`, same N5 fix) stay green. `api/README.md`'s "Sweep target set"
-      and "Check & update all cached games" sections cross-reference each
-      other, state the narrowing edge once, and carry the corrected measured
-      numbers (the WP 4d text's "one small indexed SQL query per candidate
-      app" claim is corrected, and the S2/S3 fix round corrected the env
-      table's blank-means-default rule to name `VAULT_CACHE_ROOT` as the
-      exception plus the actual mechanism for a present-but-blank value: a
-      FORWARDED compose key with empty `.env` interpolation, or a bare
-      `KEY:`/`ENV KEY=` in a derived image — NOT an unforwarded key, which is
-      simply absent and gets the default fine); the "no coalescing with
-      request-path scans" caveat is documented in both directions, since the
-      route also reads through `SizeCache`. `config.py`'s
-      `Settings.from_env()` now refuses to boot on a present-but-blank
-      `VAULT_CACHE_ROOT` (previously silent, and fatal to the sweep every
-      tick with `VAULT_SWEEP_INCLUDE_CACHED` on) — mutation-verified, comment
-      and test docstring corrected to the real mechanism in the fix round.
-      Renamed
-      `test_b2_bare_boot_patch_enables_cached_mode_and_a_real_sweep_
-      enqueues_it` to `test_s2_...` (it was already documented as the S2 pin;
-      the name just hadn't caught up). `docs/adr/0003-additive-depot-
-      mapping.md` gained a short 2026-08-18 addendum recording this reuse
-      (N3). Suite 1566 passed, 1 skipped (1554 pre-WP-4f baseline + 12 new
-      tests across both review rounds). Footprint: `api/`, `docs/PROJECT_PLAN.md`, `docs/WORKPACKAGES.md` +
-      `docs/adr/0003-additive-depot-mapping.md`, no commit/push per the
-      work-package brief.
-      **Explicit carry-over, NOT done here (B2, reviewer 2026-08-18): the web
-      demo mode still implements the pre-WP-4f generous rule and its
-      docstring states that rule as the current one.**
-      `web/js/demo-data.js`'s `selectCachedAppids()` (lines ~701–717)
-      selects every game whose `depots` array is non-empty; after a demo
-      `DELETE` that correctly moves a shared, still-protected depot into
-      `skipped_shared` (the handler at line ~997 keeps that depot in BOTH
-      the deleted app's and its co-owner's `depots` arrays by design — only
-      exclusively-deleted depot ids are filtered out, line 1078-1081), the
-      just-deleted app's `depots` array is still non-empty, so
-      `selectCachedAppids()` — and therefore the demo's
-      `POST /v1/prefill/cached` — reselects it. The function's own docstring
-      compounds this: it cites `api/README.md`'s "Selection: disk-and-mapping
-      truth, one query" heading (renamed by this package to "...and (WP 4f)
-      the SAME definition the sweep uses") as describing the CURRENT real
-      rule, when the real rule is now `exclusive + remnant`, not "any mapped
-      depot with bytes". `web/tests/README.md` (lines ~592–596,
-      `demo-data-cached-prefill.test.js`'s coverage description) repeats the
-      same stale framing verbatim ("selects every game whose `depots` array
-      is non-empty ... this demo model's stand-in for 'has cache content on
-      disk'"). Per docs/LEARNINGS.md ("Web UI" section, WP 4a.2 blocker):
-      demo fixtures are a shipped surface and must demonstrate the product's
-      invariants, not violate them — this is that same bug class. **Not
-      fixed here**: `web/` was occupied by WP 4e.1 at review time. WP 4e.1
-      merged the same day (commit 07865a3) without picking this up, and no
-      later web package did either — **open since 2026-08-18, closed by WP
-      WEB-FIX-1 (2026-10-01)**, one of the fix packages from the pre-freeze
-      project review (§11 item 12). The shape of the fix: hoist the DELETE handler's local `otherOwners`/
-      `hasCacheContent` helpers (currently function-scoped inside the
-      `DELETE` branch, lines ~1039–1051) to module scope so
-      `selectCachedAppids()` can reuse them, then change its filter
-      predicate from `g.depots.length > 0` to "has at least one depot that is
-      exclusive to this game OR a last-cached-remnant (every other current
-      owner uncached)" — the same `exclusive + remnant` predicate this
-      package's real backend now applies, expressed against the demo's
-      depots-array model instead of `deletion.plan_deletion`. Also recorded
-      in `docs/WORKPACKAGES.md` (N6).)*
-#### Phase 4e — Web UI desktop layout (track: web)
-
-The web UI (Phase 4a) has no responsive layer at all: the frozen round-7
-mockup is a single 390×844 phone frame ported into a `max-width:960px`
-column, so a 173×260 cover tile renders at a fixed 458×687 from 1280 to
-2560px, the bottom nav's three items stretch to 631–844px around a 21px
-glyph, and roughly half of a 1920px viewport carries nothing. **User
-decision (2026-08-18): approved the full desktop-layout proposal, all
-divergences included** ("setze alles so um") — implemented as designed,
-not narrowed. See `docs/WORKPACKAGES.md`'s divergence register (D-1, D-3,
-D-4, D-11, D-12) for what each package diverges from the mockup and why.
-
-- [x] Spatial tokens, breakpoints (BP-M ≥720px / BP-L ≥1024px / BP-XL
-      ≥1800px, width-keyed; pointer affordances in a separate
-      `(hover:hover) and (pointer:fine)` query), and the bottom-nav-to-
-      left-rail shell conversion; the large-library demo fixture the rest
-      of the phase measures against
-      *(WP 4e.1 done 2026-08-18: `--gutter`/`--nav-h`/`--rail-w`/
-      `--w-text`/`--w-wall`/`--tile-min`/`--w-sheet` tokens in theme.css
-      (no colour/font/radius value touched — Android's VaultColors literal-
-      pins stay valid); `.view-root`/`.onb`/`.banner-wrap`'s four
-      hand-copied 960/928/78 numbers replaced with token references/`calc()`
-      derivations (correction, Opus review nitpick N5: this is four numbers
-      that were COPIES of each other, not every dimensional literal in
-      app.css — `.view-root`'s own `20px 16px 32px` padding and `.bulk`'s
-      `left/right:12px` insets are untouched, independent literals, not
-      claimed otherwise); `.banner-wrap`'s shrink-to-fit bug fixed (`width:100%`,
-      no `display` declaration added — would have been a fourth `[hidden]`-
-      vs-author-`display` instance); `<nav>` moved before `<main>` in
-      index.html (D-11) with a compensating `.nav{ order:1 }` so VISUAL
-      order below BP-L is unchanged (`order` is paint-order only — see S2
-      below for the READING/focus-order consequence this claim does not
-      cover); the shell/rail/breakpoint machinery verified to live only
-      inside `min-width` blocks via a structural headless pin, plus a live
-      six-width measurement (390/768/1280/1440/1920/2560) — reported in the
-      coder's response (superseded by the corrected, extended table below —
-      see blocker B3).
-      Two general-purpose CSS lints added per the brief's request: (1) every
-      class with an author `display` rule that is ALSO hidden-toggled
-      somewhere in `web/js/` must have a matching `[hidden]` guard rule —
-      a real cross-reference derived from the CSS/JS source each run, not a
-      hand-typed list of the three previously-found offenders (`.btn`,
-      `h4.sec`, `.onbnav`), mutation-verified by removing a guard and
-      watching the named test die; (2) no `!important` outside the
-      `prefers-reduced-motion` block, mutation-verified by adding one to a
-      new breakpoint. `web/js/demo-data.js` gained
-      `generateSyntheticGames`/a `localStorage["steamvault.demoLibrarySize"]`
-      toggle (400 selectable, default unchanged at 6) reachable from both a
-      headless test and the running app; documented in its own header what
-      it can measure (DOM/poll-diff cost at scale) and cannot (no real cover
-      art, so it does not exercise the CSP image-allowance half of a real
-      400-game library).
-
-      **Sequencing fix (orchestrator review, same day):** a first version of
-      this package widened `--w-wall` to 1440px at BP-L and 1720px at BP-XL,
-      on the reasoning that the rail frees up horizontal room the library
-      grid should get to use. Measuring it live instead of assuming it
-      exposed the opposite: because the Library grid is STILL the mockup's
-      fixed 2/3/list column switch, not an `auto-fill` density grid,
-      widening `.view-root`'s cap only grew the ALREADY-oversized cover tile
-      further — 458×687 (the pre-WP baseline, unchanged from 1280–2560px)
-      became ~815×1222 at 1920px and ~838×1257 at 2560px. Shipping that
-      would have made the phase's own motivating problem measurably worse
-      the moment this "foundation" package landed on its own, which is not
-      independently shippable. **Fixed by sequencing, not scope creep:**
-      `--w-wall` stays equal to the pre-WP effective cap (960px, `theme.css`)
-      in EVERY breakpoint block (`:root` base, BP-L, BP-XL all say 960px
-      explicitly — restated rather than omitted, so a later reader sees a
-      deliberate decision, not a forgotten override) until a later package's
-      auto-fill grid can actually use the room; that package changes this
-      ONE value. `--w-text` (Settings/Downloads/onboarding/banner — text-
-      first views sharing the same `.view-root`) still narrows to 760px at
-      BP-M as designed; only the library-grid-specific widening at BP-L/XL
-      was deferred. Two headless pins added
-      (`web/tests/css-layout-foundation.test.js`): every `--w-wall:`
-      assignment anywhere in theme.css/app.css must equal `960px`, and
-      `.view-root`'s BP-L override must resolve to the SAME 960px as its
-      base/BP-M cap — both mutation-verified (temporarily restoring
-      1440px/1720px kills each by name). Re-measured live after the fix (see
-      the corrected six-width table below): the tile is now IDENTICAL to the
-      pre-WP baseline at every width from 1280–2560px, not merely "no
-      worse". **Honest status, not silently narrowed:** the tile-oversize
-      problem itself remains genuinely unfixed — that is explicitly D-4's
-      scope, landing with the auto-fill grid below — this package now
-      simply does not regress it in the meantime.
-
-      **Opus review round 1: FAIL — three blockers, five should-fixes, six
-      nitpicks, all fixed same day.** The reviewer's framing: the shell
-      change (bottom nav -> left rail, `#app` flex -> grid) re-parents every
-      `position:fixed` surface, and the first live-verification pass only
-      measured three selectors (the tile, `.view-root`, the nav) — it should
-      have swept every fixed/overlay surface. Two real bugs existed that a
-      3-selector check could not see:
-      - **B1** — `--nav-h:0` (BP-L) is UNITLESS; `.bulk`'s
-        `bottom:calc(var(--nav-h) + 14px)` mixes it with a `14px` length,
-        which is a calc() type mismatch, invalid at computed-value time,
-        silently falling back to `bottom:auto`. Measured: the bulk action
-        bar's `bottom` computed to -143782px (off screen) at every width
-        >=1024px — multi-select (enter select mode, pick games, Download or
-        Delete) was **unusable on desktop**. Fix: `--nav-h:0px`, plus a pin
-        requiring every `--nav-h:` assignment anywhere to match `/^\d+px$/`
-        (the CLASS of bug, not just the instance) — mutation-verified.
-      - **B2** — `index.html` puts `.nav-pip` FIRST inside the Downloads
-        button (harmless while `position:absolute`); BP-L's
-        `position:static; margin-left:auto` override then rendered it BEFORE
-        the icon in plain DOM/flex order, pushing icon+label right instead —
-        measured live with a job running: the whole Downloads row sat ~88px
-        out of line with Library/Settings. Fix: `order:1` on the BP-L
-        `.nav-pip` rule (no DOM move — `aria-current`/click/keyboard/the
-        `.on` toggle are all untouched), pinned and mutation-verified;
-        re-measured at 1024/1280/1920px with an active job — Downloads'
-        icon (x=22) and label (x=55) now match Library/Settings exactly.
-      - **B3** — the plan and the test-file header both claimed "base
-        (<720px) is byte-identical", which is false from ~430px up:
-        `.banner-wrap{width:100%}` (the shrink-to-fit fix) is a deliberate
-        TOP-LEVEL rule, not gated by any media query, so it changes real
-        rendering wherever the bug it fixes existed. Measured against a
-        `git archive HEAD` baseline: 430px viewport, 398.3px-wide banner @
-        x=8.3 -> 415px @ x=0; 719px viewport, 398.3px @ x=152.8 -> 704px @
-        x=0. **Fixed the CLAIM, not the behaviour** (the behaviour is the
-        correct fix and was already disclosed elsewhere): only the mockup's
-        own 390px is genuinely byte-identical end to end; "base is
-        untouched" now means specifically "the shell/rail/breakpoint
-        machinery is gated correctly", stated exactly that way in both this
-        section and the test file's header, with `.banner-wrap{width:100%}`
-        pinned as the one rule that must never silently revert.
-
-      Should-fixes, all closed: **S1** `generateSyntheticGames` now sets
-      `needsForce: !cached` (an idle/never-filled synthetic row was
-      `needs_force=false`, a shape the real API can never produce per
-      api/README.md's lifecycle — a demo fixture is a shipped 1:1 surface).
-      **S2** `docs/WORKPACKAGES.md`'s D-11 entry now records the phone-side
-      consequence honestly: `order` is visual-only, so below BP-L a
-      keyboard/screen-reader user now tabs the nav BEFORE the content on
-      every view — a real change to the exact surface WP 4a.8's a11y pass
-      signed off on, defensible but not previously stated. **S3**
-      `web/tests/README.md` gained a WP 4e.1 section (three new test files)
-      and an honest "what this pass did not catch on its own" note naming
-      B1/B2's category (any shell-layout-changing package must re-check
-      every fixed/overlay surface, not just the ones its diff touches — no
-      headless equivalent exists for this, same posture as WP 4a.8's list).
-      **S4** `.banner-wrap` now picks up `--w-wall` (not `--w-text`) at
-      BP-L, matching `.view-root` exactly — they share one visual column and
-      a mismatched cap was a measured 100px seam (left edges 688.5 vs
-      588.5 at 1920px); tying both to one token also keeps a later
-      `--w-wall` raise aligned for free. **S5 — the process fix.** Widened
-      this package's own regression pass to the surfaces B1/B2 fell into:
-      `.bulk`, `.sheet-backdrop` (notifications panel, verified directly),
-      `.dialog-backdrop` (delete confirm, verified directly) and `#toast`
-      (verified directly) all confirmed on screen at 1024/1280/1920px in
-      multi-select with an active job. The 1023–1279px transition band
-      (below) was added to the measurement table per this same finding — the
-      rail visibly taking 232px out of the available column is the widest-
-      changing band in the whole spec and the first draft skipped it.
-
-      Nitpicks, all closed: **N1** `css-hygiene.test.js`'s display/hidden
-      lint now also recognizes `setAttribute("hidden", ...)`/
-      `removeAttribute("hidden")` as toggle sites (not just the `.hidden =`
-      property form — the reviewer's own probe of this hole survived the
-      first version and now dies by name), and its header states the
-      multi-class/descendant-selector limitation explicitly. **N2**
-      `sectionHeadingFactory`'s hardcoded `["sec"]` mapping is now asserted
-      against the real `sectionHeading()` source, so drift fails loudly.
-      **N3** the six-width table below now says which scrollbar mode
-      produced which row: viewports <768px trigger this Browser pane's
-      mobile/touch emulation (overlay scrollbar, 0px reserved — confirmed:
-      `innerWidth === clientWidth` at 390px), 768px and up use a classic
-      scrollbar (15px reserved whenever content actually overflows, which
-      the 400-game fixture guarantees) — not an inconsistency, a real
-      platform difference the numbers now name. **N4** a dedicated pin now
-      checks the exact shape of `last_prefill_at` (real ISO string for
-      "done", exactly `null` for "idle") separately from the determinism
-      check that strips it. **N5** the "four hand-copied numbers" claim
-      above is corrected to name what it does NOT cover (`.view-root`'s own
-      `20px 16px 32px` padding, `.bulk`'s `left/right:12px`, both still
-      independent literals). **N6** `--tile-min`'s existence is now asserted
-      inside the SAME test as the `--w-wall` anti-widening pin, so an
-      automated "remove this, nothing references it" sweep cannot silently
-      delete a token a later WP needs.
-
-      Suite 450 green (36 new relative to the pre-WP-4e.1 baseline of 414:
-      30 from the first pass, plus 6 new named tests in this fix round — one
-      each for the B1 `--nav-h` unit pin, the B2 `.nav-pip order:1` pin, the
-      S4 `.banner-wrap`/`--w-wall` alignment pin, the S1 `needs_force`
-      inverse-of-cached pin, the N2 `sectionHeadingFactory` mapping pin, and
-      the N4 `last_prefill_at` shape pin. B3's fix and N5/N6 extended
-      EXISTING tests/comments in place rather than adding new ones; N1's
-      `setAttribute`/`removeAttribute` recognition extends the existing
-      lint's own scan, covered by the existing display/hidden-guard test
-      re-passing plus the mutation check below, not a new test file entry).
-
-      **Six-width table, final (re-measured after every fix above, live
-      against a running vault-api + the 400-game demo fixture; scrollbar
-      mode noted per N3):**
-
-      | width | cover tile | `.view-root` | nav | scrollbar |
-      |---|---|---|---|---|
-      | 390 | 173.0×259.5 (byte-identical to pre-WP) | — (base) | bottom, 3-col | overlay (mobile emulation) |
-      | 768 | 354.5×531.8 | 760px cap (BP-M) | bottom, 3-col, chips wrap | classic, 15px |
-      | 1023 | 358.0×537.0 | 760px cap (still BP-M) | bottom, 3-col | classic, 15px |
-      | 1024 | 366.5×549.8 | 777px (rail takes 232px out of the column) | rail, 232px | classic, 15px |
-      | 1200 | 454.5×681.8 | 953px (approaching the 960px cap) | rail | classic, 15px |
-      | 1279 | **458.0×687.0** (cap reached) | 960px cap | rail | classic, 15px |
-      | 1280 | **458.0×687.0** (pre-WP baseline, exact) | 960px cap | rail, 232px | classic, 15px |
-      | 1440 | **458.0×687.0** | 960px cap | rail | classic, 15px |
-      | 1920 | **458.0×687.0** | 960px cap | rail | classic, 15px |
-      | 2560 | **458.0×687.0** | 960px cap | rail | classic, 15px |
-
-      The 1023→1279 band (added per should-fix S5) is the widest-changing
-      one in the whole table: crossing BP-L subtracts the rail's 232px from
-      the available column before `.view-root` can reach its 960px cap, so
-      the tile visibly SHRINKS relative to where it would have landed
-      without a rail, then grows back to the steady 458×687 by ~1279px —
-      correct, expected behaviour, not a bug, but worth seeing in the table
-      rather than jumping straight from 1023 to 1280.
-
-      Re-verified separately, live, at 1024/1280/1920px in multi-select
-      with an active synthetic job (the exact conditions B1/B2 needed to
-      surface): `.bulk` on screen at all three (`bottom` computed to the
-      intended `14px`, `rect.bottom` inside the viewport with the .22s
-      slide-up transition settled); the Downloads nav-pip `on`, showing
-      "1", at the row's trailing edge with icon/label x matching Library/
-      Settings exactly; the notifications sheet-backdrop, the bulk-delete
-      `.dialog-backdrop`, and `#toast` all independently confirmed on
-      screen at 1920px.
-
-      **DOM node count vs. column count — a framing correction (orchestrator
-      review), pinned in a code comment so it is not re-litigated in a later
-      package.** `web/js/views/library.js`'s `renderGrid` builds one card
-      node per VISIBLE game regardless of `state.layout` (2/3/list all run
-      the identical loop; only `els.grid.className` — a CSS concern —
-      changes). A 400-game library already builds 400 card nodes TODAY, in
-      every layout, on every viewport width; there is no virtualization
-      either before or after this package. The auto-fill grid Phase 4e
-      eventually ships changes how those 400 nodes are ARRANGED (more
-      columns at wider viewports), never how many exist. The measured
-      ~29–33ms cost of a full 400-card rebuild (see WP 4e.1's coder report)
-      is therefore the number that actually matters for scaling, not a
-      column-count framing — the gate this fixture exists to clear is
-      already cleared)*
-- [x] Auto-fill library grid using `--tile-min` (`repeat(auto-fill,
-      minmax(var(--tile-min),1fr))`), replacing the fixed 2/3/list switch at
-      BP-L/BP-XL, and raising `--w-wall` past its currently-deferred 960px
-      alongside it (in the SAME package — see the sequencing note above,
-      widening one without the other is exactly the regression already
-      caught and fixed once) — the D-4 fix
-      *(WP 4e.2, 2026-08-18, Opus round 1: FAIL — one blocker, five
-      should-fixes — fix round verified, re-verified live: `web/css/app.css`'s
-      BP-L block wires `.grid`/`.grid.cols3` to `repeat(auto-fill,minmax(
-      var(--tile-min),1fr))`, `--tile-min` split into a 176px "Comfortable"
-      default and a 150px "Compact" override (`.grid.cols3{--tile-min:150px}`,
-      operator-chosen values, see below) — the D-3 density relabeling in
-      `web/js/views/library.js` (`LAYOUT_LABEL`: "Two columns"/"Three columns"
-      -> "Comfortable"/"Compact", `docs/WORKPACKAGES.md`'s register, now in
-      proper bullet form). "Fix the tile, multiply the columns": `.grid.
-      cols3`'s mobile-only compact card typography (tuned for a ~113px
-      3-per-row phone tile) is reset back to the base card's own values at
-      BP-L, seven reset rules pinned by literal name (round 1's blocker-class
-      finding, S3: deleting the base `.grid`/`.grid.cols3` rules OR all of
-      the BP-L reset rules survived 456/456 — both now die by name, verified
-      by re-applying each mutation and watching the named test fail);
-      `.grid.list` needed no override at all (kept via CSS specificity,
-      pinned structurally). `--w-wall` raised to 1600px at BP-L (round 1
-      should-fix S2: this value is UNREACHABLE within BP-L's own range —
-      BP-L's widest viewport, 1799px, leaves a 1567px main column, 33px short
-      — so it functions purely as a guard against a future `--rail-w`/
-      breakpoint change, not as an active cap; the original comment's "lands
-      at ~186px @1920, capped" claim was wrong, since 1920px is BP-XL's range
-      where a SEPARATE 2000px value applies, fixed in both the code comment
-      and the test's assertion message) and 2000px at BP-XL (bounded, not
-      fully uncapped — argued against the brief's "topbar/reading measures
-      don't improve past ~1600" note: true of `--w-text` content, not of a
-      tile WALL, which keeps getting more columns from more room). `.bulk`
-      re-derived from `--w-wall` with `--rail-w + --gutter` / `--gutter`
-      insets — proven algebraically exact in both the capped and uncapped
-      regimes, confirmed live at ten widths total across both review rounds
-      with Δleft=Δwidth=0 throughout, including inside BP-XL. Search+chips
-      moved into a `.view-library` BP-L grid, search capped at the new
-      `--search-w:420px` token — round 1 should-fix S4: the cap and the
-      area-map row order were both asserted by NAME (declared) but not by
-      VALUE, so removing the cap (`1fr 1fr`) and swapping "search chips" to
-      "chips search" both survived; both mutations now die by name.
-      **Blocker B1 (round 1): `.empty` (the "no results" fallback, appended
-      as a direct child of `.grid`) had no `grid-column` rule, unlike
-      `.noresult` — under auto-fill it collapsed into a single track (an
-      8.5%-of-row-wide block hard left at 2560px), reachable one click away
-      via any zero-count filter chip (`renderChips` renders zero-count chips
-      too). Fixed with `grid-column:1/-1`, pinned, and confirmed safe for
-      `downloads.js`'s two other `.empty` uses (plain block containers, the
-      property is ignored there) — re-verified live via the exact
-      reproduction (the real "Downloading 0" chip on the 400-game fixture):
-      `.empty` now measures the full grid width, not a single track.**
-      **Should-fix S1 (round 1): operator-chosen `--tile-min` values,
-      176px Comfortable / 150px Compact**, replacing the coder's
-      first-shipped 210px/168px — measured live, 210px produced
-      225.6-246.0px tiles (1.30x-1.42x the 173px mockup tile), falsifying
-      the "no card here ever sees a size it wasn't designed for" claim.
-      150px restores Compact's original WP 4e.1 value.
-
-      **B2 (round 2, blocker): round 1's OWN S1 fix was still wrong.** It
-      asserted 176px keeps the range at "~176-205px (mockup ±18%)" — wrong
-      on both counts (a 4px-resolution sweep over 396 widths, 1024-2600px
-      plus 3440px, both densities, measured the real range: 177-222px,
-      1.02x-1.29x; 220/173 is +27%, not ±18%), and self-contradicted by the
-      SAME comment's own sawtooth example ten lines below (220.0px) sitting
-      under the 205px ceiling it had just asserted. Corrected in `theme.css`
-      (and in `docs/WORKPACKAGES.md`/`web/tests/README.md`, which repeated
-      the same wrong figure), WITH the load-bearing clause a bare
-      number-fix would have omitted: a <=205px ceiling at every width is
-      unachievable with `minmax(F,1fr)` at all — it would need F<=158px,
-      already below Compact's own 150px floor — so this was never a value
-      the token failed to find. The overshoot mechanism itself
-      (`max = F + (F+gap)/n`, worst at the fewest columns, tightening as
-      columns are added) is documented in theme.css's `--tile-min` comment,
-      along with the operator's sawtooth-not-smoothed decision (re-measured
-      example: 220.0px at a 1195px viewport drops to 177.6px at 1215px, a
-      ~19% shrink from a 20px WIDER window).
-
-      **S6 (operator decision, round 2):** narrowing the two floors this
-      close (176px/150px, a 1.17x ratio) to keep S1's corrected range
-      honest made Comfortable and Compact render IDENTICALLY — same column
-      count, same tile width within 0.2px — across several sub-1400px
-      bands (1024-1076, 1208-1238, ~1396px up). Accepted and documented
-      (`theme.css`, this entry) rather than narrowing Compact further: a
-      ~135px floor to force visible separation would sit 22% below the
-      mockup's design size, with no measurement behind it.
-
-      **S7 (round 2):** the round-1 B1 pin (`.empty{grid-column:1/-1}`) was
-      class-specific — generalised into a static-analysis test scanning
-      `library.js` for every class appended as a direct child of `.grid`
-      (excluding `buildCard`'s "card" output, the grid's actual content)
-      and requiring `grid-column` on each; mutation-verified against a
-      synthetic new `libnotice` class the same way the reviewer's own
-      reproduction worked. Also (round 2): B1's fix is a CORRECTION, not a
-      new divergence — the frozen mockup already applies
-      `style="grid-column:1/-1"` inline to this exact element
-      (`docs/design/vault-app-mockup.html:1826`); the WP 4a.3 port had
-      dropped it. And the fix's own call-site inventory was corrected: ONE
-      `emptyMessage()` caller in `downloads.js` (not two), plus
-      `settings.js:553`'s loading state, previously omitted entirely.
-
-      Nitpicks closed: the hidden-toggle lint's three attribute regexes
-      gained the `i` flag (case-insensitive, round 1) AND now also
-      recognise `el.hidden ||=`/`??=` and `el.toggleAttribute?.(`
-      (optional chaining, round 2 — both one character from an idiom
-      already covered, both probed and found surviving), with
-      `Object.assign(el, {hidden:true})` documented as a genuine, unclosed
-      gap rather than implied covered; `LAYOUT_LABEL[key]` is now the
-      single source `segButton` reads its title/aria-label from; the
-      redundant `.grid.cols3 .meta .size{font-size:11px}` reset line was
-      removed; the BP-XL comment's "1656px is 1920's natural column width"
-      corrected to name it as the CONTENT width (the column box itself is
-      1688px). Suite 462 green (451 WP 4e.1 baseline + 5 round-1 first pass
-      + 4 round-1 fix-round pins + 1 round-2 S7 test + 1 round-2
-      compound-operator/optional-chaining test). Rebased cleanly onto
-      `da7ceae` (WP 4h.1, api/-only) mid-review with no conflicts in `web/`.
-      Re-verified live against the demo 400-game fixture with the 176/150
-      values: six-width table (390/768/1280/1440/1920/2560) for both
-      densities (e.g. 1920px: 8 cols/194.6px Comfortable, 10 cols/153.3px
-      Compact; 2560px: 10 cols/186px Comfortable, 12 cols/153px Compact),
-      `.bulk` exact-pixel alignment reconfirmed, BP-M (768px) and base
-      (390px) still byte-identical to the pre-4e.2/pre-4e.1 baselines. 400-card
-      full grid rebuild measured 21-27ms (WP 4e.1 baseline: ~29-33ms — no
-      regression).)*
-- [x] The rail narrower, and earning its width: `--rail-w` 232px -> 180px
-      (operator verdict at ~2000px, live: "232px feels unnecessarily large
-      for the three things in it"; asked whether to narrow or add content,
-      the operator chose both), plus vault name (rail head) and a cache
-      used/free summary (rail foot) so the rail carries more than the three
-      nav items — inserted ahead of WP 4e.3/4e.4/4e.5 in the numbering, at
-      the operator's request
-      *(WP 4e.6 done 2026-08-18: `--rail-w` narrowed to a live-measured
-      180px (theme.css) — a `.nav-btn`'s own content box is 135px
-      (x=22-157; corrected from a first-pass 136px/169px that omitted
-      `.nav`'s `border-right:1px`, Opus review nitpick), the longest label
-      ("Downloads") spanning x=55-120.5 (65.5px); since `.nav-pip` always
-      sits flush against the 157px edge, the figure that matters is the
-      label-to-pip gap — 21.5px for a one-digit pip, 17.4px for the worst
-      reachable case (a two-digit "20"; three digits is impossible,
-      `jobs(limit=20)`) — no wrap, no overlap either way; the freed 52px
-      flows into `--w-wall` through the EXISTING WP 4e.2 formulas with no
-      change needed to them (`.bulk`'s
-      Δleft/Δwidth measured exactly 0/0 at 1024/1920/2560px in multi-select,
-      confirming they are genuinely parametric on `--rail-w`). Vault name
-      (`#rail-vault-name`) via a one-time, gated `GET /v1/settings` fetch
-      (`components/rail-panel.js`, mirrors `onboarding.js`'s reconnect-path
-      gating); cache used/free (`#rail-cache`) via a FOURTH `store.js`
-      resource loop added by this WP — the brief's own claim that
-      `GET /v1/cache/summary` was "already polled" was false as of `git
-      log` (zero call sites for `api.cacheSummary()` anywhere in `web/js/`
-      before this WP), corrected in `store.js`'s header rather than left
-      wrong; the new loop has no `keyFn`/diff (a single snapshot, not a
-      list — no notification event either, since the Downloads nav pip
-      already carries queue state). Both figures distinguish "unknown"
-      from a GENUINE zero (`formatBytesGBOrZero`, a new sibling of the
-      tile-badge's `formatBytesGB` with the OPPOSITE zero-handling rule —
-      "0 B free" must render, not hide as "not known yet"), and a failed
-      poll leaves the last successful render on screen rather than
-      blanking it (same convention as `bypass-banner.js`'s "clients"
-      subscription; live-verified end to end by monkey-patching
-      `api.cacheSummary` to reject and confirming byte-identical text
-      before/after). **Coordinator addition mid-WP:** a third rail-foot
-      line reads `GET /v1/settings`'s confirmed top-level `server_version`
-      string (a parallel `api/` package, WP 4e.7, landed the field while
-      this WP was in flight) — absent/non-string/empty are all "render
-      nothing", rendered as `v<value>` when present, clamped to 24 chars
-      before the prefix; `demo-data.js`'s settings fixture gained the same
-      field (`"0.1.0"`, matching `vault_api/__init__.py`'s real
-      `__version__`) for 1:1 demo parity. Both new rail elements are
-      `display:none` below BP-L unconditionally (load-bearing, not
-      cosmetic — `.nav` is a 3-column CSS grid there, so two more in-flow
-      children would auto-place into a second implicit row without the
-      override); base (<720px) confirmed byte-unaffected at 375px/719px.
-      All new content is plain, non-interactive text — no new focusable
-      control, so "nothing reachable only by hover" holds trivially, and
-      `aria-current`/keyboard reachability on the three nav buttons are
-      untouched. First pass: suite 498 green (462 baseline + 36).
-
-      **Opus review: PASS, no blockers — ten mutations died by name incl.
-      three the reviewer added itself; four should-fixes, all addressed,
-      suite 515 green.** **S1:** WP 4e.2's `--w-wall:1600px` comment claimed
-      1600px was unreachable at BP-L — true at 232px, false at 180px (the
-      cap now genuinely binds at BP-L's own top end, measured: `.view-root`
-      1600px capped at 1799px vs. 1599px uncapped at 1794px, ~4px visual
-      cost) — exactly the "future `--rail-w` change" scenario that comment's
-      own guard warned about, which this WP triggered without anyone
-      updating the sentence; fixed in the comment plus a new structural pin
-      computing the same breakeven from the live tokens. **S2:** the cache
-      loop's cadence (`intervals.gamesMs`) was completely unpinned —
-      mutating it to `jobsFastMs` (7.5x more frequent against the one
-      endpoint that can trigger a cold depot walk) survived all 498 prior
-      tests; fixed with a live-timing pin (developing it surfaced a REAL
-      hang — a failing assertion skipping `store.stop()` left a 50s timer
-      alive past a 120s harness timeout — fixed with `try`/`finally`).
-      **S3:** `rail-panel.js` had zero test coverage; deleting the
-      poll-failure guard (blanks the rail instead of keeping the last real
-      number) and the `freeText` guard (renders a literal `"Free null"`)
-      both passed the full suite. Fixed by refactoring `rail-panel.js` into
-      a dependency-injected `createRailPanel()` — the same `store.js`/
-      `store-singleton.js` split, applied to a component for the first time
-      (`app.js` now makes the real wiring call) — tested headlessly in new
-      `rail-panel-wiring.test.js` (15 tests) via `fake-dom.js`. **S4:**
-      "render nothing, never a placeholder" only covered the TEXT, not the
-      `.rail-head`/`.rail-foot` containers — an empty box with a bare
-      divider showed on a default install. Fixed: both ARE now
-      `[hidden]`-toggled (guarded in app.css's BP-L block against the
-      `display:block` override, same fix class as `.btn[hidden]`), with
-      `.rail-foot` hidden only when BOTH the cache summary and the version
-      line have nothing to show — pinned as its own AND-not-OR test, and
-      live-verified in a real browser (`display:none`, zero height, when
-      force-hidden). Nitpicks: the rail-geometry numbers above corrected
-      (135px/157px/21.5px, not 136px/169px/12px); the `--tile-min` overshoot
-      band's low end restated as exactly 176px (the token's own `minmax()`
-      floor, not a third swept approximation); a stale "paints before
-      subscribing" claim corrected to the actual order. Divergence recorded
-      as D-12 (`docs/WORKPACKAGES.md`) — content beyond what D-1 already
-      covers for the rail's mere existence, since the frozen mockup has no
-      rail at all.)*
-- [x] Overlay geometry at BP-L (detail sheet / notifications / clients sheet
-      sizing and placement once the shell is no longer phone-width) — WP 4e.3,
-      2026-08-18: centred card (680px via --w-sheet-l, operator-approved range
-      680-760) + right drawer at BP-L, mobile byte-unchanged; Opus review
-      round 1 FAIL (confirm dialogs -90px off-axis, found by headless-Chrome
-      measurement), round 2 PASS (offset 0.0px at three widths); D-13 in
-      docs/WORKPACKAGES.md
-- [x] Downloads/Settings-specific desktop layout — WP 4e.5, 2026-08-19:
-      both views become a capped, centred 760px reading column at BP-L
-      (existing --w-text token, no new magic number); multi-column and a
-      control/help hybrid considered and rejected with measured reasons
-      (D-15 in docs/WORKPACKAGES.md — the 178-char holdnote used to render
-      as ONE line across 1931px at 2560). Opus review PASS, centring
-      measured 0.0px off the content axis at four widths. PHASE 4e
-      COMPLETE with this package.
-- [x] Pointer/keyboard interaction model pass (hover states, focus order)
-      — WP 4e.4, 2026-08-19: 11 hover rules gated in place behind
-      (hover:hover) and (pointer:fine), clipped focus rings fixed via
-      outline-offset, desktop scrollbar affordances, bulk bar removed from
-      the hidden tab order. Opus round 1 FAIL (relocating the hover rules
-      inverted the cascade for five equal-specificity state rules, found by
-      live measurement), round 2 PASS (all five re-measured as holding).
-      Roving tabindex deferred with honest costs — D-14 in
-      docs/WORKPACKAGES.md
-      beyond the one rail hover affordance WP 4e.1 added
-- [x] **4e.7 (api)** — the server's own version, reported once (`GET
-      /v1/settings`) and pinned against drift, so the new left rail can show
-      what is actually running rather than a frontend-side constant that
-      would only state what the UI believes, not what is running
-      (`VAULT_WEB_DIR` can point at a different `web/` than the image
-      shipped, so the two really can diverge)
-      *(WP 4e.7 done: `vault_api.__version__` (`api/vault_api/__init__.py`)
-      is the one hand-maintained constant — no env var, no git describe (no
-      `.git` in the image) — now also used for `FastAPI(version=...)` in
-      `main.py` instead of a second hardcoded `"0.1.0"` literal;
-      `GET /v1/settings` gained a top-level `server_version` field (string),
-      a sibling of `readonly`, deliberately NOT a `settings` row (not
-      settable, no source/applies semantics) — `PATCH` rejects it exactly
-      like any unrecognised key (`422`, generic detail, not the env-only
-      one) since it lives in neither `OVERRIDABLE_SPECS` nor
-      `ENV_ONLY_KEYS`; deliberately NOT mirrored onto `GET /v1/health`
-      (the one unauthenticated route, fixed body by design — a version
-      there is free fingerprinting), pinned with a byte-for-byte response-
-      text assertion so a future addition trips an assertion, not a review
-      comment. Anti-drift pin (`api/tests/test_version_pin.py`) derives
-      `vault_api.__version__` and `deploy/compose.yaml`'s three
-      `${VAULT_IMAGE_TAG:-0.1.0}` image-tag defaults independently and
-      compares them, no Docker/network required; mutation-verified in both
-      directions plus a narrower internal-consistency pin catching a
-      partial hand-edit across the three `image:` lines. `api/README.md`
-      documents the field and states plainly that the number is
-      hand-maintained and means "the code in this image", not a published
-      release (no release tags exist yet; the publish PATH is now built —
-      WP CI-3, 2026-08-22 — but has never executed, so "nothing published"
-      remains true until the first tag).
-      **Opus review round 1: FAIL — one blocker (B1), two should-fixes,
-      three nitpicks, all fixed same day.** B1: the first version's pin
-      covered only `deploy/compose.yaml`, while THREE more hand-maintained
-      copies of the same number existed unpinned — `api/Dockerfile`'s
-      `org.opencontainers.image.version` LABEL (a build-time literal that
-      cannot read a Python module, so it can never be collapsed into
-      `__version__` itself), `deploy/tests/verify-stack.sh`'s
-      `TAG=${VAULT_IMAGE_TAG:-...}`, and `deploy/.env.example`'s example
-      line — plus `api/Dockerfile`'s own free-text `docker build` comment,
-      fixed by removing the literal instead of pinning a comment. All
-      three real sites now have their own named, mutation-verified (both
-      directions) pin; two more copies (`core/Dockerfile`,
-      `dns/Dockerfile`) stay explicitly OUT of this pin's reach per this
-      WP's `api/`+`deploy/`-only footprint and are named as a real,
-      documented gap rather than omitted — see `test_version_pin.py`'s
-      module docstring for the full table. **S1:** `main.py`'s
-      `version=VAULT_API_VERSION` wiring had a comment-only guarantee —
-      `version="9.9.9"` survived the full suite (bounded blast radius,
-      confirmed empirically: `openapi_url=None` makes `GET /openapi.json`
-      404, so the value is unobservable over HTTP either way) — closed
-      with a direct `app.version == __version__` assertion through a real
-      `create_app()` call, mutation-verified. **S2:** the `/v1/health`
-      justification in both `routers/settings.py` and this README
-      misattributed §10's "never expose vault-core/port 80" rule to
-      vault-api itself; corrected to the real, STRONGER reason — §10's
-      public-domain profile fronts vault-api (not vault-core) and can
-      legitimately put `/v1/health` on the open internet, which is exactly
-      why its body must stay minimal. Nitpicks: the compose precondition
-      test now asserts the key SET directly instead of a self-referential
-      dict comparison; every by-name lookup uses `.get(...)` so a mutated-
-      away key reports a clear value mismatch instead of a bare
-      `KeyError`; and this README no longer calls `VAULT_IMAGE_TAG` an
-      "already-published" tag (nothing is published yet — it is a locally
-      built image's tag). Suite 1617 passed, 1 skipped (baseline 1603/1)
-      — 14 new tests.)*
-#### Phase 4h — Decision support in the reclaimed desktop width (user decision 2026-08-18)
-
-The desktop portering (Phase 4e) frees width that today carries nothing. The
-question "what do we put there" was answered deliberately: **decision support
-about the cache, not taste.** SteamHangar knows things Steam does not — what is
-on the disk, how much of it sits in SHARED depots, when a game was last
-confirmed current, what is installed on which machine, and from
-`depot_manifests`, how often a game actually changes. Crossed with playtime
-(already relayed and validated, see below) that yields statements nobody else
-can make:
-
-- "43 GB cached, 0 minutes played" — prefilled and never touched
-- "Installed on your PC, not in the cache" — the real prefill list, not a guess
-- "Not confirmed current for 40 days" (`last_manifest_check` already exists)
-- "Deleting frees 12 of 43 GB; the other 31 GB sit in depots other games use"
-  (pure ADR-0003 data)
-- "Changes every three days" vs "unchanged for two years" — the actual input
-  for the Phase 4d decision about which games the sweep should keep current
-
-**Deliberately rejected: taste recommendations** ("what should I play next" in
-the Steam-discovery sense). They need tags, similar titles and review scores
-from the store API, they duplicate a Steam feature, and they turn a cache
-manager into a storefront — against the scope discipline in §9. The honest
-version of the same idea needs no foreign data and is uniquely ours: *"these
-games are fully cached and you have never started them — playable now, no
-wait."* The cache is the reason "playable now" is true.
-
-**Privacy stance (user, 2026-08-18), binding on every item below:** playtime
-makes the UI judgemental ("never played"), and a household vault has more than
-one person in the living room. So: off by default or dismissible at any time,
-no nagging, and no number that gets held up to somebody else. This is the same
-posture §7 Phase 6 already takes toward client addresses in webhook payloads,
-for the same reason. WP 5.3's threat model must cover the new personal-data
-surface (playtime and last-played now flow through the API response).
-
-- [x] **4h.0 (api)** — the API-level half of the privacy stance above:
-      two independent, off-by-default settings
-      (`VAULT_RELAY_EXPOSE_PLAYTIME`/`VAULT_RELAY_EXPOSE_LAST_PLAYED`) gate
-      whether `playtime_forever`/`rtime_last_played` may leave the Steam
-      relay's response AT ALL, enforced by omitting the JSON key entirely
-      (not `0`/`null`) when off. Deliberately environment-only — no
-      `PATCH /v1/settings` override — because the `settings` table lives in
-      a Docker volume that can be lost independently of the environment,
-      and a privacy opt-out must not have "silently starts collecting
-      again" as its failure mode; see
-      [ADR-0010](adr/0010-relay-privacy-gate-env-only.md) for the full
-      argument, including the runtime-toggle design considered and
-      rejected. This is the API-only half of the stance: the display-side
-      "dismissible at any time, no nagging" half remains 4h.2/4h.3's to
-      build. `docs/security/threat-model.md` §4 updated accordingly.
-- [x] **4h.4 (app)** — the Android app fetches library + persona through
-      vault-api's Steam relay; the device-local Steam Web API key is gone
-      (entry UI, EncryptedSharedPreferences storage, direct-to-Valve client
-      — deleted, with a construction-time + sign-out scrub for legacy
-      installs), no fallback by design so the 4h.0 gate cannot be bypassed
-      from a phone. Private-profile limit is a first-class UI state and an
-      accepted, recorded cost (ADR-0004 addendum 2). Suite 592→578 both
-      variants, ledger reconciled per file; Opus review rounds 1-3
-      (FAIL/FAIL/PASS — threat-model truth, pinned-the-fake call-site gap,
-      dual-source-set isolation blind spot all closed). 2026-08-19.
-- [x] **4h.1 (api)** — two small additions that make the panel sharp:
-      `rtime_last_played` carried through the Steam relay (Steam returns it,
-      we simply never asked; `playtime_forever` is ALREADY relayed and
-      validated — `steam_relay.py`, unused by any frontend today), and a
-      per-app change frequency derived from `depot_manifests`. Two honesty
-      pins are the point of this package, not the plumbing: **an absent
-      upstream field must surface as UNKNOWN, never as "never played"** (0 is
-      a claim, absence is not), and **a short observation window must surface
-      as "not enough data", never as "changes rarely"** — the manifest history
-      starts when WE started watching, so on a young vault every game looks
-      stable.
-      *(WP 4h.1 done, Opus FAIL→fix→re-verified: `rtime_last_played` added to
-      the Steam relay's `OwnedGame`/`OwnedGameOut` — no extra request
-      parameter needed (verified against the Steamworks Web API docs, not a
-      live account); an absent OR an implausible-sentinel (`<=0`) upstream
-      value both degrade to `null`, never a manufactured `0` (pin 1) —
-      wording fixed in the fix round: Steam's own convention IS that `0`
-      means never-played (real information), discarded here only because
-      `playtime_forever` already carries that fact and a 1970-01-01 render
-      would be worse; `playtime_forever`'s existing type is untouched
-      (additive-only). Change frequency: schema v14 adds
-      `depot_manifests.first_seen_at`/`manifest_changed_at`/
-      `observation_count` (ALTER-migration with a conservative recorded_at
-      backfill, guarded against the table not existing yet); `GameSummary`/
-      `GameDetail` gain `manifest_change_frequency`
-      (`null`/`"insufficient_data"`/`"stable"`/`"changed"`),
-      `manifest_observation_days`, and — fix round, reviewer-authorised
-      semantic correction — `manifest_days_since_last_change`: the category
-      was originally `"changing"`, which the review correctly called not a
-      rate (an app that changed once 3 years ago and one that changes weekly
-      were indistinguishable); renamed to `"changed"` (has-changed-at-least-
-      once, past tense) and the new field carries the one rate-adjacent fact
-      the table can actually support (days since the MOST RECENT observed
-      change). Computed by
-      `depot_manifests.change_frequency_for_app`/`.change_frequency_by_app`
-      (bulk, no N+1, statement-count pinned) with a weakest-observed-depot
-      rule: `null` only when an app has NO manifest rows at all (never
-      conflated with `"insufficient_data"`, pin 2); fewer than 2 observations
-      on any one depot, or an observation window under 14 days (matching
-      `VAULT_GC_GRACE_DAYS`'s established scale), both force
-      `"insufficient_data"` rather than a confident claim. Fix round also
-      closed two review blockers: B1 (the deliverable WP 4h.2 consumes had
-      zero endpoint tests — added to `test_games.py`, all four states over
-      real HTTP for both routes, plus the null-out mutation re-run and
-      confirmed dead by name) and B2 (`change_frequency_by_app` 500'd `GET
-      /v1/games` on a poisoned `depot_manifests.appid` row that `gc.py`
-      already defends against for the same table — fixed with the same
-      `deletion.coerce_positive_id` skip, regression-pinned unit + HTTP).
-      Both original honesty-pin mutations re-verified dead by name after the
-      fix round. 1603 tests green, 1 skipped, on a tree rebased onto WP 4f:
-      1554 baseline + 12 (WP 4f) + 37 across this package's three rounds
-      (26 initial, 10 for the untested endpoint surface, 1 real pin for the
-      most-recent-change guarantee). An earlier draft of this note claimed
-      1580 and "net count unchanged by the fix round" — both wrong, and
-      caught by the reviewer in the same diff that shipped them, which is
-      why the numbers here are the measured ones. api/README.md documents both fields' exact semantics,
-      absence/unknown handling, the observation-window caveat, the NOT-a-rate
-      correction, the poisoned-row degrade, and that these fields survive
-      cache deletion (unlike `size_bytes`). Not verified against a live Steam
-      account/key — recorded on the real-world/device verification list,
-      incl. the reviewer's own addition: every migrated row starts at one
-      observation, so on a freshly upgraded vault the panel legitimately
-      shows `insufficient_data` for every game until
-      two post-upgrade observations plus a 14-day window exist.)*
-- [x] **4h.2 (web)** — DONE 2026-08-19: both modes shipped (BP-XL right
-      column + collapsible card below, one statement module), privacy stance
-      structurally pinned (negative pin survived adversarial probing), demo
-      fixtures corrected to the shipped default gate. Opus review, FOUR
-      rounds: grid auto-placement blocker (browser-measured), a
-      measurement dispute settled by full-chain measurement (both rigs
-      right, different elements/page states — see LEARNINGS), the column
-      released when there is nothing to say. 587→665 web tests. D-16.
-      Original bullet: **4h.2 (web)** — the panel itself: a right-hand column at BP-XL
-      (>=1800px), a collapsible card below that width. Serves the statements
-      above. Depends on 4h.1's fields and on Phase 4e's breakpoints.
-      **Panel removed 2026-10-13 (user decision), statements moved, see
-      `docs/handover/post-0.1.0-roadmap.md` WEB-FEAT-SUGGEST-2:** "last
-      changed" to the detail sheet ("Last update downloaded N days ago"),
-      "fully cached, never played" to a card pill ("Never played"), "not
-      confirmed current" to one bell notification at 14 days, "unchanged
-      for N days" dropped.
-- [x] **4h.3 (web)** — DONE 2026-08-19: header art in the detail card
-      (aspect-ratio as the only reservation, whole-wrapper collapse on 404
-      — verified against the real CDN both ways), 665→676 web tests, Opus
-      PASS round 1 incl. four reviewer-own mutations and a hostile-appid
-      host-escape probe (impossible by construction). D-17. PHASE 4h
-      COMPLETE. Original bullet: **4h.3 (web)** — header art in the detail drawer. Nearly free: a
-      predictable `header.jpg` URL on the CDN host the CSP already allows for
-      cover art, no relay endpoint, no new external call.
-- Screenshots (the `appdetails` store API) are **not** in this phase:
-  undocumented, rate-limited, no CORS, so they need their own relay endpoint
-  and privacy note — and a screenshot does not help anyone manage a cache.
-  If wanted at all, they belong to Phase 6 with the other external
-  integrations. **Dropped (user decision 2026-10-16):** Steam-like
-  screenshots on the detail card are rejected and will not be built in
-  any phase.
-
-### Phase 5 — Community Release
-- [x] README with architecture diagram, quickstart (compose up in 5 minutes),
-      and an explicit "works for guests" FAQ note: any Steam client behind
-      the LAN DNS is served with zero setup — no account, agent, or app;
-      store-on-miss means the first guest download fills the cache for
-      everyone (ADR-0001)
-      *(WP 5.2: root README with Mermaid diagram, quickstart verified
-      command-by-command against deploy/, works-for-guests FAQ plus four
-      more ADR-backed entries; feature status stated against shipped code,
-      not ADR designs — license section says "planned Apache-2.0" until
-      the LICENSE file lands with the release)*
-- [x] License: Apache-2.0 (permissive for maximum adoption, includes patent
-      grant; AGPL deliberately rejected as it deters contributors and
-      companies in the early phase)
-      *(WP 5.4: root `LICENSE`, canonical text, copyright line "Copyright
-      2026 SteamHangar contributors")*
-- [x] **Packaging: ship the web UI in the vault-api image + close the
-      env-forwarding gaps** (gap recorded 2026-08-17, closed same day, WP
-      P1, two Opus review rounds: FAIL → fix → FAIL → fix → re-verified).
-      User decision: bake `web/` into the image (a mount-only fix cannot
-      survive `docker pull` of a published image, WP 5.5) — vault-api's
-      `build:` in `deploy/compose.yaml` moved to `context: .. / dockerfile:
-      api/Dockerfile`, every `COPY` in `api/Dockerfile` became
-      repo-root-relative, `COPY web /app/web` was added, and
-      `ENV VAULT_WEB_DIR=/app/web` replaces the now-wrong relative default
-      inside the image. New root `.dockerignore` keeps the wider context
-      from also sending `app/` (Android), `poc/` (Phase-0 evidence) and
-      api/'s own dev-only files (`README.md`, `pytest.ini`,
-      `requirements-dev.txt` — round-2 review caught these missing from the
-      first pass) to the daemon (measured 9.734 MB → 1.54 MB, 84% smaller);
-      the old api/-rooted `api/.dockerignore` is deleted and its rules fully
-      folded in (Docker only reads a `.dockerignore` at the context root,
-      and an api/-rooted build no longer even works); `core/`/`dns/` keep
-      their own build contexts, unaffected.
-      **Env-forwarding: a complete audit, not a two-key patch** (the
-      round-2 reviewer's B1: `.env.example` told operators to set
-      `VAULT_MANIFEST_ORACLE_URL` for a privacy mitigation that could not
-      work while unforwarded — the exact `docs/LEARNINGS.md` "Containers"
-      bug class this package exists to close, re-introduced by an
-      incomplete first pass). Every env var `config.py` reads was checked
-      against `deploy/compose.yaml`: twelve were unforwarded with no
-      good reason and now are —
-      `VAULT_EVENT_LOG_PATH`/`VAULT_MANIFEST_ORACLE`/
-      `VAULT_MANIFEST_ORACLE_URL`/`VAULT_MANIFEST_ORACLE_TIMEOUT`/
-      `VAULT_MANIFEST_KEEP`/`VAULT_EVENT_SWEEP_INTERVAL_MINUTES`/
-      `VAULT_MISS_TRIGGER_COOLDOWN_MINUTES`/`VAULT_MISS_TRIGGER_MAX_PER_SWEEP`/
-      `VAULT_BYPASS_WINDOW_DAYS`/`VAULT_CLIENT_STATS_KEEP`/
-      `VAULT_EVENT_LOG_MAX_BYTES`/`VAULT_WEBHOOK_TIMEOUT_SECONDS`
-      (round-2 reviewer independently re-derived all 33 keys from
-      `config.py` and reconciled this classification exactly, then proved
-      every default byte-identical by diffing `Settings.from_env()` JSON
-      dumped from a bare container against one fed exactly what `docker
-      compose config` renders; this package additionally proved each key
-      arrives with a non-default value too). New `api/tests/
-      test_p1_compose_env_defaults.py` (round-2 should-fix S-D) keeps this
-      from drifting again without Docker: it derives expected values from
-      `config.py`'s own `DEFAULT_*` constants and diffs them against
-      `compose.yaml`'s `${VAR:-default}` text on every `pytest` run,
-      mutation-tested in both directions (a changed default, a deleted
-      passthrough line) — and its first real run caught a genuine,
-      harmless pre-existing drift of its own: `VAULT_SIZE_CACHE_TTL`'s
-      compose default was the bare string `60` against `config.py`'s
-      `60.0`; fixed to match (both parse to the same float, so no behavior
-      changed). The rest stay unforwarded for one of three recorded
-      reasons: baked into the image (`VAULT_DB_PATH`/`VAULT_CACHE_ROOT`/
-      `VAULT_STEAMPREFILL_PATH`/`VAULT_WEB_DIR`); DB-overridable at runtime
-      via `PATCH /v1/settings` instead (ADR-0009: `VAULT_NAME`,
-      `VAULT_SCHEDULE_*`, `VAULT_WEBHOOK_URL`/`VAULT_WEBHOOK_EVENTS` —
-      `deploy/examples/tuned-setup.md` §2 rewritten to point at this instead
-      of its now-stale override-file workaround, and its `VAULT_GC_GRACE_DAYS`
-      claim corrected, that one having already been forwarded before this
-      package); or deliberately env-only, volume-topology-sensitive
-      (`VAULT_MANIFEST_ARCHIVE_DIR`, `VAULT_STEAMPREFILL_CACHE_DIR` — new §3
-      in `tuned-setup.md`); plus `VAULT_SETTINGS_READONLY`, env-only by
-      definition — left unforwarded by P1, closed as a forwarding gap on
-      2026-08-18 (Fable audit finding: the one env-only key with NO
-      alternative path, so the shipped compose could not enable the
-      documented hard-lock at all; now forwarded + pinned). `.env.example` makes the cache-event log pair default-ON
-      (user decision, WP 3.11's consumer justifies it) with an honest
-      read-not-truncate growth warning, a reachable
-      `VAULT_EVENT_LOG_MAX_BYTES=0` escape hatch, an upgrade note that a
-      dozen previously-silent-no-op keys now fail loudly at boot if
-      malformed, and widens the `VAULT_RESOLVER` warning from
-      vault-dns-only to any same-host rewriting resolver (AdGuard
-      Home/Pi-hole).
-      **The SteamPrefill container-detection trap — corrected twice.**
-      Round 1 named only the DNS candidate and treated a DNS miss as
-      universally fatal; round-2 review (B2) fixed that to a four-candidate
-      model but used `curl`/`ip`, neither of which exists in the
-      `python:3.13-slim`-based `vault-api` image (measured: `curl: not
-      found`), and its worked-example transcript was mislabelled — the
-      `200 OK` shown as `curl` output was actually produced by the
-      `python3`/`urllib.request` command this package used throughout, not
-      by running `curl` inside `vault-api`, which cannot happen. Round-2's
-      OWN measurement (the container's dynamic default-route gateway) also
-      turned out not to be the actual mechanism: round-3 review (S-A)
-      settled, via a string scan of the shipped SteamPrefill binary, that
-      candidate 3 is the FIXED LITERAL `172.17.0.1` (present as a managed
-      UTF-16LE string; the only private IPv4 literal there matching the
-      documented candidate list — `127.0.0.1` also appears, as candidate 2 —
-      and no `host.docker.internal`-style name at all) — not something SteamPrefill
-      dynamically detects from `vault-api`'s own routing table. Re-verified
-      directly: a real Compose stack's `vault-api` container, whose OWN
-      network gateway is `172.19.0.1` (a Compose-managed bridge, not the
-      classic default bridge), still reaches the literal `172.17.0.1` and
-      gets the heartbeat back when `VAULT_CORE_BIND=0.0.0.0` — ordinary
-      host-level routing between the host's own `docker0` and Compose-bridge
-      interfaces, not container-to-container traffic (which Docker's
-      inter-network isolation WOULD block). The conclusion is unchanged
-      (default layout: nothing to fix; dedicated `VAULT_CORE_BIND`: the
-      trap is real), only the mechanism description and the diagnostic
-      command are corrected. `deploy/README.md`, `deploy/examples/
-      truenas-scale-dockge.md` §7.1 and its troubleshooting row now state
-      the literal, use `docker compose exec vault-api python3 -c
-      "import urllib.request as u; ..."` (verified present and working;
-      `curl` stays available only in vault-core's own Alpine image, a
-      different question), and every transcript shown was re-run with that
-      exact command and pasted verbatim, including the real Python
-      traceback tail for the refused-connection case. The `extra_hosts` fix
-      recipe itself was correct in every round and stays unchanged —
-      confirmed sufficient on its own (SteamPrefill uses the resolved IP
-      for all subsequent depot traffic once detection succeeds, per WP
-      0.4), with the added requirement that the value be a plain IPv4
-      address, never a hostname.
-      Verified against real Docker (WSL2, Engine 29.1.3/Compose 2.40.3),
-      three review rounds: built the image from the repo-root context, ran
-      it standalone with zero volumes and confirmed `GET /` serves the real
-      app shell (`docker inspect` showed `Mounts: []`); proved all twelve
-      newly-forwarded keys reach `Settings.from_env()` with non-default
-      values in a running container; rendered `docker compose config`
-      against both the shipped `.env.example` defaults and with every knob
-      uncommented; re-ran the exact documented `python3`/`urllib.request`
-      diagnostic (not a stand-in) in both `VAULT_CORE_BIND` layouts and
-      pasted the real transcripts into the docs; and ran `deploy/tests/
-      verify-stack.sh` to completion four times across three review rounds
-      (109 checks, up from WP D1's 73): 105/109 passed on the final run,
-      every time. The 4 failures are a pre-existing WP D1 bug in step 5i
-      unrelated to this package (nginx's `flush=5s` event-log buffer vs. an
-      immediate post-request grep with no wait; confirmed by an isolated
-      repro) — reproducible on every run so far, but genuinely
-      timing-dependent rather than strictly deterministic (a slower/faster
-      host could tip the race either way), corrected wording per
-      `docs/LEARNINGS.md`. Every check this package added, across all three
-      rounds, passed on every run; api suite 1482 passed/1 skipped on the
-      final run (1461 baseline + 21 new in `test_p1_compose_env_defaults.py`).
-      **Fixed in WP 4g** (2026-08-18): step 5i's grep is now a bounded
-      wait-for-line loop instead of an immediate read, so this 105/109
-      result is historical — see `verify-stack.sh`'s step-5i comment and
-      `deploy/README.md`.
-- [x] **Product rename SteamVault → SteamHangar** (WP RN-1, 2026-08-19):
-      the working title collided with piracy tools and an established
-      achievement tracker. Three tiers — product word and image namespace
-      renamed; Kotlin package `dev.steamvault.app`, the `steamvault://`
-      scheme, internal `vault-*`/`VAULT_` names, and every dated historical
-      record deliberately NOT renamed. Two persisted-state identifiers
-      (Android prefs file, web localStorage keys) left on the old name so no
-      existing install silently loses its saved connection — a migration is
-      a separate package. See docs/adr/0013-product-rename-steamvault-to-
-      steamhangar.md for the full change list, the wire-visible items, and
-      the open follow-ups.
-- [x] CI: GitHub Actions — lint, tests, multi-arch image build (amd64/arm64),
-      publish to ghcr.io with pinned version tags
-      *(BUILT, in four packages; the publish path itself has never
-      executed — no tag exists — so every "nothing is published yet"
-      statement elsewhere in this plan remains true until the first tag,
-      which is the user's click. WP CI-1, 2026-08-21, commit 72a0aeb: the
-      web suite (node --test) and the verify-stack integration suite join
-      CI — verify-stack nightly/manual only, isolated from the PR gate.
-      WP CI-2, 2026-08-21, commit e8a09ca: the Android Gradle suite joins
-      the PR gate (assembleDebug + both unit-test variants + lintDebug),
-      closing the last blind spot; known residual: a Gradle cache hit
-      skips distributionSha256Sum re-verification, recorded in the threat
-      model. WP CI-3, 2026-08-22, commit 3f5fd0e: publish.yml on v* tags
-      + workflow_dispatch — four images to ghcr (vars.GHCR_NAMESPACE,
-      flavor latest=false, unknown/unknown manifest guard, per-platform
-      SteamPrefill smoke), plus android-release (secrets-gated signed
-      APK, apksigner verify, if:always() keystore cleanup). WP AGENT-BIN,
-      2026-08-22, commit 29d875c: vault-agent binaries for the three
-      ADR-0005 targets + SHA256SUMS attached to the same release; static
-      CGO_ENABLED=0, per-target file-type guard, VERSION sanitized for
-      slashed refs (workflow_dispatch rehearsal), release notes generated
-      by exactly one job per tag. Known, commented: re-pushing the SAME
-      tag appends release notes a second time. First-tag advice recorded
-      by review: a throwaway pre-release to exercise the never-run path
-      end to end — originally named v0.0.1-rc1, superseded 2026-09-30 by
-      `v0.1.0-rc1` so the tag is a pre-release of the baked `0.1.0` base
-      (`__version__`, compose tag default, Dockerfile LABELs), see §11
-      item 7.)*
-      *(WP 5.1 done 2026-08-09 — the test/lint half: api pytest (Linux),
-      agent go build/vet/test (Linux+Windows matrix), core `nginx -t`
-      through the image's REAL entrypoint render path (pinned upstream
-      image derived from core/Dockerfile) + config-drift check +
-      shellcheck, PS 5.1 parser/pure-ASCII gate + PSScriptAnalyzer
-      PSUseCompatibleSyntax(5.1); actions SHA-pinned, contents:read,
-      NO publishing. Manual/network harnesses documented as CI-excluded.
-      First gate exposed a real WP 3.10 bug — 25-vault-eventlog.sh's
-      survivor check made vault-core unable to start in its default
-      config; fixed in a separate fix(core) commit. Image build/publish
-      remains WP 5.5, user-gated. Opus PASS + delta-confirmed. CI run #1
-      on real runners: 4/5 jobs green incl. all three locally-unverifiable
-      ones; the api/pytest Linux job found a second real bug — a
-      Windows-only-measured path guard accepting `a\b`/`C:x` on POSIX —
-      fixed as fix(api), run #2 green expected.)*
-- [x] CONTRIBUTING.md, issue templates, example configs
-      *(WP 5.4: root `CONTRIBUTING.md` with verified per-component test
-      commands (api pytest: 704 passed/1 skipped; agent go build/vet/test:
-      all packages green, incl. a documented CRLF/`gofmt -l` checkout
-      caveat) and an honest local-only-vs-CI test matrix; GitHub issue-forms
-      `.github/ISSUE_TEMPLATE/{bug_report,feature_request,config}.yml`
-      (YAML-validated) + `.github/PULL_REQUEST_TEMPLATE.md`;
-      `deploy/examples/{minimal-lan,tuned-setup}.md` plus an examples
-      `README.md` index — `tuned-setup.md` documents a real gap (scheduler/
-      GC env vars are read by `vault_api/config.py` but not yet forwarded
-      by `deploy/compose.yaml`) with a working Compose-override recipe
-      rather than a silently-broken `.env` example)*
-- [x] **SECURITY.md + threat model** (WP 5.3 docs half, 2026-08-18; the
-      pre-release security review below is a separate, still-open half of
-      the same work package — see that item). Root
-      [`SECURITY.md`](../SECURITY.md): supported-versions note (pre-release,
-      no tags yet), reporting via GitHub's private vulnerability reporting
-      for this repository (no email address anywhere, per the operator's
-      constraint). The substantial part is
-      [`docs/security/threat-model.md`](security/threat-model.md): every
-      behavioural claim cited by file/line (or, for `docs/PROJECT_PLAN.md`
-      itself, a section-plus-quote anchor rather than a line number, since
-      this file grows under active editing) against the shipped code, not
-      the ADRs' designs (same discipline WP 5.2 established for the README).
-      Covers the LAN trust boundary and what an untrusted device on it can
-      already do (`vault-core`'s `/depot/` path is unauthenticated by
-      design, and its Host allowlist restricts *where* it can relay, not
-      *who* may use it), the cache contents and why they are not a licence
-      bypass, ADR-0004's credentials claim verified against the code (and
-      exactly where a real Steam session lives at rest —
-      `vault-steamprefill` volume), the WP 4h.1 personal-data surface
-      (playtime/last-played: the API-level half of the operator's privacy
-      stance has landed since — WP 4h.0's two env-only, off-by-default
-      gates mean the API no longer answers unconditionally to anyone
-      holding the one shared key. What remains open is the display-side
-      half: no UI renders either field yet, so "off by default or
-      dismissible" cannot be said fully met until WP 4h.2/4h.3 ship;
-      flagged for whoever builds those to read the threat model's own
-      framing first), outbound data flows (the opt-in Steam relay,
-      the opt-in manifest oracle, and the CSP's one external cover-art
-      host — what leaves the LAN and under what conditions), the ADR-0008
-      event log, precisely what `VAULT_SETTINGS_READONLY` and the bypass
-      banner do and do not mean, and supply-chain pinning (digest-pinned
-      base images and SHA-pinned CI actions vs. this project's own
-      mutable-tag image references, pending WP 5.5's first publish). Named
-      plainly as out of scope rather than glossed over: physical host
-      access, a compromised LAN, a malicious operator, and in-LAN DoS via
-      the unauthenticated relay-and-store path. Reviewed by Opus (round 1:
-      FAIL, four must-fixes — two broken-by-drift citations into this very
-      file, an understated personal-data claim, a missing outbound-data-flows
-      section, and the plan tick overreaching the delivered scope — all
-      fixed; round 2: FAIL, two blockers plus should-fixes — §4 citations
-      drifted again when WP 4h.0 rewrote that section in the same commit
-      that added 109 lines to `routers/steam.py`, and §5's outbound-flows
-      list falsely claimed exhaustiveness while omitting the Android app's
-      own direct Steam Web API and OpenID calls — addressed in the WP
-      5.3-fix follow-up commit; round 3: PASS, 2026-08-18). Several claims
-      explicitly could not be substantiated from code alone and are listed
-      as open gaps in the document's own closing section rather than
-      asserted anyway.
-- [x] **Pre-release security review (WP 5.3 review half, Fable mandatory)**
-      — DONE 2026-10-01, after the api/core code freeze
-      ([ADR-0016](adr/0016-api-core-code-freeze.md), freeze commit
-      92e95be). Two passes on the strongest available model (Opus 5.5):
-      pass 1 with two reviewers (server; clients/release), pass 2 over the
-      remaining server areas. Fix packages, each reviewed to PASS:
-      SEC-FIX-1 (9aef5f4, full-match Host allowlist; vault-core
-      `cap_drop: ALL` plus five caps), SEC-FIX-2 (eea667d, signing secrets
-      in a tag-only Environment, verifiable release assets, client
-      hardening), SEC-FIX-3 (c20a33a, starlette 1.3.1 for CVE-2025-62727
-      and others, every runtime dependency pinned), SEC-FIX-4 (901368e, no
-      symlink following on the shared volume, pre-auth body guard, bounded
-      zip errors), plus test fix 907de53 (the racing-delete test asserts
-      the documented byte floor). Evidence: api suite 2000 passed /
-      6 skipped; `verify-stack.sh` 211/211. Known limits recorded in
-      threat-model §9: tinyproxy ConnectPort, event-log boot TOCTOU, GC
-      unlink TOCTOU, no client-count cap, depot base resolved per request,
-      plain-HTTP misses. Post-release items: web "forget key", removal of
-      the per-level `O_NOFOLLOW` GC walk, the deletion byte-count lock.
-      See §11 item 6.
-- [ ] Announcement: r/selfhosted, r/homelab, LanCache Discord (stay fair:
-      frame as a complement/alternative, not a "LanCache killer").
-      Waits for v0.6.0 (user decision 2026-10-16: after the D18 rename;
-      2026-10-18, ADR-0029: once schedules are in).
-
-### Phase 6 — External Integrations (post-release, user decision 2026-08-10)
-
-Deliberately NOT a release blocker: WP 3.13 already ships working generic
-webhooks, and everything below is additive on top of them. Scheduled after
-the community release so no integration work delays it.
-
-Motivation: the WP 3.13 envelope is consumed happily by n8n and any generic
-JSON receiver, but the Phase 3 checkbox claiming "Discord/Slack/ntfy-
-compatible" overstates it — a Discord webhook accepts only `{"content": …}`
-or `embeds` and rejects our envelope with 400. Today Discord needs a relay
-in between. Phase 6 closes that gap and adds the events an automation
-platform actually wants to react to.
-
-- [ ] Multi-target delivery: `VAULT_WEBHOOK_TARGETS` — N receivers, each
-      with its own URL, event filter, format and headers, so n8n and Discord
-      can be fed at the same time (today: exactly one URL)
-- [ ] Vendor format adapters `generic|discord|slack` (user decision
-      2026-08-10: adapters in the backend, NOT a free-form body template —
-      Discord must work without a relay; the cost is that we maintain two
-      foreign formats). Includes honouring `Retry-After` on 429, which
-      Discord does send and the current 3-attempt/0.2-0.5 s backoff ignores
-- [ ] `app.updated` — the update notification. **No oracle dependency**
-      (user decision 2026-08-10, superseding the earlier "either source"
-      answer): the trigger is the existing non-forced scheduler sweep, which
-      per `docs/research/phase3-manifests.md` costs ~3 s and zero bytes for
-      an up-to-date app and is therefore already the manifest check. The
-      changed manifest ids come from WP 3.2 ingestion, the byte/`Updated`
-      counters from the WP 3.3 summary parser — so this is a notification
-      hook on machinery that already runs, not new detection.
-      The honest semantics are "the vault HAS this update" rather than
-      "an update is available"; for a homelab that is the more actionable
-      message. `VAULT_MANIFEST_ORACLE` (ADR-0006 tier 3) stays exactly what
-      it is — an opt-in pre-emptive badge — and never becomes a
-      precondition for notifications
-- [ ] Outbound auth beyond Basic-in-URL: custom headers (n8n commonly wants
-      a header token) + optional HMAC-SHA256 signature, plus a per-event
-      `event_id` so a receiver can deduplicate across retries
-- [ ] `POST /v1/webhooks/test` — fire a synthetic event at a target. Needed
-      by any settings UI (Phase 4) and turns webhook setup from guesswork
-      into one click
-- [ ] Integration docs: n8n in BOTH directions (receiving events; calling
-      `/v1/jobs` to trigger a prefill), Discord, ntfy
-- [ ] Structured log export — opt-in `VAULT_EVENT_LOG_STDOUT` mirroring the
-      cache-event TSV (WP 3.10) to vault-core's stdout, so Loki/Promtail/
-      Vector-style collectors can ingest the machine-readable events without
-      mounting the volume (user request 2026-08-17: keep it open for the
-      community even though the requester uses Dozzle). Deliberately NOT a
-      Dozzle gap: Dozzle reads container stdout, where vault-core's
-      human-readable per-request log with HIT/MISS/BYPASS already is — a
-      file-tailing log viewer is what the TSV would need, and no popular
-      Docker log viewer does that. Cost side: doubles the line volume inside
-      the json-file ring buffer, and the config-drift check's pinned
-      `access_log` counts must be updated in the same change. Off by default
-- [ ] Named, scoped API keys — the direct consequence of inviting external
-      systems in (user question 2026-08-10). Today there is exactly ONE
-      key: `auth.require_api_key` compares against `VAULT_API_KEY` for every
-      router, so the key an n8n flow needs in order to enqueue a prefill is
-      the same key that may `DELETE /v1/cache/{appid}`. Wanted: several
-      named keys (web UI, agent, Android app, n8n) with a coarse scope —
-      read / enqueue / destructive — each revocable on its own, so a leaked
-      automation token does not mean rotating every agent in the house.
-      Note this is about BLAST RADIUS, not about identity: it does not make
-      the vault multi-user
-- [ ] Payload scoping per target: a Discord channel is a room full of
-      people, and `client.bypass_*` payloads carry `client_id` plus every
-      IP address a device reported from, while job/update events reveal
-      which games the household owns. A `full|minimal` payload mode per
-      target (minimal drops device and address fields) is the cheap,
-      correct fix — authentication cannot solve a receiver-side visibility
-      problem
-- Open, deliberately deferred: PER-USER webhooks ("tell ME when MY games
-  update") require a real user identity, which only arrives with Phase 4a's
-  Sign in with Steam (ADR-0004). Until then a vault has one operator's view
-  and the webhook config belongs to that operator. Revisit after Phase 4a
-- Explicitly rejected: persisting the delivery queue across restarts.
-      At-most-once is the right hardness for homelab notifications
-      (`webhooks.py` module docstring)
-
-### Runner split & egress enforcement (S-track, decided 2026-08-19)
-
-Operator decision after WP EG-1's first attempt STOPPED pre-implementation
-(the coder proved the egress lock's promise unkeepable while SteamPrefill
-runs as a subprocess of vault-api — network namespaces are per container;
-ADR-0011 is reserved for the egress lock's ADR when EG-1 lands, which is
-why 0012 precedes it in time): split first, then lock.
-
-- [x] **S-1 (api)** — prefill runner split: VAULT_PREFILL_MODE
-      subprocess|queue, schema v15 lease columns, atomic claim (two
-      independent sufficient mechanisms, measured as 8 OS processes),
-      no-lease-stealing crash semantics, bounded stale-lease tests after a
-      mutation class was shown to wedge CI silently. ADR-0012. Opus review
-      rounds 1-2 (FAIL: queue-mode pause→resume was an inescapable dead
-      end, found by live probe; fixed + integration-pinned → PASS).
-      1672→1729 api tests. 2026-08-19.
-- [x] **S-2 (deploy)** — DONE 2026-08-19: vault-runner service (same
-      image, queue mode on both sides, health-gated against a
-      fresh-volume race found empirically), credential volume moved off
-      vault-api, HOME volume shared (CI-pinned — the silent-forever
-      ingestion case), unused cache mount dropped from the broad-egress
-      container on review. verify-stack 112→149 checks, api tests
-      1729→1747. Opus rounds 1-3 (version-pin guard silently disabled by
-      the duplicate image line — re-keyed by service; a tuned-setup
-      recipe asserting a mechanism the code lacks — rewritten to move the
-      volume, not the variable).
-- [x] **EG-1 (deploy, resumed)** — DONE 2026-08-19: the egress lock.
-      vault-api on vault-lan (no-masquerade) + vault-egress (internal),
-      allowlist tinyproxy as shipped default, VAULT_EGRESS_ALLOW, the
-      five-minute tcpdump/router verify recipe, completeness pins. ADR-0011.
-      Two channels the lock does NOT close are named as accepted gaps in the
-      ADR and threat-model, both measured live: DNS resolution (resolver
-      forwards from the host namespace) and the Docker host's own address
-      (replies need no masquerade). verify-stack 149->185, api 1747->1809.
-      Opus rounds 1-2 (FAIL: two security-doc absolutes overstated the lock,
-      caught by the reviewer actually exfiltrating; a CRLF gitattributes gap
-      that would crash-loop the proxy on a Windows checkout; the proxy image
-      was never built by verify-stack -> all fixed). HARDENING CHAIN
-      COMPLETE.
+| Phase (heading as recorded) | Open boxes | Archive file |
+| --- | --- | --- |
+| Phase 0 — Feasibility PoC (CRITICAL, before anything else) | 0 | [phase-0-3.md](plan-archive/phase-0-3.md) |
+| Phase 1 — vault-core + vault-api (server MVP) | 0 | [phase-0-3.md](plan-archive/phase-0-3.md) |
+| Phase 2 — vault-agent (PC listener) — COMPLETE 2026-08-09 | 0 | [phase-0-3.md](plan-archive/phase-0-3.md) |
+| Phase 3 — Scheduler & Update Logic — COMPLETE 2026-08-09 | 0 | [phase-0-3.md](plan-archive/phase-0-3.md) |
+| Phase 4a — Web UI (served by vault-api as static files) — COMPLETE 2026-08-11 | 0 | [phase-4a-4b.md](plan-archive/phase-4a-4b.md) |
+| Phase 4b — Android App — 4b.1–4b.10 MERGED 2026-08-17 | 1 | [phase-4a-4b.md](plan-archive/phase-4a-4b.md) |
+| Phase 4c — Manual update check (both frontends, user decision 2026-08-10) | 0 | [phase-4c-4d.md](plan-archive/phase-4c-4d.md) |
+| Phase 4d — Persisted settings + "keep the cache current" sweep mode | 0 | [phase-4c-4d.md](plan-archive/phase-4c-4d.md) |
+| Phase 4e — Web UI desktop layout (track: web) | 0 | [phase-4e.md](plan-archive/phase-4e.md) |
+| Phase 4h — Decision support in the reclaimed desktop width (user decision 2026-08-18) | 0 | [phase-4h.md](plan-archive/phase-4h.md) |
+| Phase 5 — Community Release | 1 | [phase-5.md](plan-archive/phase-5.md) |
+| Phase 6 — External Integrations (post-release, user decision 2026-08-10) | 9 | [phase-6-s-track.md](plan-archive/phase-6-s-track.md) |
+| Runner split & egress enforcement (S-track, decided 2026-08-19) | 0 | [phase-6-s-track.md](plan-archive/phase-6-s-track.md) |
 
 ---
 
@@ -2505,846 +428,21 @@ repository, then start Phase 1) are all DONE — Phase 0 answered the
 Phases 1–3 plus 4a shipped (state as of the 2026-08-17 rewrite; the items
 below carry their own later dates, item 12 is the current one).
 
-1. [x] **Packaging package** (§7 Phase 5, first bullet) — DONE, WP P1: `web/`
-   baked into the vault-api image, the full env-forwarding gap audited and
-   closed (not just `VAULT_EVENT_LOG_PATH` + `VAULT_MANIFEST_ORACLE` —
-   twelve keys total, see §7 Phase 5's own bullet for the complete list),
-   `deploy/tests/verify-stack.sh` extended and run for real. What follows is
-   unchanged by it: next up is item 2 below.
-2. [ ] **First real-world rollout** — joint interactive session with the
-   operator (see the Deployment section of `docs/WORKPACKAGES.md`). The two
-   operator-side network blockers are cleared (measured by the operator,
-   2026-10-01): the VPN subnet router advertises only the current networks,
-   and LAN clients get no IPv6 DNS server. One check stays for the rollout
-   itself: with the DNS rewrite active, the AAAA answer for the cache name
-   must not be a public address. Precondition decided 2026-10-01: the
-   egress subnet becomes configurable (WP DEPLOY-FIX-2) so a production
-   stack can run next to a test stack; the rollout started with tag
-   v0.1.0-rc3. Gate (b) found that a bind-mounted cache
-   (VAULT_CACHE_PATH) fails on Docker 28 because of vault-api's
-   `:nocopy` (fixed in WP DEPLOY-FIX-3, verify now runs bind mode too);
-   production moves to v0.1.0-rc5, which carries the fix. Findings from
-   the operator's first phone test on rc5 (2026-10-02), fixed in WP
-   WEB-FIX-3 (phone layout hardening), WEB-FIX-4 (job titles for
-   owned-only games; plain-language hints plus Retry for a missing Steam
-   login and for a cache name resolving to a public IP) and WEB-FIX-5
-   (dismissible hint when the browser's "Desktop site" mode renders the
-   UI at desktop width - the root cause of the zoomed-out phone view).
-   Prefill on the production stack needs vault-core on its own address
-   and `extra_hosts` for the cache name on vault-runner. This session is also
-   where the honest still-open lists in `web/tests/README.md` and
-   `app/README.md` get verified — real screen reader, phone browser cover
-   art, GC against real on-disk chunks, real multi-client bypass detection.
-3. [x] **WP 4b.9** Android release build + signing docs + APK distribution
-   (keystore creation is a user action), plus the review carry-over list in
-   `docs/WORKPACKAGES.md` — done 2026-08-17, together with WP 4b.10 (the
-   clients/bypass detail surface); see §7 Phase 4b's evidence notes.
-4. [x] **Phase 4c / 4d** frontend halves — CLOSED 2026-08-22: the manual
-   "check & update" trigger in both UIs (web WP 4c-web, Android WP 4c-app),
-   and the now-default-on "keep the cache current" sweep mode (WP SWEEP-1
-   flipped it — and its auto-GC pair — from opt-in to the shipped default,
-   docs/adr/0014-sweep-cached-and-auto-gc-default-on.md). Its frontend
-   surface shipped in both UIs the same day: web as WP 4d-web (commit
-   c825625, see §7 Phase 4d's closing note), Android as part of WP AG-3
-   (commit 0a3bfc5) — toggle, GC-risk warning and three-way last-sweep
-   status, the Kotlin port pinned by string equality against the
-   twice-reviewed web copy.
-5. [x] **WP 5.3 docs half** — `SECURITY.md` + `docs/security/threat-model.md`,
-   done 2026-08-18 (see §7 Phase 5). Round-2 review ran and FAILED (two
-   blockers plus should-fixes, mostly citation drift from WP 4h.0 landing
-   in the same commit range plus a false §5 exhaustiveness claim) —
-   findings addressed in the WP 5.3-fix follow-up commit; round 3: PASS
-   (2026-08-18).
-6. [x] **WP 5.3 review half** — pre-release security review, DONE
-   2026-10-01 after the api/core/dns freeze
-   ([ADR-0016](adr/0016-api-core-code-freeze.md), commit 92e95be). Two
-   passes on Opus 5.5 (Fable unavailable, user decided not to wait; since
-   WP R-0, commit 80f750f, "[Fable]" names a boundary — the strongest
-   available model at call time — not a model). Fix packages SEC-FIX-1..4
-   (9aef5f4, eea667d, c20a33a, 901368e) plus test fix 907de53, each
-   reviewed to PASS; api 2000 passed / 6 skipped, `verify-stack.sh`
-   211/211. Known limits in threat-model §9, post-release items in §7
-   Phase 5's evidence note.
-7. [ ] **User-gated:** WP 5.5 — the machinery is no longer the gate. The
-   GitHub org exists, the repo lives at `steamhangar/steamhangar`, and the
-   full publish path is built and reviewed (WP CI-3 + WP AGENT-BIN, see §7
-   Phase 5's CI bullet): images, signed APK, agent binaries, checksums.
-   What remains are user actions only (steps (a)-(d) at the end of this
-   item), and review's standing advice is a throwaway pre-release first, named
-   `v0.1.0-rc1`: three things in the tree bake `0.1.0` —
-   `vault_api.__version__` (served as `server_version` by the
-   authenticated `GET /v1/settings`; `/v1/health` returns only
-   `{"status":"ok"}`), the compose `VAULT_IMAGE_TAG` default, and the
-   `org.opencontainers.image.version` LABEL in the api, core, dns and
-   deploy/proxy Dockerfiles. (Superseded 2026-10-03 by WP VER-1: the
-   Dockerfile labels and `server_version` now come from the build args
-   publish.yml derives from the tag, `dev` for local builds; only
-   `vault_api.BASE_VERSION`, the fallback outside an image, and the
-   compose `VAULT_IMAGE_TAG` default still say `0.1.0`.) What the tag sets: since DEPLOY-FIX-1/APP-FIX-1 the APK's
-   versionName is the tag without its `v` (build.gradle.kts falls back to
-   `0.1.0` for local builds only), and the published images are tagged
-   (and labelled, via docker/metadata-action) with the same string. With
-   `v0.1.0-rc1` the APK and images say `0.1.0-rc1`, a semver pre-release
-   of the baked `0.1.0` base; a `v0.0.1-rc1` would ship images and an APK
-   whose version is older than the `server_version` inside them. The path has never executed and the
-   release page is the only place its end-to-end result can be seen
-   (re-pushing the SAME tag double-appends release notes; known, commented
-   at the site). WP 5.6
-   (announcement) stays gated on the user's own end-to-end test with the
-   Android app. Phase 6 integrations are deliberately post-release.
-   **Remaining release steps (2026-10-01, all user actions):**
-   (a) merge PR `wp/pre-freeze-review` once its CI is green — the first
-   android-tests run there is the first compile of the APP changes;
-   (b) one-time GitHub settings BEFORE setting the signing secrets: an
-   Environment `release` with a `v*`-tag deployment rule, the four
-   `ANDROID_*` secrets placed in it (not as repo secrets), and a `v*` tag
-   ruleset (see app/README "CI signing secrets"); (c) push the tag
-   `v0.1.0-rc1` from main; (d) check the release page's "Verify this
-   release" block. After the first push, the GHCR packages must be made
-   public.
-8. [x] **The AG series — agents become first-class residents** — COMPLETE
-   2026-08-22, four packages in one day (user's go for the full chain).
-   AG-0 (commit 74e7727): client identity visible and attributed at
-   startup (source + sanitize note), install-time preview reading the
-   same hostname source as Go (the COMPUTERNAME case defect found in
-   review would have minted ghost identities), rename semantics
-   documented honestly. AG-1 (commit 54e7622): installed_on on the games
-   endpoints with the scheduler's own freshness gate resolved against
-   effective settings (round 1 caught the shared-function/unshared-bound
-   divergence), plus DELETE /v1/clients/{client_id} for ghost rows.
-   AG-2 (commit 0971a1d): the web badge and the payoff statement
-   "installed but not cached", after a round-1 FAIL in which every DOM
-   surface was deletable green — root cause a stub fake-dom whose no-ops
-   silently swallowed the calls; the harness itself was extended and now
-   throws on unsupported selectors. AG-3 (commit 0a3bfc5): Android
-   parity for the badge plus the sweep surface, after the same
-   wiring-unpinned FAIL on the same day, fixed with the codebase's
-   strongest anchor generation; the demo's stale pre-ADR-0014 default
-   (which made screenshots show a warning no real fresh install shows)
-   corrected and pinned by the Android twin of the web's config drift
-   guard. Both frontends' demo modes now exercise every badge state.
-9. [x] **WP APP-DEMO** — Android demo mode, done 2026-08-22 (commit
-   bdb2c19): screenshot-grade fixtures behind the onboarding skip link,
-   no account, no vault, no network; six repository seams, compile-time
-   fixture/model coupling, DEMO MODE banner unscrollable on every
-   surface. Four review rounds; the durable outcome is recorded in
-   docs/LEARNINGS.md (the guarantee-vs-mechanism ceiling of name-based
-   isolation scans). Real-device residuals listed in app/README.md.
-10. [x] **Download throttling, time-dependent — done (WP TH-1a/TH-1b,
-    TH-1a committed as 6aa4c0c, TH-1b as 47747b4, TH-1-FIX as 92e95be; ADR-0015)** (operator request 2026-08-30). Caps the
-    upstream (Steam → vault) bandwidth; LAN serving stays uncapped. Scoping
-    by the WP TH-0 spike (commit 9865237,
-    `poc/throttle/RESULTS-THROTTLE-20260929.md`): SteamPrefill 3.7.1 has
-    no rate option, nginx-native `proxy_limit_rate $var` caps the
-    `proxy_store` miss path exactly, per request, HITs at LAN speed. User
-    decision 2026-09-30: the operator sets ONE aggregate limit, divided at
-    download time by the live number of parallel requests. WP TH-0b
-    (commit e3f3f65, `poc/throttle/RESULTS-THROTTLE-DYNAMIC-20260930.md`)
-    chose Option A (an nginx `map` on the live connection count) over Option B
-    (njs counter: burst overshoot, leak on abort). WP TH-1a
-    (`poc/throttle/RESULTS-TH1-20261001.md`) switched the divisor to
-    `$connections_writing`, not `$connections_active` (measured: `_writing`
-    0.98× of target with 8 idle keep-alives open, `_active` 0.50×). The map
-    is generated at container start with buckets 1..1024 =
-    `worker_connections` (worker_processes 1), so no live count reaches the
-    default; the bound is pinned by `check-config-drift.sh`. Fail-closed:
-    an invalid value refuses to boot. Env-only: `VAULT_UPSTREAM_RATE`
-    (empty = off) and `VAULT_UPSTREAM_RATE_WINDOW` (full speed inside;
-    unset follows `VAULT_SCHEDULE_WINDOW`, blank caps around the clock),
-    evaluated in vault-core's `TZ`, which `deploy/compose.yaml` now
-    forwards (WP TH-1b). Limits stated in `core/README.md` "Upstream rate
-    cap": per request divided by the live count (HITs dilute the share),
-    the LAN client of a MISS is slowed too, the window edge stops nothing,
-    slow-ramp overshoot unmeasured. Router QoS stays the zero-code
-    alternative.
-11. [ ] **Macvlan deploy example — vault-core on its own LAN IP** (operator
-    request 2026-08-30, roadmap entry — not yet a scoped work package).
-    Steam clients require plain HTTP on port 80 (Steam's choice), so on
-    a host whose port 80 is already owned by a reverse proxy (Traefik,
-    NPM — the homelab default) vault-core needs a second address. Today
-    that means a host-side IP alias created in the host platform's own
-    UI (so it survives reboots). The comfortable
-    shipped answer: a documented compose override giving vault-core its
-    own LAN IP via a macvlan network — Docker-native, no host network
-    clicks, the established lancache pattern. Must ship as an EXAMPLE
-    with its caveats stated, not as a silent default: the host cannot
-    reach a macvlan container directly (affects the host-side health
-    probes and any same-host DNS rewrite target), the parent interface
-    and address range are operator-specific, and the interaction with
-    the host platform's container manager needs a real test on the
-    deployment this was requested for. Belongs in deploy/examples/ beside
-    minimal-lan and tuned-setup, with a verify recipe; footprint deploy/ +
-    docs only.
-12. [x] **Pre-freeze project review (2026-09-30/10-01) and its fix
-    packages — done 2026-10-01; freeze declared (ADR-0016).** Before declaring the api/core freeze that
-    item 6 waits on, the whole tree was reviewed in eight areas (api data
-    layer, api surface, core + dns, agent, web, app, deploy, docs), each by
-    its own reviewer, each report naming blockers (claims or code that must
-    not reach the freeze as they are). One fix package per area with
-    findings, each through the usual coder → reviewer → PASS pipeline:
-    - [x] **AGENT-FIX-1** — commit 5ce6b50
-    - [x] **CORE-FIX-1** (core + dns) — commit 30151f8
-    - [x] **API-FIX-2** — commit 460897e
-    - [x] **WEB-FIX-1** — commit 9572e6f (includes the WP 4f demo-mode
-      carry-over open since 2026-08-18)
-    - [x] **API-FIX-1** — commit 298029f
-    - [x] **APP-FIX-1** — commit 95b684c
-    - [x] **DEPLOY-FIX-1** (deploy, CI) — commit 4c8a67d
-    - [x] **DOCS-FIX-1** (this plan, the root docs, the ADR addenda dated
-      2026-09-30 — files no other fix package owns) — commit f70c031
-    - [x] **DOCS-FIX-2** (the component docs those packages touch, after
-      they land) — commit ec90ce2
-    Follow-up commits after the review packages, all reviewed to PASS:
-    - [x] **TH-1a** (core, aggregate upstream cap) — commit 6aa4c0c
-    - [x] **WEB-FIX-2** (user decision 2026-10-01, connection-lost
-      indicator) — commit 984d02a
-    - [x] **TH-1b** (deploy, cap configurable from `.env`, follows the
-      schedule window) — commit 47747b4
-    - [x] **TH-1-FIX** (copy-up race on a fresh cache volume, found by a
-      live verify; verify 204/204) — commit 92e95be
-    Directly before the review, WP R-0 (commit 80f750f) moved agent
-    delegation to the session model (see item 6). The freeze followed the
-    last PASS: ADR-0016, freeze commit 92e95be.
+Items 1-12 are archived verbatim in
+[`plan-archive/next-steps-items-1-12.md`](plan-archive/next-steps-items-1-12.md);
+their open boxes (items 2, 7 and 11) are in section 12. Item 13 stays here.
+
 13. [ ] **Road to v0.1.0 final and the post-v0.1.0 roadmap (user
     decisions 2026-10-02).** The production rollout on the operator's
     host (item 2) is the release gate. What it found, what is still open
     before `v0.1.0`, and what was deliberately moved past it.
 
-    **A. In flight / next release candidate (`v0.1.0-rc6`)**
-    - [x] **CORE-FIX-2** (commit 7ecca59, merged 6965ea7 2026-10-02,
-      first shipped in `v0.1.0-rc6`) — prefill concurrency cap. On a DS-Lite line
-      (IPv4 behind the provider's CGNAT) a prefill failed 94% of chunk
-      requests with `connect() failed (113: Host is unreachable)`: the
-      CGN answers ICMP host-unreachable once the subscriber's port quota
-      is spent (RFC 6888 REQ-11). vault-core opens one upstream
-      connection per chunk, and SteamPrefill's 30 workers re-fire
-      instantly on failure. Fix: SteamPrefill runs with `--max-threads`
-      (new `VAULT_PREFILL_MAX_THREADS`), the hidden flag is guarded
-      against version bumps, nginx stops multiplying connect retries.
-    - [x] Tag `v0.1.0-rc6` (user's yes given 2026-10-02, once CORE-FIX-2
-      is green and merged): verify digests, new override/.env templates
-      for the operator's rollout request. Tagged 2026-10-02 on a7856fc
-      (contains 6965ea7); later candidates up to `v0.1.0-rc12` followed.
-    - [x] ~~Operator re-tests on rc6: prefill of one real game completes,
-      Steam client downloads the same game from the cache (HIT), job
-      titles show game names, the failure hints read correctly, the
-      Desktop-site banner appears on the phone with the mode on.~~
-      Obsolete (audit 2026-10-16): superseded by the later production
-      rollouts of newer candidates (real prefills completed, client HITs
-      measured on prod, e.g. 94 % HIT on 2026-10-13); open device checks
-      ride on each rc's deploy Antrag and the "Before v0.1.0" list in the
-      roadmap.
-    - [x] **AGENT-FIX-2** (operator's rc9 agent install on Windows 11,
-      non-admin, PS 5.1, 2026-10-04; follows AGENT-FIX-1/AGENT-FEAT-1) —
-      `install-task.ps1` takes the library root from
-      `HKCU\Software\Valve\Steam\SteamPath` when `-LibraryRoot` is omitted
-      and it holds `steamapps\` (explicit > registry > kept from
-      `env.txt` > default + warning); a re-install without
-      `-ApiKey`/`-ApiKeyFile` keeps the key from `env.txt` (never
-      printed), and without `-ClientId` keeps the client id (review S1);
-      `run-vault-agent.ps1` writes the agent's
-      output as plain UTF-8 bytes via `Start-Process` redirection (no
-      NativeCommandError wrapping, no UTF-16). New hermetic CI test
-      `agent/packaging/windows/tests/test-packaging-unit.ps1`. Follow-up,
-      not done: registry lookup in the Go agent itself.
-    - [x] **CI-FIX-3** (tag `v0.1.0-rc10`, 2026-10-04; follows CI-FIX-2's
-      token-less annotations) — the signed APK verified (v2) but publish.yml
-      refused it with "found 0" certificates: current build-tools print
-      `V2 Signer: certificate SHA-256 digest:`, the inline sed wanted lines
-      starting with `Signer`. The parser moved to
-      `.github/scripts/apk-cert-digest.sh` (all known label shapes, CRLF,
-      de-duplicated, still exactly one certificate or fail-closed), and any
-      failure in the verify step now repeats apksigner's verdict and signer
-      lines as `::notice::` annotations. Fixture tests:
-      `api/tests/test_ci_fix_3_apk_cert_digest.py`. First real signing
-      certificate SHA-256, published in app/README.md:
-      `f095d5abda5acb23f3f07c9fa68a5526a514f1f4e600fca17162aa8d17c66172`.
-      Still open: pinning that value as a CI comparison (N4 follow-up).
-    - [x] **CI-FIX-4** (2026-10-04; extends CI-FIX-2's token-less
-      annotations to the web job) — `web / node --test` failed on merge
-      commit 0048bc0 with only "Process completed with exit code 1" visible
-      publicly, while the same suite passed locally (1158/1158, Node 22 and
-      24). The test step now runs `spec` to stdout plus `junit` to
-      `$RUNNER_TEMP/web-junit.xml` (exit status unchanged), and an
-      `if: failure()` step runs `.github/scripts/node-junit-annotate.py`,
-      which prints one escaped `::error file=…,line=…,title=<suite > test>`
-      per failing test (cap 10 per step; it reuses android-annotate.py's
-      escaping). Tests: `api/tests/test_ci_fix_4_node_junit_annotate.py`.
-      Limit: a test file that crashes as a whole (junit names it by its
-      path as given on the command line -- relative under CI's glob) is
-      annotated on that file with a hint only; its crash text stays in the
-      log.
-
-    **B. Open before `v0.1.0` final**
-    - [x] **API-FIX-3** — misleading prefill summary (done 2026-10-03:
-      new failure reason `prefill_failed` from the summary's Failed column). When SteamPrefill
-      reports `Failed 1`, vault-api appends "did not consider this app -
-      is it owned by the logged-in account?". It must tell "failed" from
-      "not considered" (parse the summary table's Failed column) and say
-      what failed. Needs the freeze opened for a bug fix (ADR-0016
-      addendum).
-    - [x] **API-FIX-4** — Steam tool apps are never prefilled (production
-      2026-10-04, user decision Weg A; done 2026-10-04, ADR-0016 addendum).
-      Every Windows agent reports 228980 "Steamworks Common
-      Redistributables"; its prefill always failed and the card read
-      "App 228980 / Failed / Retry download". vault-api keeps a fixed list
-      (`api/vault_api/tool_apps.py`, only 228980): the scheduler (installed
-      and cached sources), the miss trigger and `POST /v1/prefill/cached`
-      skip it, `POST /v1/prefill` answers `422`, `GET /v1/games[/{appid}]`
-      add `tool_app` + `tool_app_name`. Web and Android show the name, the
-      neutral "Steam tool package — cached together with the games that use
-      it", a muted card, no Download/Retry and no "not cached" warning; bulk
-      download never targets it. Agents still report it.
-    - [x] **API-FIX-5** — real cover art for new games (user decision
-      2026-10-10 Weg B; done 2026-10-10, ADR-0016 and ADR-0011 addenda).
-      Both frontends built the cover as the legacy
-      `cdn.akamai.steamstatic.com/steam/apps/<appid>/library_600x900.jpg`,
-      which Valve answers with 404 for newer games (measured: 3527290).
-      vault-api now asks Steam's store item lookup
-      (`IStoreBrowseService/GetItems` on `api.steampowered.com`, no key,
-      up to 50 apps per call) in a background thread
-      (`api/vault_api/cover_art.py`), stores the hashed
-      `shared.akamai.steamstatic.com/store_item_assets/...` URL in the new
-      table `app_cover_art` (schema v18) and serves it as `cover_url` in
-      `GET /v1/games[/{appid}]` (null while unknown). On by default with no
-      switch: the tracked app ids leave the server toward Valve
-      (threat-model §5 outbound flow 6). Web and Android use `cover_url` when
-      it is an https URL on one of the two asset hosts, else the legacy
-      path; CSP `img-src` gains `https://shared.akamai.steamstatic.com`.
-      Not changed: the detail sheet's header art (`header.jpg`) still uses
-      the legacy path.
-    - [x] **DOCS-FIX-3** — ADR-0004 and SECURITY.md claim QR login via the
-      Steam app is the documented path (done 2026-10-03: ADR-0004
-      addendum 4 marks the claim wrong; SECURITY.md, threat-model §3 and
-      deploy/README's first-run login corrected, plus a note on Steam's
-      location check and the code workaround; only ADR-0004 actually
-      carried the QR sentence). No SteamPrefill release supports
-      QR (verified in the v3.7.1/v3.7.2 source, 2026-10-02); the only
-      path is account name + password + Steam Guard on the server
-      terminal. Correct the claim, point to the planned QR helper (D2).
-    - [x] **APP-FIX-2** — Android parity with WEB-FIX-4: job titles from
-      the owned list (`JobCardModel.nameFor`), plain-language hints and
-      Retry for `not_logged_in` and the public-IP cache detection, the
-      raw output collapsed; demo enqueue creates an unnamed vault row
-      like the real API.
-    - [x] **APP-FEAT-1** — the Android app reads the stored
-      `steam_library_steamid` (API-FEAT-1) instead of its own input, and
-      can set it, as the web Settings block does.
-    - [x] **WEB-FIX-6** (done 2026-10-03) — the bulk bar overlaps content in select mode on
-      a phone (noted during WEB-FIX-3, not fixed).
-    - [ ] Signed APK: operator creates and backs up the keystore, puts
-      the four `ANDROID_*` secrets into the `release` Environment, then
-      dispatches the publish workflow on the release tag (app/README).
-    - [ ] Standard-user check: `install-task.ps1` (AGENT-FEAT-1, with the
-      AtLogOn trigger) registers the task on a non-admin Windows account
-      (CI's harness runs as admin).
-    - [ ] Real-device checks from the honest open lists
-      (`web/tests/README.md`, `app/README.md`): screen reader, phone
-      cover art, GC against real chunks, multi-client bypass detection,
-      bottom-nav behaviour with Desktop site off.
-    - [x] Nightly `deploy / verify-stack` runs the new bind-mode section
-      (DEPLOY-FIX-3) on a GitHub runner for the first time; check it.
-      Green: scheduled CI run 37921148659 (2026-10-09, main 6d7248e), job
-      `deploy / verify-stack` success; the four scheduled runs before it
-      (2026-10-05..08) green too. Section 9 has no skip path and any failed
-      check exits non-zero, so a green job means it ran and passed (job
-      log not read: it needs an authenticated API call; HYG-1).
-    - [ ] Rollout gates (h) and (i) by the operator: re-measure with the
-      DNS rewrite, scheduler on, stack in the operator's stack repo,
-      SQLite dump in the backup job.
-    - [ ] Release notes for `v0.1.0`: the DS-Lite/CGNAT behaviour, the
-      `extra_hosts` requirement with a dedicated `VAULT_CORE_BIND`, the
-      bind-mount precondition (`cache/depot` + `tmp`; since SEC-FIX-5 only
-      `cache/depot` is 101:101, the rest root:root, migrated at start; a
-      rollback to an older image needs the old ownership back).
-      Also, for the release candidate after rc12 (D7 CORE-FIX-4,
-      ADR-0021; user decision 2026-10-04: fixed before `v0.1.0`): a Steam
-      client downloading an app that is NOT in the cache used to open one
-      upstream connection per chunk, so behind DS-Lite/CGNAT a MISS burst
-      could exhaust the subscriber's port quota (first client test,
-      2026-10-04: 1838x `113: Host is unreachable` across 14 edge hosts in
-      ~16 s). Now: new env vars `VAULT_UPSTREAM_EDGE` (compose default
-      `dist-fra1.discovery.steamserver.net`, on out of the box; empty =
-      legacy per-name pool = rollback, which keeps the old limitation),
-      `VAULT_UPSTREAM_MAX_CONNS` (default 16, 1..64, no off switch) and the
-      forwarded `VAULT_PREFILL_MAX_THREADS` (floor for the cap). Behaviour:
-      all MISSes go through ONE pooled edge (the client's Host only has to
-      pass the allowlist), a global cap answers 503 above C concurrent
-      upstream connections, three new log fields (`upstream_host`, `host`,
-      `limit_conn`). Keep `VAULT_UPSTREAM_RATE=4m` with an empty
-      `VAULT_UPSTREAM_RATE_WINDOW` (user decision 2026-10-04) until the
-      post-rollout measurements are stable. Post-rollout check (ADR-0021
-      "After rollout", deploy/README.md): `113` count 0, connect-time
-      dominated by `0.000`, established :80 sockets <= 2C, and the
-      Host-for-all-names inference confirmed (uncached app update without
-      hash mismatch, no edge-mode-only 4xx/5xx). Scheduler mitigation
-      stays: prefill every installed app of an active PC, window e.g.
-      `06:00-24:00`. Windows agent installer notes from
-      AGENT-FIX-2: a re-install keeps the key, client id and (when the
-      registry has none) a working library root from `env.txt`; going back to the hostname-derived id
-      needs uninstall + install; the registry SteamPath wins over an
-      earlier explicit `-LibraryRoot`. AGENT-FIX-3 (release candidate
-      after rc12): the Scheduled Task no longer flashes a console window
-      on every run; it launches `powershell.exe` through
-      `conhost.exe --headless` (direct `powershell.exe` action as before
-      when `conhost.exe` is missing), logging unchanged. Existing installs
-      keep the old action until `install-task.ps1` is re-run once.
-      WEB-FIX-10: the web UI's Windows install command trims spaces
-      around the pasted key (as `install-task.ps1` does), still starts the
-      first report when the download folder cannot be removed (warning
-      only), and its steps say to press Enter once more if nothing happens.
-      DEPS-1 (release candidate after rc12): the vault-api image ships
-      SteamPrefill 3.7.2 instead of 3.7.1 (upstream fix: a DLC depot that
-      links to itself without a manifest no longer breaks a prefill);
-      no setting, flag or file format changes.
-      WEB-FEAT-6: web and app show a running prefill of an already
-      completed game as "Updating" (turning arrows) and a forced re-run of
-      one as "Verifying", instead of "Downloading".
-      CORE-FIX-4d (release candidate after rc12): the HTTPS passthrough's
-      connection caps are tunable via `VAULT_TLS_CLIENT_MAX_CONNS` (per
-      client address, default 64, 1..256) and `VAULT_TLS_MAX_CONNS` (total,
-      default 256, 1..400, per-client <= total); defaults unchanged, an
-      invalid value stops vault-core's boot. A Steam client over the
-      per-client cap retries refused connections at once, which a gateway
-      may log as a SYN flood; count the `status=503` passthrough lines
-      before raising it.
-      API-FIX-5 (release candidate after rc13): newer games get their real
-      cover art instead of the fallback tile. vault-api looks covers up in
-      the background through Steam's store API on `api.steampowered.com`
-      (no key; the list of tracked app ids and the server's address go to
-      Valve, always on), stores them (schema v18, new table) and serves
-      `cover_url`; offline vaults keep the old covers and log one warning
-      per failure streak. A rollback to an older image refuses the v18
-      database (as for every schema bump).
-
-    - [x] **WEB-FIX-7** — the running download arrow falls through the
-      badge in a seamless two-arrow loop (period 32 units, 1.6s, clipped
-      to the disc) instead of drifting 2px and fading (user feedback
-      2026-10-03, done 2026-10-03).
-    - [x] **APP-FIX-3** — Android parity for WEB-FIX-7: `StatusIcon.kt`
-      still drifts and fades (`downloadDriftFraction` /
-      `downloadOpacityFraction`, ported from the removed `vault-dlslide`).
-    - [x] Design notes: `docs/design/vault-app-mockup-NOTES.md` still
-      describes the old drift-and-fade arrow; record the WEB-FIX-7 change.
-      Done in HYG-1: new closing section "Real app: the download arrow
-      falls through the badge", superseded markers on the three
-      drift-and-fade passages.
-    - [x] The update/verify spinner (`vault-turn`, status kinds
-      `updating`/`verify`) exists but no view ever renders those kinds;
-      decide whether a live update/verify state should be shown, or drop
-      the dead glyph. **WEB-FEAT-6** (user decision 2026-10-09: show it,
-      no API change): a `running` prefill job shows `updating` when the
-      app's games row has `last_prefill_at` set and `needs_force` false,
-      `verify` when `last_prefill_at` is set and `needs_force` true (a
-      `--force` run over a completed copy),
-      else `running` — in the library card, detail sheet and Downloads
-      card, web and Android. Not shown: the mockup's short "verifying"
-      phase at the start of a resumed run (no API field marks its end).
-
-    **B2. Component versions and agent presence (user decisions
-    2026-10-03, "Weg A1" and "Weg B")**
-    - [x] **VER-1** — every image and the agent carry the real release
-      version and commit (build args from publish.yml; `server_version`
-      from the image; `vault-agent --version`; publish fails if a tag is
-      not the version metadata-action derives).
-    - [x] **VER-2** — `GET /v1/about`: versions and reachability of
-      vault-api/web, vault-core, vault-proxy, vault-runner, SteamPrefill
-      and vault-dns. The web rail footer must not render `vdev`.
-      Shipped as: vault-core via a version file its start hook writes into
-      the cache volume (status `unknown`, user decision "Weg A"
-      2026-10-03: no network path from vault-api, ADR-0011 untouched);
-      runner presence table (schema v16, 30 s refresh, `ok` under 90 s);
-      vault-proxy by reachability only (a version page would need a hole
-      in tinyproxy's egress filter); vault-dns `unknown`, never probed
-      (vault-api cannot tell whether it runs). Footer: `dev` reads "dev
-      build", only digit-leading versions get the `v`.
-    - [x] **AGENT-FEAT-1** — the agent reports at logon/boot and every
-      10 minutes (was 30), with its version and report interval in the
-      report; `GET /v1/clients` adds them plus a computed online/offline
-      state (offline after two intervals plus 5 minutes, "last seen ..."
-      shown). Old agents appear without a version, assumed 30 minutes.
-      Implemented 2026-10-03, in review (ADR-0016 addendum): schema v17,
-      `agent_reports.presence`, Windows logon trigger + 10 min, systemd
-      `OnCalendar=*:0/10` + `OnStartupSec=30s`; a new agent resends once
-      without the fields to a server up to rc8 that refuses them. Operators
-      reinstall the task/units to get the new schedule.
-    - [x] **WEB-FEAT-3** — Settings gains "About" (component table) and
-      "PCs (agents)" (always reachable, online/offline, last seen,
-      version, games); the clients sheet no longer needs the bypass
-      banner as its only entry point.
-
-    - [x] **SEC-FIX-5** (done 2026-10-03) — root may never follow a name uid 101 controls
-      in the cache volume (found in VER-2 review, 2026-10-03, severity
-      medium under a compromised vault-api or nginx worker). (a)
-      `25-vault-eventlog.sh` checks then creates/truncates the event log
-      as root (`[ -e ] || : >`); (b) the root nginx master opens
-      `/vault/logs/event.log` O_APPEND|O_CREAT and follows a symlink uid
-      101 can swap in at any time (CVE-2016-1247 class). Implemented
-      2026-10-03, in review (user decisions 2026-10-03: before `v0.1.0`;
-      refuse to start when the migration is impossible, "Ist okay";
-      ADR-0016 addendum): `/vault`,
-      `cache/`, `tmp/`, `logs/` root:root 0755, uid 101 owns only
-      `cache/depot`, the nginx temp dirs and the event log; new start hook
-      `21-vault-volume-ownership.sh` migrates existing volumes and bind
-      mounts at every start or refuses to start with the host commands;
-      the version file is written by root; bind-mount operator step is now
-      `chown 101:101 <dir>/cache/depot` only (deploy/README).
-
-    - [x] **WEB-FEAT-4** — remove a PC from the "PCs (agents)" list with
-      a confirmation dialog, calling the existing `DELETE
-      /v1/clients/{client_id}` (WP AG-1); a renamed or retired PC
-      otherwise stays listed as offline forever (user decision
-      2026-10-03, after rc9). Android follows in the next app package.
-      Done 2026-10-04, web only, no API change: "Remove" per row, confirm
-      names the PC, what is deleted and that a running agent lists it
-      again; 404 counts as removed; ids containing "/" get a note instead
-      (the frozen route cannot address them, measured).
-    - [x] **PAIR-1** — "Add a device" in Settings → PCs (user request
-      2026-10-04, "Weg A": pairing from the already-configured web UI with
-      the one shared API key, no API change, ADR-0016 freeze holds). Done
-      2026-10-04, web only: a locally generated QR code (own byte-mode
-      encoder, `web/js/lib/qr-encode.js`, checked against segno) of
-      `steamhangar://pair?v=1&url=<origin>&key=<key>` for the Android app
-      (the contract with APP-PAIR-1, plus the same URI as a link and as
-      text); a browser link `<origin>/#pair=<key>` whose fragment the
-      receiving page strips at once, asking before it replaces a different
-      key and storing only a key the server accepts; a PowerShell 5.1
-      command that downloads the release's vault-agent and scripts, checks
-      them against `SHA256SUMS`, and runs `install-task.ps1` with the key
-      in a temp file (a dev build gets a note instead). The command holds
-      no key (review round 1, user decision "Weg A"): it asks for it with
-      `Read-Host -AsSecureString`, and the sheet has a separate "Copy key"
-      button. The agent's server
-      address is an editable field (prefill: page origin, remembered per
-      browser) because the agent must reach vault-api directly, not
-      through a reverse proxy (per-PC stats and bypass detection match the
-      report's TCP peer). Every option is shown only after "Show" and
-      removed from the DOM when hidden or closed. Details:
-      `web/tests/README.md` "WP PAIR-1".
-    - [x] **APP-FEAT-2** — Android parity package (2026-10-03): APP-FIX-2,
-      APP-FEAT-1 (library account from the stored setting only; servers
-      older than rc4 get a "too old" notice; a signed-in-id fill button
-      only where the setting is writable), APP-FIX-3, plus About and
-      presence in the clients sheet matching WEB-FEAT-3. Follow-up: twin
-      pins against web about-view.js / clients-view.js, onboarding step 2
-      saving the id, a separate PCs entry and "PC entfernen" (WEB-FEAT-4).
-    - [x] **APP-PAIR-1** — pairing the Android app from the web UI's QR
-      code (user request 2026-10-04; web half is PAIR-1). The camera app
-      opens `steamhangar://pair?v=1&url=<enc>&key=<enc>`; the app parses it
-      (pure parser, `v=1` only, http/https origin only, key never shown or
-      logged), asks "Pair with <host>?" (replace notice when another vault
-      is configured), verifies with the onboarding check before writing,
-      stores through onboarding's `finish()`, then continues to the Steam
-      identity step or home. No API change, no camera permission. Not
-      device-tested; whether every camera app opens a custom-scheme QR is
-      open (app/README "Pairing from the web UI").
-    - [x] **WEB-FIX-8** — About wording and the Settings save bar, web and
-      Android (user feedback on the rc9 About table, 2026-10-04: "'Unknown'
-      sounds bad and makes it look like the user did something wrong").
-      Done 2026-10-04, no API change (ADR-0016 freeze): the word "unknown"
-      is never shown; a value a component does not report is an em dash;
-      the server's generic `unknown` (vault-api looked and got a bad or
-      unclear answer, e.g. a proxy that forwards a host it must refuse)
-      reads a neutral "Check" with its (i) details open; vault-core reads
-      "OK" when its recorded version AND commit equal vault-api's (same
-      release), a neutral "Check" when they differ or cannot be compared,
-      "Not reported" when it never recorded one; vault-dns reads "N/A";
-      vault-proxy keeps OK with dashes. Every explanation moved behind a
-      per-row (i) disclosure button, collapsed by default except on Check
-      rows. The PCs sheet says "not reported" instead of "unknown" too
-      (presence, last seen, agent version, game count). The About twin
-      pins requested by APP-FEAT-2 now exist both ways
-      (`web/tests/about-android-twin.test.js`,
-      `AboutCrossFrontendContractTest.kt`). Second user request, same
-      package: Save must be visible as soon as something changed. Web:
-      the Save/Discard bar is fixed above the bottom nav (the bulk bar's
-      placement, which never shares a view with it), shown while the PATCH
-      would change something (typing a value back hides it), a failed save
-      keeps it with the error, an edit made during a save survives it, and
-      the root scroll padding keeps a focused field above the bar (WCAG
-      2.4.11). Android: the same bar as the Scaffold's bottom bar (it was
-      an inline row at the end of the form), same dirty rule, "Saving…"
-      while in flight. Review round 1 (FAIL: server `unknown` shown as
-      "Not checked" hid real faults) fixed in a second commit.
-
-    **C. Hygiene (any time, small)**
-    - [x] Stale ownership leftovers after SEC-FIX-5 (frozen api code,
-      comments/dead setup only, each needs a freeze note):
-      `api/Dockerfile` (`chown -R 101:101 /vault`, never seeds a volume
-      because of `nocopy`), `api/vault_api/db.py` (~423) and
-      `api/vault_api/event_sweep.py` (~1303) comments, and the
-      `VAULT_EVENT_LOG_MAX_BYTES` text in `deploy/compose.yaml`.
-      Done in HYG-1, comments only (ADR-0016 addendum 2026-10-09). The
-      Dockerfile chown stays: it still sets ownership where nothing is
-      mounted at `/vault` (vault-runner, standalone `docker run`). Left
-      as is: the runtime WARNING text in `maybe_truncate` (behaviour).
-    - [x] verify-stack section 8: its `rootonly/` fixture cannot be
-      removed by a non-root caller; clean it through a container like
-      section 9 does. Already done in WP VER-2 (5dac4a2, review S2):
-      `cleanup()` hands `rootonly/` back through a root container of the
-      vault-core image, also on an aborted run; confirmed by HYG-1's
-      `dev.sh verify` as a non-root caller (no leftover work dir).
-    - [x] SteamPrefill 3.7.2 is out (bug fix for invalid depot links);
-      bump the pin after re-checking `--max-threads` and the session file
-      format. **DEPS-1** (2026-10-09): pinned in `api/Dockerfile`, sha256
-      matches GitHub's asset digest; the v3.7.1...v3.7.2 diff touches only
-      `DepotInfo.cs` and the version, the 3.7.2 binary prints the
-      `--max-threads` line, Config/ and cache file formats unchanged.
-    - [x] The `api` tests that read `api/vault_api/config.py` from web
-      tests (`demo-data-config-defaults`, `demo-data-installed-on`) make
-      partial web copies fail; document it in web/tests/README.md.
-      Done in HYG-1 ("Run from a full repo checkout"), with every web test
-      that reads a file outside `web/`.
-    - [x] **CI-FIX-1** — CI builds every release image on every push and
-      PR: ci.yml `image-build` runs `docker build` with publish.yml's
-      matrix (contexts, Dockerfiles, all platforms incl. QEMU arm64), no
-      push, no login, no layer cache; `api/tests/test_ci_image_build.py`
-      pins the two matrices and action SHAs equal.
-
-    **D. After `v0.1.0` (decided 2026-10-02, each with its own ADR)**
-    - [ ] **D1 CORE-FEAT-1 — upstream keepalive to the Steam CDN.**
-      nginx pools connections only for named `upstream` groups; a
-      variable `proxy_pass` first looks the name up among the defined
-      groups, then falls back to the resolver. Plan: one `upstream`
-      block per known edge host (`server <host> resolve; keepalive N;`
-      with a shared zone), rendered at container start from a list;
-      unknown hosts keep today's path, so the Host header, the
-      path-faithful store and the loop guard stay unchanged. Before
-      building: measure on production with a handful of requests whether
-      Valve edges keep connections alive. Benefits Steam clients too,
-      which also download through vault-core.
-      **Pulled ahead of `v0.1.0` by user decision 2026-10-02.** ADR-0017
-      accepted 2026-10-02 with decisions 1A 2B 3A 4B 5A 6A (static env
-      list `VAULT_UPSTREAM_POOL_HOSTS`, shipped seed in `.env.example`,
-      `keepalive 8` per edge with a ceiling of 32 idle = at most 4 edges,
-      list changes by container recreate, rate cap untouched plus a CI
-      pin, `error` restored in `proxy_next_upstream`). Measurement done
-      on the operator's DS-Lite line (ADR-0017 "Measurement"): the edge
-      keeps connections alive and holds an idle one for at least 60 s.
-      Ships in `v0.1.0-rc7` together with CORE-FIX-3 (user decision
-      2026-10-03, reversing the earlier Weg B), each switchable off
-      independently; freeze exception in ADR-0016. Packages:
-      - [x] CORE-FEAT-1a — docs: freeze exception, operator measurement
-        page (87b0789).
-      - [x] CORE-FEAT-1b — core: hook `28-vault-upstream-pool.sh`, include
-        line, native empty render, drift pins, hook test (c414deb).
-      - [x] CORE-FEAT-1b2 — core/CI: renders and refusals in
-        `verify-core-nginx.sh`, `error` back in `proxy_next_upstream`,
-        upstream log fields, rate-cap pin.
-      - [x] CORE-FEAT-1c — deploy tests: verify-stack fake edge with
-        connection counting, test resolver, fallback, 508 and rate cap.
-      - [x] CORE-FEAT-1d — deploy and docs: compose forwarding,
-        `.env.example` seed, `deploy/README.md` "Upstream keepalive
-        pool", this entry.
-    - [ ] **D2 AUTH-FEAT-1 — Steam login by QR code from the web UI.**
-      A small own helper on SteamKit2 (`BeginAuthSessionViaQRAsync`)
-      runs in the runner container, emits only the rotating challenge
-      URL, polls, and writes SteamPrefill's `Config/account.config`
-      (refresh token) directly; vault-api relays URL and status only, so
-      no password and no token cross the API. Endpoints behind the API
-      key, short-lived, rate-limited. The terminal login with a Steam
-      Guard code stays as the fallback, because Steam's location check
-      can block app/QR approval when the phone is far from the server.
-      Includes the Settings "Steam session: present / missing" status.
-      Amends ADR-0004 and needs the freeze opened for two endpoints.
-    - [ ] **D3 MULTI-1 — several Steam accounts per household.**
-      SteamPrefill keeps one session per install (`Config/` next to the
-      binary). Plan: one `Config/` per account, the job carries the
-      account, the runner picks the account that owns the app; the
-      library shows the union of several SteamIDs with an owner hint;
-      QR login (D2) per account. The cache itself is already
-      account-agnostic (chunks are keyed by depot path), so a game
-      cached by one account is a HIT for every client in the house.
-      Steam Families sharing is deliberately not pursued for now.
-    - [ ] **D4** IPv6 egress (operator network, optional): Steam CDN
-      hosts publish AAAA records and IPv6 bypasses the CGNAT. The
-      operator's host runs without global IPv6 on purpose; a network
-      decision, not a code change.
-    - [ ] **D5** Named, scoped API keys and per-target payload scoping
-      (Phase 6, already listed there).
-    - [ ] **D6 CLIENT-1 — a proper desktop client** (user request
-      2026-10-03: "moderner und professioneller", no scheduled tasks).
-      Replace the script + Scheduled Task / systemd timer packaging with:
-      a Windows installer (MSI via WiX or Inno Setup, Apps & Features
-      entry, clean uninstall, later winget); a background service that
-      watches the Steam library folders and reports on change, plus a
-      light heartbeat for presence; an optional tray app (status, last
-      report, version, "open Hangar", settings and connection test); set-up
-      by pairing from the web UI's "PCs" list (short code or QR) instead
-      of typing the API key, ideally one revocable key per PC (D5);
-      update offers driven by `GET /v1/about` (follow-up from WEB-FIX-8:
-      a real "newer release available" check against GitHub releases
-      belongs here too, so the About table can say "Update available"
-      instead of only comparing vault-core with vault-api; it needs an
-      egress decision, since vault-api reaches the internet only through
-      the egress proxy's allowlist and GitHub is not on it); code signing
-      (SmartScreen) as an explicit cost decision; Linux/SteamOS as a package with a
-      systemd user service. Open decision: service + tray (reports
-      without a logged-on user, sees all users' libraries, needs admin to
-      install) versus tray-only (per user, no admin).
-    - [ ] **D7 CORE-FIX-4 — hard cap on concurrent upstream connections**
-      (user decision 2026-10-04, after the first Steam-client MISS test
-      behind CGNAT; see the release-notes item in B). The ADR-0017 pool
-      caps idle connections per listed edge (8 per group, at most 4
-      groups); it does not cap in-flight connections, and a Steam client's
-      concurrency is not ours to cap. Research first what nginx OSS
-      offers (`max_conns` without the Plus-only `queue`, `limit_conn` on
-      the client side, a local forward proxy with a connection pool),
-      and whether pooling by edge name fits when a client uses 14 edges.
-      Needs an ADR-0017 addendum and a freeze note.
-      **Timing (user, 2026-10-04): BEFORE `v0.1.0`**, not after the tag;
-      designed in ADR-0021 (one pooled edge, global `limit_conn` cap),
-      built as CORE-FIX-4a..4d. 4a (core: hook, configs, preflight, drift
-      check, Dockerfile, hook test, ADR-0016 freeze note) is the first
-      package; the box stays open until 4b-4d are done.
-      **Status:** 4a (core), 4b (live verify checks) and 4c (compose
-      forwarding with edge mode on by default, `.env.example`, deploy and
-      core docs, release notes) are done; 4d is done in changed form
-      (user decision 2026-10-09, "Weg A"): instead of lowering the 443
-      passthrough caps to 32/16 they are operator-tunable
-      (`VAULT_TLS_CLIENT_MAX_CONNS` default 64, `VAULT_TLS_MAX_CONNS`
-      default 256, ADR-0021 addendum 2026-10-09). **Measured 2026-10-10**
-      (operator line, client on `:80`): 0x `113` errors, upstream connect
-      time ~0, 16-23 upstream sockets, no SYN floods. **Still open**, so
-      the box stays unticked: the `:443` measurement and the default of
-      `VAULT_TLS_CLIENT_MAX_CONNS` (WORKPACKAGES carry-over 2). Related
-      open measurement: CAP-503-LOOP-1 (roadmap audit list).
-    - [ ] **D8 SCHED-FEAT-1 — weekday schedules, several windows per day** (user request
-      2026-10-04: "the night check is no use if I come home at 17:00 and
-      the update came during the day"). Today `schedule_window` is one
-      `HH:MM-HH:MM` range (editable in Settings, applies at the next
-      sweep); allow a list of ranges. Until then `06:00-24:00` covers it.
-      Scope extended by the user on 2026-10-04: per-weekday schedules and
-      several different windows per day (e.g. Mon-Fri 12:00-16:00 and
-      22:00-06:00, weekend all day). The download-rate cap window
-      (`VAULT_UPSTREAM_RATE_WINDOW`, env-only in vault-core) must follow
-      the same schedule, or be replaced by it.
-      **Rate per window** (user 2026-10-14 "nachts ungedrosselt tagsüber
-      gedrosselt", 2026-10-15 "off testen für das nachtfenster"; folded in
-      2026-10-16): several windows per day, a "throttle" checkbox per
-      window, and an unthrottled window also works with the scheduler off
-      (it then only lifts the rate cap). Since rc18 there is one download
-      window (D16a-1); `VAULT_UPSTREAM_RATE_WINDOW` stays a deprecated env
-      pin until D8 replaces it.
-    - [ ] **D29 PAIR-2 — proper device pairing** (labelled "D9 PAIR-2"
-      here until 2026-10-16, which clashed with roadmap D9 TOOL-APPS-2;
-      follows PAIR-1, user decision 2026-10-04). PAIR-1 hands every new
-      device the one shared API key. Replace that with short-lived pairing
-      codes (the web UI shows a code or QR valid for minutes, the device
-      trades it for its own
-      key) and one named, revocable key per device, so removing a phone or
-      PC revokes only its key. Builds on D5 (named, scoped API keys) and is
-      the pairing step D6's desktop client needs. Needs new endpoints, so
-      an ADR and the freeze opened; the `steamhangar://pair` URI gets a
-      `v=2` with a code instead of a key.
-
-    - [x] **D14 UPD-1..4 — always-on update check** (user decision
-      2026-10-13; details in `docs/handover/post-0.1.0-roadmap.md`).
-      - [x] **UPD-1 (API)** — vault-api checks cached games for updates
-        every `VAULT_SCHEDULE_INTERVAL_MINUTES` (at UPD-1 only while a
-        schedule window was configured; since UPD-5 with or without one),
-        on a background runner (`update_check.py`, schema v19/v20
-        `update_check_state`); only an open window still enqueues the
-        download (the sweep is unchanged). `POST /v1/updates/check` starts
-        the same check in the background (`202`, no download),
-        `GET /v1/updates/status` reports it; `GET /v1/games` and
-        `/v1/games/{appid}` carry `update_available` + `update_checked_at`.
-        The manifest oracle is **on by default** (`VAULT_MANIFEST_ORACLE`
-        unset/empty = `steamcmd_api`, `off`/`none` opts out; user decision
-        2026-10-13), and vault-proxy allows the default oracle host
-        `api.steamcmd.net` by itself while it is on (Weg A); a private
-        mirror still needs `VAULT_EGRESS_ALLOW`. ADR addenda (ADR-0006,
-        ADR-0011) in UPD-4.
-      - [x] **UPD-5 (API, rc16)** — the scheduled update check runs every
-        `VAULT_SCHEDULE_INTERVAL_MINUTES` whenever the oracle is on, with or
-        without a schedule window (user decision 2026-10-14, superseding
-        the UPD-1 review's window gate; the dev instance now checks in the
-        background too, anonymous metadata). Downloads and prefill sweeps
-        stay window-bound; `GET /v1/updates/status` `scheduled` now equals
-        `enabled`. ADR-0006 note 2026-10-14.
-      - [x] UPD-2 (web badge, button, filter chip; merged a4f1e38), UPD-3
-        (Android; merged 624a90a), UPD-4 (docs, ADR addendum superseding
-        the 2026-08-18 "never bare Check" rule; merged 50e6a49).
-
-    Record for rc15-rc18: their packages (D9-D13, D15, D16, UPD-6,
-    AGENT-ADDR-1, CACHE-COMPLETE-1, LIB-LIST-1, LIB-FILTER-INST-1,
-    APP-DIST-1, UPD-FIX-1, DIST-1a/b and the rest) are not repeated here as
-    boxes; `docs/handover/post-0.1.0-roadmap.md` (wave plan, rc status
-    lines) is the record for them.
-
-    - [ ] **rc19 Downloads and card block** (run 2026-10-15/16; details in
-      `docs/handover/rc19-run-plan.md` and
-      `docs/handover/post-0.1.0-roadmap.md`; tag not yet cut).
-      - [x] **NOT-OWNED-1** `not_owned` job outcome, SteamVR tool-app seed,
-        Android parity (2a23eb3, 19ef097, 64c90f6)
-      - [x] **METRIC-AUDIT** metric labels by scope, web and Android (dfeed99,
-        a7a115a)
-      - [x] **TILE-INTERNET** "Loaded from the internet" tile, web and Android
-        (167625a, a7a115a)
-      - [x] **GRAPH-ZOOM** 1 min traffic tier, 1 h / 6 h ranges, schema 29
-        (c127c6d, 4d08701)
-      - [x] **GRAPH-LIVE** in-memory live tier, `GET /v1/throughput/live`,
-        web graph (9f8d6c4, 902623a, 5f772de; ADR-0025). Android part open.
-      - [x] **LIB-SORT** library sort, web and Android (319c11e, 90e9665)
-      - [x] **MAP-DRIFT-1** orphan depot mapping cleanup at startup (6bf0b65)
-      - [x] **ID-AUDIT** traffic-seen apps are named, never a bare id as title
-        (e6c0085, 2601e25)
-      - [x] **D16** neutral upstream-budget wording (web f34317d) and Android
-        settings UI with expert switch and risky confirm (3c25459, 30e3357,
-        6566a2f, 2c8bd69, b988579)
-      - [x] **D19** expected depots and size 1a/1b (22afcab, 202ef0f), store
-        details 1c (2c5ee64, 4ec9281), Android card (e1ef20a); schema 32/33,
-        ADR-0024
-      - [x] **D20** queue order, api + web (ff0e8c1, c2eb090) and Android
-        (8bd40c9)
-      - [x] **D21** privacy review (038dcb0); D22 modes stay a draft ADR-0023,
-        not built
-      - [x] **D23** library metadata table, filters, rating/year sort, schema
-        30 (96ca39a, 9441331, 32ef087)
-      - [x] **rc18 follow-ups** watcher streak logging, `real_http_fetch`
-        marker and webhook boot witness, demo `core_apply` generation, queue
-        comparator (51db3bd, a9bebc5, 7377ab9, 35ccf31, 1cf5c1e)
-      - [x] Android GRAPH-LIVE (8ebe38e), diag read-only note, `dev.sh verify`
-        (613/0, schema 33), deploy Antrag (schema 29-33, new env values, store
-        host, rollback via the update.sh SQLite dump)
-      - [x] tag `v0.1.0-rc19` (b29379b) after main CI is green
-
-    - [ ] **rc19.2 follow-ups** (2026-10-16, patch release on top of rc19)
-      - [x] RATE-TILE and CARD-LAYOUT (already on main)
-      - [x] MAP-FROM-MANIFEST-1: a job's own depots are mapped from its
-        ingested manifests (ADR-0003 addendum); completeness always reads
-        "X of Y on disk"
-      - [x] NOT-OWNED-2: unowned packages (language packs, content
-        packages) keep a Cached game Cached, Verify skips them, neutral
-        note "Not part of your library"; additive `not_owned` on the game
-        API
-      - [x] THROUGHPUT-DEBUG-1: opt-in `VAULT_DEBUG_THROUGHPUT` nginx log
-        plus `core/tools/throughput-report.py`; flag off renders the
-        template byte-identical to rc19; removal = flag off, recreate
-        vault-core, delete `/vault/logs/throughput-debug/`
-      - [x] tag `v0.1.0-rc19.2` after main CI is green (pushed on main)
-
-    - [ ] **rc19.3** (2026-10-16, throughput diagnostics and tuning switches)
-      - [x] TUNE-1a: heartbeat in the opt-in debug log, `VAULT_NGINX_AIO`
-        and `VAULT_NGINX_WORKERS` switches (off by default), report
-        Heartbeat section (merged)
-      - [x] TUNE-1b: ADR-0027, learnings, plan block
-      - [x] NITS-1: index on `jobs (status, finished_at)` for
-        `not_owned_appids` (additive, no schema bump)
-      - [x] FIX-SHOT-1: stats graph caption reads the injected clock (goldens refreshed)
-      - [x] tag `v0.1.0-rc19.3` after main CI is green (pushed on main d409f30)
-      - [x] Sunday cold-game test per ADR-0027 (baseline, AIO=threads,
-        WORKERS=2). Done 2026-10-18, 6 runs, results in ADR-0027
-        "Measurement 2026-10-18". AIO qualifies, WORKERS=2 does not. The
-        verify window goes back on after AIO is live on prod (user decision
-        2026-10-18). Planned 2026-10-18 in
-        `docs/handover/cold-game-test-plan.md` (drop_caches eviction, one
-        test Antrag, runs A-B-C-A, decision rule fixed upfront). Until it decides the worker tuning, keep the verify
-        window off: a verify over many games on cold data runs against the
-        single nginx worker (VERIFY-COLD-1, audit 2026-10-16).
-      - LIVE-DELAY-1 (client downloads show more than 1 min late on the
-        Downloads page) moved to the rc20 block below (user decision
-        2026-10-16): analysis and fix before DOWNLOADS-1.
+    Blocks A, B, B2 and C, block D (D1-D29), the rc15-rc18 record and the
+    rc19 to rc21.1 blocks are archived verbatim in
+    [`docs/plan-archive/`](plan-archive/README.md). Every box of them that is
+    still open is in section 12 ("Carried-over open items"), grouped by
+    origin; "the box above" or "B above" in the blocks below now means that
+    copy in section 12, which is where it is ticked.
 
     **Release plan from rc20 on (user decisions 2026-10-16).** The blocks
     below are grouped by version; theme, goal, entry and exit criterion
@@ -3382,883 +480,6 @@ below carry their own later dates, item 12 is the current one).
     Add-a-device redesign is CLIENTS-1..3 and ADD-DEVICE-1 in rc20;
     VERIFY-SPEED-TEXT-1 is decided inside DOWNLOADS-1; D20 shipped in rc19
     (its nits are in rc22); DUAL-STACK-1 is an operator item.
-
-    - [ ] **rc20 web redesign** (decided 2026-10-16, mockup round with the
-      operator; reference: `docs/design/rc20/`, run notes:
-      `docs/handover/rc20-run-plan.md`). The redesign packages are web
-      only, no schema change, no new env value. Order: LAYOUT-1 and
-      SHEET-MOTION-1 first (shared base), then the page packages;
-      LIVE-DELAY-1 lands before DOWNLOADS-1. The three non-web packages
-      below (user decisions 2026-10-16) ride in the same rc.
-      - [x] **LIVE-DELAY-1** (moved from rc19.3, user decision
-        2026-10-16) analysis, then fix: the Downloads page shows client
-        downloads more than 1 min late. Analysis and fix land BEFORE
-        DOWNLOADS-1, so the redesign builds on the fixed data path.
-        Analysis done (2026-10-16): no bug, a by-design latency. The
-        default range (6h) and every non-live range read the sweep-fed
-        tiers (sweep every 5 min, +60 s scheduler tick, +5 s nginx flush,
-        +30 s web poll): up to ~6 min late. The `live` range is ~10 s. Fix
-        was decided Weg A (Jan, 2026-10-16) and is done: the Downloads
-        default range is now `live` (`DEFAULT_STATS_RANGE`; a stored "6h"
-        or other choice in localStorage still wins), and
-        `GET /v1/throughput/live` has an additive `active_clients` (+
-        `active_window_minutes`, 5) counted from the ring, which
-        `mergeLive` uses for `active_clients_now` / the "Loading now" tile.
-        No schema change, no new env value. **For DOWNLOADS-1:** the page
-        now starts on `live` (polls `/v1/throughput/live` every 3 s plus the
-        1h summary every 30 s); tests that fake only the persisted endpoints
-        must store `steamvault.downloadsRange` = "6h" and set
-        `globalThis.localStorage` (see `downloads-stats-wiring.test.js`).
-      - [x] **BOOT-RATE-1** (core, roadmap D24) vault-core renders the
-        default rate window 03:00-07:00 at boot until settings generation 1
-        is applied, so a restart between 03:00 and 07:00 runs unthrottled
-        for a few seconds. Fix: read the settings file at boot if present,
-        otherwise start throttled until the first generation.
-      - [x] **LIB-META-WINDOW-1** (api, roadmap D23 note, Weg B) the nightly
-        `library_meta` job runs independent of the download window, once
-        per night like UPD-5; today it skips with `no-window` and never
-        runs with `VAULT_SCHEDULE_WINDOW=off`.
-      - [x] **LAYOUT-1** wide page width: new token `--w-page` (~1400px) in
-        `theme.css`; the BP-L rule at `app.css` (`.view-downloads,
-        .view-settings, .view-clients` capped to `--w-text`) uses it and
-        Library keeps `--w-wall`. Adapt
-        `css-downloads-settings-layout.test.js` (it pins the `--w-text`
-        assignments). Narrow breakpoints unchanged.
-      - [x] **SHEET-MOTION-1** slide/fade for every overlay: drawers slide in
-        from their edge, bottom sheets slide up, the centre card and the
-        scrim fade; one implementation in `sheet-dialog.js` + `app.css`,
-        `prefers-reduced-motion` disables it. Check that the confirm dialogs
-        (`.dialog-backdrop`/`.dialog`) use the same classes; focus trap,
-        Escape and `modal-stack.js` order must not change. Close waits for
-        the transition end with a timeout fallback.
-      - [x] **CLIENTS-1** one card per device: agent data is merged into the
-        client card (`clients.js`, `clients-view.js`, `clients-sheet.js`);
-        the "PCs running vault-agent" list and "Manage PCs" are removed;
-        a PC that is both client and agent shows once (match: equal
-        `client_id`, `mergeAgentData` in `clients-page.js`). The PCs sheet
-        stays for the bypass banner and notifications. Adapt `clients-*.test.js`.
-      - [x] **CLIENTS-2** card grid (`auto-fill`, min ~440px), summary tiles
-        (connected, outdated agents, ...), "Add a device" as the header
-        button. Real data only, no tile without a source.
-      - [x] **CLIENTS-3** outdated-agent warning, Weg A: the agent version
-        differs from the server version, compared in the frontend only; the
-        "Update command" button opens the Add-a-device dialog without a
-        preselected tab (the agent reports no OS). Unknown version shows no
-        warning.
-      - [x] **ADD-DEVICE-1** Add a device as tabs (Phone / Browser / Windows /
-        Linux-SteamOS) with a single security notice; secrets (API key,
-        commands containing it) revealed on demand and copyable
-        (`add-device-sheet.js`). Adapt `add-device-wiring.test.js`.
-      - [x] **DOWNLOADS-1** declutter the header cards; two-column layout
-        (Active and Queue left, History right, one column below 1000px);
-        per-game Update and Verify buttons; Queue reordered by drag and drop
-        only (no arrows); History differs between idle and active, rows
-        expand to failure hint, Retry, log excerpt and raw output
-        (`downloads.js`, `traffic-view.js`, `job-failure.js`). Keep the
-        existing keyboard path for reordering (`web/js/lib/queue-reorder.js`
-        moves a focused row with ArrowUp/ArrowDown; QUEUE-KBD-KEEP). Decide
-        the "Speed not measured yet" wording while Verifying here
-        (VERIFY-SPEED-TEXT-1).
-      - [x] **SETTINGS-1** left sticky section nav (Vault & connection,
-        Download window, Disk & cleanup, Notifications, Steam, About) and
-        the expert switch revealing "Expert settings"; auto-fit 2-column
-        field grids; chips (Default / Changed here / From env); (i) hint
-        shows timing text only; savebar appears on change; GC warning when
-        Auto-GC is not Execute; Steam keeps its inline Save/Preview/Reset;
-        the "PCs and devices / Open Clients" row is dropped. All settings
-        keys, validation, risky-key confirm and wording stay. Adapt
-        `settings-*.test.js`, `steam-*.test.js`, `about-view.test.js`,
-        `css-settings-*.test.js`, `demo-data-settings.test.js`.
-      - [x] **LIBRARY-1** one toolbar row: search, chips with counts, sort
-        group (select + icon-only direction button with `aria-label` and
-        `title`), layout control, Filters popover for the metadata filters,
-        Select button (replaces the permanent long-press hint); split
-        primary "Check updates" with a menu entry "Check & update all cached
-        games"; one status line per card. Long-press and right-click
-        selection stay. Adapt `library-*.test.js`, `game-card*.test.js`,
-        `css-bulk-bar-room.test.js`, `keyboard-pointer-model.test.js`.
-      - [x] **LIBRARY-DETAIL-1** game detail sheet with tabs Overview /
-        Depots / Maintenance (Verify, GC check, red "Delete from cache"
-        zone); the two duplicate delete-confirm dialogs (`library.js`,
-        `game-detail-sheet.js`) become one shared component. Adapt
-        `game-detail-sheet-*.test.js`, `css-overlay-geometry.test.js`,
-        `dialog-wiring.test.js`.
-      - [ ] nit (LIBRARY-DETAIL-1): tab keyboard focus is lost on a structural
-        re-render of the detail sheet; `.detail-box-danger` hard-codes an rgba
-        (no `--danger-soft` token yet); optional `tabindex=0` on tabpanels;
-        move `add-device-sheet.js` onto `components/tabs.js`
-      - [ ] nit: Exit animation for the nine confirm-dialog call sites
-        (.dialog-backdrop toggles .on directly; currently animates in only)
-      - [ ] nit: Add-a-device tabs have no icons and the dialog has no
-        numbered steps, unlike the mockup (`docs/design/rc20/`)
-      - [ ] nit (DOWNLOADS-1): the generic failure text could add "If it fails
-        again, check the log"
-      - [ ] nit (LIBRARY-1): hard-coded CSS fallbacks (`--tool-h` is not in
-        theme.css) and a stale header comment in `library.js`
-      - [ ] **Rework after the operator's visual check (2026-10-17).** The
-        packages above shipped the structure of the mockups (columns, tabs,
-        nav, split button, drag queue) but not their anatomy: the page
-        title, tiles, pills, section labels, segs and field cards were
-        re-styled per page from the old primitives, so every page reads as
-        "old look, new layout". Root causes and remedies are the UI kit
-        (`docs/design/rc20/kit.html`, approved 2026-10-17) and web
-        screenshot goldens. Decisions: Clients cards one per row in three
-        zones; Downloads hero with the four totals beside the graph and
-        three columns below; `--dim-2` raised to about #7A91A0 (5:1) and
-        no text below 11px; pills wrap the existing `status-icon.js` disc
-        (shape first, word second, colour third; glyph box 60% of the disc;
-        motion means "right now" and stays as is).
-        - [x] **UI-KIT-1** (web, base, first; 07fde55, 1e82f57) type scale `--fs-1..7`
-          (11/12/13/15/18/24/32) and spacing `--sp-1..8` (4px grid) in
-          `theme.css`, `--dim-2` to #7A91A0; new `web/css/kit.css` with
-          `.page-head`, `.tile` (value + `<small>` unit, caption, optional
-          `.meter`), `.pill` (wraps `createStatusIcon`, tinted background,
-          ok/run/acc/stale/danger/none), `.sec` + `.sechd`, `.seg`, `.btn`
-          variants incl. `.w72`, `.fchip`/`.gchip`, `.fcard` + `.fg` +
-          `.field` (label, 18px (i), chip, control, hint). Components size
-          themselves with container queries, not viewport breakpoints.
-          Hidden route `/kit` (`router.js` + `_SPA_ROUTES`) renders every
-          primitive with demo data at full width and inside a 400px
-          container, from the real stylesheets. A node test rejects new raw
-          `font-size:Npx` outside `theme.css`/`kit.css` (allow-list of the
-          existing ones, shrinking). ADR-0028 "Web UI kit, scale and visual
-          regression". Reference: `docs/design/rc20/kit.html`.
-        - [x] **WEB-GOLDENS-1** (ci + tools, parallel to UI-KIT-1; 50b198b, 31d5eff)
-          `tools/web-shot.mjs` drives the Playwright Chromium over CDP (no
-          playwright npm dependency): demo mode via localStorage, pages
-          library/clients/downloads/settings/kit (+ one open sheet each
-          where cheap) at 1400/1000/400px, deterministic clock and reduced
-          motion, PNG per page. CI job `web / goldens` like the Android
-          goldens (`wp/*-goldens` record branch, verify mode with a pixel
-          tolerance, diff images as artifacts, annotation on failure).
-          Local use: `dev.sh test-web-shots` against the dev instance.
-          Reviewers of every later web package attach the screenshots.
-        - [x] **TOKENS-SYNC-1** (web + app, after UI-KIT-1; user decision
-          2026-10-17; 061b4ce, c1a3eaf, golden 58eb2ee; Type.kt deferred to the
-          rc21 Compose follow-up, sibling tests DesignTokensContractTest /
-          StatusVocabularyContractTest instead of extending the twin test) one source for design tokens: `docs/design/tokens.json`
-          (colours incl. the new `--dim-2`, type scale `fs-1..7`, spacing
-          `sp-1..8`, radii) and `docs/design/status-vocabulary.json` (kind,
-          word, tone, glyph, animated). Web: a node test checks `theme.css`
-          and `status-icon.js` against both files. Android: a JVM test
-          checks `ui/theme/Color.kt`, `Type.kt` and `ui/status/StatusKind.kt`
-          against the same files (extend `StatusIconWebTwinTest`); `Dim2`
-          moves to #7A91A0 with it. No generator, no build step: the tests
-          are the contract, and a value changed on one side fails CI. The
-          Compose anatomy (three-zone card, tiles, hero) stays the rc21
-          Android follow-up; the kit page is its spec.
-        - [x] **CLIENTS-4** (replaces the earlier CLIENTS-4 nit list; 3751e12, 3a89818) card
-          per `kit.html` "Clients card, three zones": zone 1 identity, pills
-          (`Online`/`Offline`, `Agent outdated`), update box, agent health
-          row; zone 2 "loading now" box or idle dashed box, three stats
-          with meter; zone 3 recent games as `.gchip` with "+N more"; footer
-          with last-active text and actions. One card per row (operator
-          decision 2026-10-17), zones stack below 700px container width.
-          Tiles: fixed four (Connected, Loaded, Hit rate, Agents with the
-          outdated pill inside), "Devices" section label with the range seg
-          on the right. Component `components/client-card.js` with its own
-          test; `clients.js` only composes.
-        - [x] **ADD-DEVICE-2** (0a26cba, b6e01ea) drawer per `clients.html`: header (h2,
-          intro, tabs with icons), scrollable body, footer row (hint +
-          Close); numbered steps `ol.steps`; one security notice as a tinted
-          box; secret as a blurred `.code` block with Show + Copy side by
-          side; Phone tab with two side-by-side QR boxes; OS pick panel as
-          a dashed box. Tabs on `components/tabs.js`.
-        - [x] **DOWNLOADS-2** (f72735f, d021c2a; three columns from a 1100px
-          container, wide page at BP-M) per `kit.html` "Downloads, width-aware":
-          page head with Pause all right; hero = label + range seg row,
-          big number + pill + limit caption, graph (96px, grid lines) in
-          the middle, four totals as 2x2 tiles on the right, mini line
-          (avg, peak, runner share) below; three equal columns (Active +
-          Queue | Updates available + Incomplete | History), two at 1200px
-          with History full width, one at 760px. Attention rows share the
-          `.jr` anatomy (name, meta, 72px button) with count badges and
-          "Update all"/"Verify all" in the section head; paused jobs fold
-          into Active; the client row moves into the hero caption; History
-          head one row (seg + Delete); expanded row as a hanging panel
-          (boxed log with max-height, titled failure hint, bordered
-          command). Drop the `[data-state]` density switch. Components:
-          `downloads-hero.js`, `job-row.js`, `history-list.js`.
-        - [x] **SETTINGS-2** (ee90a27, a05ca6a) per `settings.html` + kit: flat nav items
-          (13px, state on the same line right, accent-glow selection),
-          `.exp` expert row with the small switch; panels = h2 + p + one
-          `.fcard` per group (Identity, Connection, Schedule, Garbage
-          collection, Webhook, Steam identity, Steam library, Bandwidth,
-          Housekeeping, Debug); fields per kit `.field`; hint behind (i)
-          holds the timing line only, help text moves to the field's
-          Settings help where it exists; env-pinned rows as disabled inputs
-          with the env note behind (i); webhook events as a `.checks`
-          grid; savebar sticky inside the right column, one row; Steam
-          rows inline (input + buttons), status pill above; GC warning as a
-          `.warn` box below the grid. Component `settings-field.js`.
-        - [x] **LIBRARY-2** (c581eec, b8168d3) per `library.html` + kit: chips wrap at BP-L
-          (no clipped chips), Filters always visible, sort as one `.sortg`
-          group, one status line (updates checked · Reload Steam library),
-          card status as pill-less dot + sentence case 12px with 11.5px
-          sub-lines, size-only cover badge, sub-lines hidden in Compact,
-          grid gaps per mockup; detail sheet 920px with permanent hero band
-          + X close, overlapping mini cover, status pill, Verify + Update in
-          the header row, two-column Overview with a 2x2 facts grid, no
-          bottom Close button.
-        - [ ] nit (DOWNLOADS-2 review): the bypass banner (`.banner-wrap`,
-          `--w-text`) is narrower than the Downloads page at BP-M.
-        - [ ] nit (WEB-GOLDENS-1 review): goldens for one open sheet per page
-          (library detail, add a device) deferred; `dev.sh test-web-shots`
-          is operator infrastructure, requested as Antrag A-20261017-01.
-        - [x] **rc20 docs:** `docs/design/rc20/README.md` points to
-          `kit.html` as the primary reference; `rc20-visual-check.md` gets
-          the kit page and the goldens; LEARNINGS entries for "structure
-          is not anatomy", "mockup CSS must be the real CSS", "no visual
-          package without a rendered screenshot".
-      - [x] close: `dev.sh test-web`, `dev.sh verify` (613/0), web goldens
-        green, rendered check of every page at 1400 / 1000 / 400px, docs,
-        LEARNINGS, tag `v0.1.0-rc20` (operator's browser check follows on
-        the dev instance, `docs/handover/rc20-visual-check.md`)
-    - [ ] **rc20.x (optional patch)**: new defaults for `VAULT_NGINX_AIO` /
-      `VAULT_NGINX_WORKERS` only if the Sunday cold-game test (ADR-0027,
-      box in the rc19.3 block) says so, with a new ADR carrying the numbers;
-      otherwise the item moves to rc21. Test 2026-10-18: AIO qualifies
-      (about 5-7 times faster cold, link-limited), WORKERS=2 gets no default.
-      rc20.2 is taken, so the slot is rc20.3 or rc21: open decision
-      AIO-DEFAULT-1 in the roadmap (Weg A code default + ADR, B prod `.env`
-      only, C both, D measure more).
-      - [x] AIO-DEFAULT-1 (decided 2026-10-18: Weg B, prod `.env` via
-        Antrag A-20261018-02, code default in rc21)
-      - [x] AIO-DEFAULT-1b (rc21, core; 729d48c) `aio threads` + sendfile off
-        is the default, `VAULT_NGINX_AIO=off` opts out (byte-identical to
-        rc20.x), ADR-0030; verify 627/0. After the rc21 rollout: remove the
-        prod `.env` line (Antrag).
-      - [ ] VERIFY-COLD-1: verify window back on after AIO is live on prod
-        (user decision 2026-10-18); devbox watches the first verify run.
-        AIO is live on prod since 2026-10-18 12:40Z (A-20261018-02; idle
-        heartbeat from outside 5x 200 in 0.8-0.9 ms). Prod has
-        `VAULT_SCHEDULE_WINDOW=off` pinned in `.env`, so the window cannot
-        be switched in Settings. Decided 2026-10-18: Weg A, a manual
-        verify run (Complete all / Verify on several large games) started
-        by the operator AFTER his vacation; the devbox probes the heartbeat
-        every 5 s, iostat partition lines and the duration.
-        Pre-measurement 2026-10-18 20:40-21:08 (prod rc20.2, AIO=threads,
-        Auto-GC dry-run; manual Verify of Enshrouded, AC Black Flag
-        Resynced, Gothic 1 Remake, Hogwarts Legacy done, No Man's Sky
-        stopped; cache partly warm, no drop_caches): heartbeat from outside
-        327 probes, all 200, p50 0.9 ms, p95 3.0 ms, max 9.1 ms (without AIO
-        on 2026-10-18: up to 7.6 s); the four data partitions read about
-        209 MB/s summed (p50, max 236 MB/s, incl. parity); about 238 GB in
-        ~25 min (approximate, job times not taken exactly). Every job: all
-        HIT, "0 depots observed", Auto-GC queued in dry-run mode (A-20261018-03
-        check done). Open for the full run: cold data, exact job durations.
-      - [x] UI-COLD-CACHED-1 (rc21, api; 9b994ce) `SizeCache` serves the expired
-        snapshot at once and refreshes in one background walk; only the
-        first read and the read after `invalidate()` wait; one INFO line per
-        walk with duration and counts. Web loading states of rc20.2 cover
-        the remaining first read (no web change). Branch
-        `wp/rc21-ui-cold-cached-1` 0a821c0, review PASS; check the walk
-        duration in the next cold test.
-      - [x] **FLAKY-DEMO-24H-1** (bb75706, TEST-HYGIENE-1; Date frozen via mock.timers; the clients-merged-card flake was state left by the Remove test in `views/clients.js` `removedIds`, fixed by waiting for the store snapshot) (web test) `web/tests/demo-data-traffic.test.js:105`
-        computes the 24 h cutoff after the demo request, so a seed job
-        finishing right at the boundary flips in/out (CI failure on
-        wp/rc21-aio-default-1, 2026-10-18; passed locally 2062/0). Freeze
-        the clock or take the cutoff from the same `now` the demo uses.
-      - [ ] nit (AUTO-VERIFY-1): local `dev.sh test-web-shots` fails
-        `clients-pair-shown-400` at 0.42 % inside the QR (the case encodes
-        the serving URL/port); pin a fixed URL in the case. Android
-        Downloads note does not read `auto_complete_cached` yet (says
-        "complete automatically" when off).
-        Also Android: the setting renders as a free-text field, not an
-        Off/On toggle (`SettingsScreen.kt:316-341` special-cases only
-        auto_gc, sweep_include_cached, webhook_events); Android demo
-        (`DemoState.kt` ~920, `scheduleOut()`) lacks `auto_complete_cached`.
-      - [ ] nit (MOBILE-1b review): real "Download app" button state is in
-        no golden (pairing cases render the demo note); no real-device
-        check of safe-area insets yet.
-      - [ ] nit (GROUP-VERIFIED-1 review): `routers/games.py:175-185`
-        comment and api/README.md (~646, event-sweep section ~4470) still
-        describe the old `last_manifest_check` rule; flaky
-        `web/tests/clients-merged-card-wiring.test.js:103-108` (2 s wall
-        clock under full-suite load: wait for the event or raise it).
-      - [ ] nit (MOBILE-1b review): Library toolbar at 1000 px puts the
-        search (180 px) and the chips in a narrow left column under the
-        title (on main already, not changed by MOBILE-1b); check against
-        the kit layout.
-      - [ ] nit (UI-COLD-CACHED-1 review): no backoff when walks keep
-        failing (one ERROR per expired read, bounded by request rate);
-        theoretical waiter starvation after a failed walk; the Thread.start
-        test patches `threading` process-wide
-      - [x] TP-REPORT-2 report nits: heartbeat blind spot, size-floor count
-        (c71ae00): large = size floor + status, timed ones feed the
-        percentiles, warning when most are untimed, `--probe-log` for an
-        outside heartbeat probe; ADR-0027 footnote on the biased p50.
-      - [ ] nit (TP-REPORT-2 review): `parse_probe` accepts `nan`/`inf`/
-        negative values (core/tools/throughput-report.py:327-342, 365);
-        README probe example `date +%s.%N` needs a `%s` fallback.
-
-    - [x] **rc20.1** (patch, operator report on prod 2026-10-17)
-      - [x] **DOWNLOADS-3** (95a012e, 6eb3979, goldens 92d9db9) (web) History head "Delete…" clipped; History
-        unbounded (first 10, then "Show 20 more"); subline count ("20 in
-        history") disagrees with the list; History glyph words use library
-        vocabulary ("Current", "Not in use") instead of the job outcome;
-        empty graph area when idle (flat baseline + "No traffic in this
-        range").
-      - [x] **GOLDENS-LOCAL-1** (977f1d4, e1b26f5, goldens 5d6672c; dev.sh line via Antrag A-20261017-03) (tools + ci) local `dev.sh test-web-shots`
-        (Antrag A-20261017-01) fails on all 15 CI goldens with 0.3-0.8 %
-        diff, only on glyph edges (Debian 12 FreeType vs. the Ubuntu runner).
-        Deterministic font flags in web-shot + fontconfig, a text-tolerant
-        png-diff mode for local runs, CI stays strict; goldens re-recorded.
-      - [x] tag `v0.1.0-rc20.1` (fff08b9; verify 613/0, main CI green)
-
-    - [x] **rc20.2** (patch, operator report on prod 2026-10-18)
-      - [x] **WEB-FIX-20.2** (8ad4ab4, 134997c, goldens 1bac461) plain
-        "Delete" label; Clients fetched on mount and every 5 s while
-        visible; loading states instead of "Cached 0" / "Unknown app" after
-        a slow or failed first fetch, fast retries; hero "Throughput" with
-        pill Serving / Downloading / Idle and a two-series graph (served
-        from cache in green, from the internet in cyan).
-      - [x] tag `v0.1.0-rc20.2` (3f78b1b; verify 613/0, main CI green)
-
-    - [ ] **rc21 — Android parity and cache health** (cut 2026-10-17; web
-      and API packages first, Android packages and golden images only after
-      the operator's rc20 visual check; no rc21 tag without the operator's yes;
-      rc20 visual check PASSED, operator 2026-10-18: Android packages unblocked)
-      - [x] **MOBILE-1** (web, first package of rc21; user decision
-        2026-10-17) phone fine-tuning on top of the kit: 44px touch targets
-        via `@media (pointer:coarse)` (segs, chips, (i), `.btn.sm`, card
-        quick action); the QR pairing flow end to end at 400px; detail
-        sheet, confirm dialogs and expanded History rows as bottom sheets
-        with scrolling tabs; safe-area insets for the bottom nav and the
-        savebar, landscape and 200% text; visible overflow cue on scrolling
-        segs; goldens for one open sheet and dialog per page at 400px.
-        Phone mockup from the kit first, operator approves.
-        - [x] MOBILE-1a mockup `docs/design/rc21/mobile.html` approved
-          2026-10-18 (decisions Q1-Q7 in the page and its README: 38px
-          visual + 44px hit, scroll-listener edge cue, all confirms as
-          bottom sheets below 600px, History row as a sheet, "Open on this
-          phone" first on narrow touch, no paired state in the drawer,
-          landscape nav icon+label). Fixes found by the mockup: toast covers
-          the nav, no `safe-area-inset-top`, `.sheet` 88vh -> 88dvh.
-        - [x] MOBILE-1b implementation (6d81a61, goldens 0a28553, merge
-          d4bf7ae): touch targets 38/44, `.scue` overflow cue, bottom sheets
-          and confirm sheets below 600px, History row sheet on phones,
-          pairing with "Open on this phone" and the reveal overlay on the
-          QR stand-in, safe area + landscape nav, 200 % text (minmax(0,1fr)
-          grids; 8.75em / 6em minimums), sheet top corners clipped.
-          CARD-CORNERS-1 not reproduced with a real cover image.
-      - [x] **CACHE-REPAIR-1** (api; roadmap "CACHE-REPAIR-1") delete the
-        wrong-size chunk files of an app's target manifests behind the
-        `deletion.py` cache-root guards (size re-checked right before the
-        delete), then queue a forced run; "Complete all" and automatic
-        completion keep skipping such a game until repaired. Full review.
-        Done: `POST /v1/cache/{appid}/repair` (dry run by default, `execute:
-        true` deletes then queues the forced run; 409 on an active job of the
-        app or a depot co-owner, 422 above 2000 files); `vault_api/cache_repair.py`;
-        API only, no schema change, no new env value; UI (button on an
-        incomplete row with `cache_missing_chunks == 0`) is a follow-up.
-      - [x] **CACHE-REPAIR-UI-1** web part (6e21a89; Downloads "Incomplete" row, detail sheet Maintenance tab and header; dry run -> confirm with per-depot counts -> execute -> "Show job"; per-flow token against late answers) (web + android) Repair button on incomplete
-        rows with `cache_missing_chunks == 0` (dry run, confirm dialog with
-        counts, execute, show job).
-      - [x] (ANDROID-DL-2) CACHE-REPAIR-UI-1 Android twin: strings and templates exported
-        from `web/js/lib/cache-repair.js`; drop the `DAMAGED_NOTE` pin in
-        `CacheCompletenessWebTwinTest.kt` when adopting the new note
-      - [ ] nit (CACHE-REPAIR-UI-1 review): the sheet's Repair buttons use
-        `withButtonBusy` (`disabled`, no "Checking…") unlike the Downloads row
-        (aria-disabled + "Checking…"); demo route has no `not_owned` 409
-        branch; a flow closed during execute only re-reads the store, no toast
-      - [x] **FIX-POP-HIDDEN-1** (web, rc20 visual check 2026-10-17) the
-        Updates split-button menu was always open because
-        `.pop.menu{display:flex}` beat `.pop[hidden]`; it overlapped the
-        search field and the caret appeared dead. Guard added plus a CSS pin
-        test. Also: Clients cards got icon tile, "now" box, card padding,
-        action footer, boxed update warning and an empty state box.
-      - [x] **CLIENTS-4** (done in the rc20 rework, 3751e12 / 3a89818) (web) finish the Clients cards per
-        `docs/design/rc20/clients.html`: mono meta line and outdated pill in
-        the card head; update box tint, icon, versions in code, "Show update
-        command"; now box with subline and speed readout; stat grid
-        (Installed, Loaded, Hit rate with meter); Recent chips with "+N
-        more"; agent health row; footer with last active and unattributed GB;
-        summary tile details and range control.
-      - [x] **CSS-HIDDEN-LINT-1** (bb75706, TEST-HYGIENE-1; Lint 3 in css-hygiene.test.js found and guarded 2 real overrides in kit.css) (web test; partly done: since SETTINGS-2 the
-        hygiene check also reads kit.css) generalise the hidden-guard lint
-        in `css-hygiene.test.js`: fail when a later or higher-specificity rule
-        sets `display` on an element whose `[hidden]` guard it overrides
-        (`css-pop-hidden.test.js` covers only compound `.pop.<x>`).
-      - [ ] nit (TEST-HYGIENE-1 review): Lint 3 blind spots (guard
-        ancestors must all appear in the rule's ancestors, so
-        `.kit .grid.selecting .pick` vs `.kit .card .pick[hidden]` is not
-        flagged; `.kit.<page>` treated as `.kit`) should be stated in the
-        lint header; ten web test files still use `until(..., 2000)`
-        (clients-live, clients-view-wiring, clients-nav-refresh,
-        clients-rename-wiring, steam-library-setting, onboarding-steamid,
-        downloads-names-loading, downloads-layout, downloads-updates-wiring,
-        downloads-owned-preloaded).
-      - [ ] nit (FIX-POP-HIDDEN-1): `.pop` has no box-shadow and
-        `.pop.menu` min-width is 100% where the Library mockup shows 260px
-        plus shadow; dead `.cl-list > p` rule; the Clients empty state repeats
-        the "Add a device" accessible name.
-      - [x] **UNMAPPED-FLAG-1** (api + web) honesty flag for unmapped depots
-        in the completeness display: when depots of a game have no mapping
-        the percentage says so instead of showing a clean figure.
-      - [ ] nit (UNMAPPED-FLAG-1, VERSION-HEALTH-1): `get_game` scans all of
-        `depot_manifests` for one appid (add `AND appid = ?`); library card
-        keeps the green check at 100% with unmapped depots and Android lacks
-        the note (Android parity package); VERSION-HEALTH-1 chose the startup
-        log line, `/v1/health` stays a fixed body (fingerprinting decision)
-      - [x] **APP-NAMES-1** (web, Weg A decided 2026-10-17; no api change) package
-        rows with no name from any source read "Content package" instead of
-        "Unknown app" (HELLDIVERS 2 content packages, roadmap D9); the app id
-        stays in the facts line, a real unknown app keeps "Unknown app".
-      - [x] **VERSION-HEALTH-1** (api) version and schema readable without
-        the key (roadmap "VERSION-HEALTH-1"; `/v1/health` or a startup log
-        line).
-      - [x] **CLIENT-ROW-1** (web + api if needed) "Client downloading" row on
-        the Downloads page (operator decision 2026-10-16: in rc21; after
-        DOWNLOADS-1; shown only while a client downloads, no empty heading).
-        Web only: `clientDownloadingRow` in `lib/traffic-view.js` over
-        `active_clients_now` (live ring via `mergeLive`).
-      - [x] nit (MOBILE-1a; 2d3a644, now 10.0.0.x): tests still use the operator's real VLAN as
-        sample data (`api/tests/test_d15_runner.py:622` 192.168.10.15,
-        `CoverArtTest.kt:131` and `GameCardModelTest.kt:227` 192.168.10.20);
-        switch to 192.168.1.x (Kotlin part with the Android packages)
-      - [ ] nit (rc20 reviews): CLIENTS-3 `tab:null` wiring check is a regex
-        over source (use a spy); `getSettings` call on Clients has no guard
-        against a detached view; tile wording "Version differs from the
-        server" could read "differs from the server version"
-      - [ ] nit (rc20 reviews): SETTINGS-1 nav label "Other settings" is
-        vague; stale comment about the `api.schedule()` refetch after save
-        in `settings.js` (check whether `state.schedule` is still needed)
-      - [ ] nit (rc20 reviews): LIVE-DELAY-1 `active_clients` under-reports
-        for up to 5 minutes after a vault-api restart (ring not filled yet);
-        no test for a live answer with the feed ok but `active_clients`
-        null or missing
-      - [x] **CLIENTS-LIVE-1** (7856c4e; `live_now` per client: loading, speed and apps from one ~20 s window; Android still reads `loading_now`) (api + web) the Clients "loading now" box and
-        speed come from the swept 5-minute window (`/v1/clients/overview`,
-        `traffic.current_window`), so they lag up to one sweep; serve them
-        per address from the live tier (like LIVE-DELAY-1 did for Downloads).
-        Found in rc20.2 (WEB-FIX-20.2 polls every 5 s, the data stays old).
-      - [x] **GRAPH-RECENT-1** (ad5a7b3; 1h/6h/24h series stitched from the live ring via `prefer_ring`, `now` block on `/v1/throughput` drives header/pill/"Loading now" on every range) (api + web, decided 2026-10-18, Weg A; moved
-        from rc22 into rc21 the same day after a second operator report)
-        the Downloads 1 h / 6 h views (graph and header `current`) show the
-        minutes since the last event sweep: stitch the live tier in, as
-        `/v1/throughput/live` already does. Observed on dev: live graph
-        144 MB/s (forced verify reads from cache), 1 h view empty and
-        "Idle" until the next 5-minute sweep. Check first that the next
-        sweep fills the 1 h view (else it is a real bug). Second report
-        (operator screenshot, dev, 1 h range, idle): header "10.3 MB/s" with
-        pill "Downloading" while the subline says "Idle", the graph is flat
-        at 0 "now" and the only peak (68.6 MB/s, runner verify of jobs
-        #192/#193) is 9 min old: `current` and the pill come from the last
-        swept window, so they lag in both directions. Header and pill must
-        agree with the newest graph point; the pill's "Downloading" for
-        runner cache reads is RUNNER-SPLIT-1 (next package).
-      - [x] **GROUP-VERIFIED-1** (499fd5f; api + web; operator report 2026-10-18,
-        prod) HELLDIVERS 2 stays "Cached · not verified" (grey) after a
-        successful forced verify (job #193, 23.11 GiB, all HIT), although
-        its own figure is "100% complete, not counted: 1 unmapped depot".
-        Read from code (not measured): the card is a D9 group card and
-        `group_cache_complete_pct` (`routers/games.py` ~377,
-        `CompletenessIndex.figure`) is unknown as soon as ONE member pair
-        has no OK row; the 8 content packages ("Not part of your
-        library", 0.2-0.3 GB each on disk) are probably never measured, so
-        the group can never turn green. To check on prod data first: which
-        pairs are unknown and why. Also check the run log: the depot
-        mapping replace dropped 553851 (main depot?) and 7 package depots
-        from app 553850 while manifest ingestion recorded all 11, and
-        auto-GC (execute) ran right after (job #195): prove that GC cannot
-        delete chunks of a depot that just lost its mapping, and explain
-        the "1 unmapped depot". Fix so a verified group reads "Current"
-        when every member it can measure is at 100 % (decide how unowned
-        or unmeasurable packages count; show them, never hide bytes).
-        On close: put the open question AUTO-VERIFY-FULL-1 (roadmap) to
-        the operator with the finding on how reliable the mapping is.
-        Decided during the package (operator 2026-10-18): prod Auto-GC to
-        dry-run until rc21 (Antrag A-20261018-03); "Confirmed current" is
-        stamped after every successful run, incl. forced verifies.
-        Reviewer advice for AUTO-VERIFY-FULL-1: decide after one prod verify
-        of HD2 on rc21 shows `removed=[]` and 0 unmapped depots.
-      - [x] **AUTO-VERIFY-1** (e9ad10d; api + web; decided 2026-10-18, Weg A)
-        Settings checkbox "Complete cached games automatically" (default
-        on; forced run only for games the disk check calls incomplete).
-        Goal: a game with only an update delta cached is detected (disk
-        check vs the current manifest -> Partially cached) and completed.
-        Test for exactly that. A "Full" mode switch was considered and
-        deferred (AUTO-VERIFY-FULL-1, roadmap): decide it when
-        GROUP-VERIFIED-1 is closed.
-      - [x] **DELETE-CLAIMANT-1** (5f87277; api; GROUP-VERIFIED-1 review S1, safety)
-        `DELETE /v1/cache/{appid}` (`routers/cache.py:514`,
-        `deletion.plan_deletion` / `load_co_owner_states`) decides only from
-        `depot_app_map`; while a game has lost its mapping rows (prod: HD2
-        package depots), deleting a package app removes a depot the game
-        needs. Count every app with a `depot_manifests` row for the depot as
-        a co-owner, judged with the has-content predicate (an uncached
-        recorder → last remnant + needs_force, WP 3.6), mirroring the GC
-        claimant rule. Until
-        rollout: after the rc21 deploy run one verify of 553850 (heals the
-        mapping); note in the rc21 rollout Antrag.
-      - [x] (ANDROID-DL-2) Android follow-up GROUP-VERIFIED-1 (S2): show the group
-        "not measured: N package depots (X GB)" note; Android demo
-        `groupPct` (`DemoState.kt:169`) differs from the web demo's
-        `demoGroupFields` since GROUP-VERIFIED-1.
-      - [x] **LOADING-NOW-1** (ad5a7b3; `active_clients` = addresses served bytes in the ~20 s speed window, `active_window_seconds`) (web + api; CLIENTS-LIVE-1 review) the
-        Downloads "Loading now" tile (`active_clients_now`, 5-min window,
-        `web/js/lib/traffic-view.js:308-315`) uses a different window than
-        the Clients page after CLIENTS-LIVE-1 (loading = bytes in the speed
-        window); align both, one window for "loading" and speed. Do with
-        GRAPH-RECENT-1.
-      - [ ] nit (GRAPH-RECENT-1 review): the newest, still-open bucket is
-        divided by the full bucket length, so early in a minute it draws far
-        below the header speed (N1, handed to RUNNER-SPLIT-1); summary tiles
-        (served, average, peak, hit rate) and job-card speeds stay swept, so
-        the graph's newest point can briefly exceed "Peak"; Android demo
-        `watcher_window_seconds = 30` vs web 60 (`DemoTraffic.kt:210`) and
-        Android ignores the new `now` block (header and "Loading now" still
-        lag there: Android Downloads follow-up); a brand-new PC loading
-        before its first sweep counts in "Loading now" but has no Clients
-        card yet; runner traffic counts as client traffic in the ring until
-        a sweep extends the runner's address window on a new UTC day
-        (relevant for NOW-LOADING-1).
-      - [x] **RUNNER-SPLIT-1** (f306f40; additive `runner_hit_bytes`/`runner_miss_bytes` on points, `*_per_second` on `current`/`now`/live; pill "Verifying" for an all-HIT runner via the existing `verify` kind; GRAPH-RECENT-1 nit N1 fixed for the series) (api + web) the throughput series and `current`
-        have no hit/miss split for the prefill runner, so the Downloads graph
-        counts all runner traffic as "from the internet" and a verifying
-        runner shows "Downloading"; add the runner split and use it for the
-        pill and the two-series graph (rc20.2).
-      - [ ] nit (RUNNER-SPLIT-1 review): redundant `when is not None` in
-        `_series_point` (traffic.py ~748); `/v1/throughput/live` still divides
-        its running 5/15/60 s point by the full bucket length (N1 fixed only
-        for the series); a running ring bucket that only partly covers its
-        bucket (api restarted mid-bucket) still reads too low; demo summary
-        says the runner was 60 % HIT while its points say 0 % (kept for
-        golden stability). Android: read the runner split, add the
-        "Verifying" pill and count runner HITs as cache in the graph.
-      - [x] **NOW-LOADING-1** (f8b7754 + goldens bba31e7; `now.loading_sources` / live `loading_sources`: runner row with job and phase or "No running job", client rows with games, "Unattributed traffic"; one ring snapshot `LiveTier.now_view`; live 5 s point divided by elapsed seconds) (api + web; operator report 2026-10-31, prod
-        rc20.2, decided the same day: rc21, scope "game + source") the
-        Downloads page never says WHAT is loading: the pill, "no device
-        loading" and the runner GB are counts only. Add a "Loading now"
-        block in the hero with one row per source: the runner job (game,
-        phase download/verify, speed) and each client (name, game(s) from
-        `live_now.apps`, speed); traffic no source explains reads
-        "Unattributed traffic" instead of being hidden. Screenshot case to
-        explain first: pill "Downloading" (runner bytes > 0) with ACTIVE
-        empty, right after job #200 (No Man's Sky) was cancelled at
-        21:07:18 — prove whether this is live-ring lag or a runner that
-        keeps loading after cancel (the latter is a bug of its own). Build
-        on GRAPH-RECENT-1 and RUNNER-SPLIT-1 (same data path, one window
-        for "loading" and speed); Android parity with the Android packages.
-      - Android package cut (orchestrator, 2026-10-31, operator's yes to run
-        rc21 incl. Android): each package builds and tests only in GitHub CI
-        (push `wp/*`, app goldens via a `wp/<name>-goldens` branch).
-        - [x] **ANDROID-DL-1** (96e526e + goldens f27f4c8) Downloads data path: default range live and
-          `active_clients` from the live answer (LIVE-DELAY-1 follow-up), the
-          `now` block for header/pill/"Loading now" on every range
-          (GRAPH-RECENT-1, LOADING-NOW-1), runner split with the "Verifying"
-          pill and runner HITs as cache in the graph (RUNNER-SPLIT-1), demo
-          watcher window 60 s, the subline/History count and first-10 +
-          "Show more" paging (DOWNLOADS-3 twin). Closes the two Android
-          Downloads boxes below.
-        - [ ] nit (ANDROID-DL-1 review): `ClientsScreenshotTest.kt:96`
-          `heightDp = 640` cuts the 360dp/font130 Downloads golden through the
-          axis captions and hides the legend (raise to ~760 with the next app
-          goldens round, ANDROID-DL-2); Kotlin `splitGeometry` always draws
-          the split (fields default to 0) where the web falls back to one
-          line; TalkBack focus stays on "Show N more" (web moves it to the
-          first new row); the two graph fills are hard to tell apart in the
-          night golden (REDESIGN-1b); import order in `DownloadsStats.kt`.
-        - [x] **ANDROID-DL-2** (6c582af + goldens ee1c40c, review fixes c2dd930/48393af; also closes the ANDROID-DL-1 golden-height nit and moves focus after "Show more") (after NOW-LOADING-1 is on main) the
-          "Loading now" source rows (twin of `loadingNowModel`), the Repair
-          flow (CACHE-REPAIR-UI-1 twin) and the GROUP-VERIFIED-1 S2 group
-          note incl. the demo `groupPct` alignment.
-        - [x] **ANDROID-GAPS-1** (3769c48 + goldens bcf0c40, fix fadfb7b/dd7f5df: Finish waits for a running SteamID lookup and save) (box below) Remove PC, SteamID in
-          onboarding, client rename, Delete history.
-        - [ ] nit (ANDROID-GAPS-1 review): the Rename button leaves an empty
-          band at the bottom of nameable Clients cards (`ClientsScreen.kt:273`,
-          REDESIGN-1a); busy dialog buttons are not visually disabled (guards
-          exist); `startLibraryLookup` guard could also check
-          `lookupJob?.isActive`; leaving onboarding via Cancel/Demo or an
-          activity recreate still cancels a running lookup; Look up uses the
-          current step-1 fields, not the verified ones; no Remove on the
-          Clients page cards (web has it, REDESIGN-1a); demo Delete history
-          does not zero the synthetic traffic like the web demo's "since" cut.
-        - [ ] nit (ANDROID-DL-2 review): focus after "Show more" goes to a
-          wrapper Box (input focus; TalkBack accessibility focus may not
-          follow, check on a device); "Show job" only scrolls, no focus;
-          Repair only in the sheet's completeness block (web also in header
-          and Maintenance tab, REDESIGN-1b); a flow reset during execute only
-          re-reads (inherited from the web).
-        - [x] **ANDROID-REDESIGN-1a** (39b9d91 + fixups 674edab/29cfd05/4b5ddcf, goldens 11cf7a2; Remove and Rename on the card, summary tiles always present) rc20 redesign follow-up, part 1:
-          Clients cards (Add a device tabs not built: the app has no such
-          flow; open decision ANDROID-ADD-DEVICE-1 in the roadmap).
-        - [ ] nit (ANDROID-REDESIGN-1a review): `SectionLabel` sets
-          `contentDescription` on an uppercase Text; inside merged cards
-          TalkBack may read "Connected, CONNECTED" (check on a device; else
-          `clearAndSetSemantics { text = ... }`); 12dp gap above DEVICES
-          before the first answer; no agent-only cards when the overview
-          returns 404 (web shows them); footer buttons wrap below a long
-          last-active line; no golden for the bypass row or the empty state;
-          the PC list is fetched twice while the PCs sheet is open.
-        - [x] **ANDROID-REDESIGN-1b** (bab33ac + fixups, goldens 590a34d) part 2: Library toolbar and detail
-          tabs (Overview / Depots / Maintenance, Repair in the header and the
-          Maintenance tab), sheet motion where it fits Material, distinct
-          Downloads graph fills. (Split 2026-10-31: Settings nav and the
-          Downloads layout moved to 1c.)
-        - [ ] nit (ANDROID-REDESIGN-1b review): `DETAIL_TABS_TAG` unused
-          (use it in the 1c sheet screenshot test or drop it); the Overview
-          "Cache" fact lacks `groupCompletenessLine` (group figure only on
-          Maintenance); the graph grew 72 -> 88dp; accepted deviations to note
-          in rc20-visual-check.md so the device check does not flag them:
-          Filters only with metadata, store details first on Overview
-          (CARD-LAYOUT-1 pin); `strings.xml:210` hint `http://192.168.1.50:8080`
-          belongs to SAMPLE-IP-1.
-        - [x] **ANDROID-REDESIGN-1c** (c8da36d + fixup 7290657, goldens 866a660/fccb6e0; also closes the two REDESIGN-1b should-fixes) part 3: Settings section nav (one
-          panel at a time behind a scrolling section strip, expert switch at
-          the end of About, nav labels from web `SECTIONS.nav` as a separate
-          Kotlin map, rewrite of `SettingsD16WiringTest`, drop the "PCs and
-          devices / Open Clients" row per the rc20 visual check) and the
-          Downloads layout (web hero: big number + pill + limit, graph, four
-          totals 2x2 via a twin model; then Active / Queue / History order
-          and spacing).
-          Also the two REDESIGN-1b review should-fixes (before the rc21 tag):
-          a rendered check of the open detail sheet (capture the sheet content
-          composable directly, three goldens Overview / Depots / Maintenance
-          at 360dp font130 from a demo game with packages and a
-          Repair-eligible state) and one Library golden with metadata so the
-          Filters button renders.
-        - [x] **ANDROID-POLISH-1** (45d41cf + goldens 8d42231; Settings strip dirty dots, Filters as funnel + count so the 411dp toolbar is one row, Overview times formatted, KDoc fixed) (before the rc21 tag; REDESIGN-1c review
-          should-fixes) a dot with a spoken "(unsaved changes)" on each
-          Settings strip tab whose section holds a draft, and on the expert
-          switch row (web settings.js dirty dots); the Library Select
-          checkbox wraps alone onto its own row when Filters shows
-          (`library_411dp_font100_meta.png`, REDESIGN-1b toolbar), fix the
-          row so typical vaults with metadata get one control row.
-        - [ ] nit (ANDROID-REDESIGN-1c review; KDoc and Overview ISO times fixed in POLISH-1): hero runner mini item and the
-          0-devices caption descriptions differ from the web tile titles;
-          downloads_stats shot heights 1000/1250 leave empty canvas;
-          the "Surveyor Outfits" package row squeezes its name at 360dp/1.3.
-        - [ ] nit (ANDROID-POLISH-1 review): `assertOneControlRow` does not
-          check the sort button (`LibraryScreenshotTest.kt:646-659`);
-          `EXPERT_SECTION_ID` duplicates the id literal from
-          `SettingsLayout.SECTIONS`; import order in `GameDetailSheet.kt:67`;
-          at 360dp/1.3 with metadata Select still wraps alone (documented
-          worst case).
-        - [x] **APP-NIGHT-GOLDEN-1** closed as works-as-designed (2026-10-31,
-          reviewer-confirmed): the app is single-dark-theme on purpose
-          (`Theme.kt`, no `values-night/`, mockup NOTES.md:117, app README);
-          the night qualifier is applied and the byte-identical night golden
-          is the intended guard against a theme that starts reading the
-          system setting. The MOBILE-1a sample-address nit rides along
-          (10.0.0.x; 192.168.1.0/24 is not neutral either).
-        - [ ] nit (APP-NIGHT-GOLDEN-1 review): a blind golden refresh would
-          silently accept a changed night shot; add a test asserting the
-          night shot equals its notnight twin pixel for pixel.
-      - Cancel question (NOW-LOADING-1, answered from code, reviewer-checked;
-        no prod measurement): a cancelled job's SteamPrefill does not keep
-        loading. `cancel_job` only sets `stop_request` (jobs.py ~894-990);
-        the runner polls it every 0.2 s (prefill.py:122, prefill_runner.py
-        ~215-251) and stops the child with SIGTERM, then SIGKILL after 5 s
-        (prefill.py ~750-781); the job reads "cancelled" only after the
-        process is reaped (prefill_runner.py ~281-298, worker.py ~376-383,
-        ~918-921). The operator's screenshot (pill "Downloading", ACTIVE
-        empty) was log flush (5 s, nginx.conf.template:671) plus window lag,
-        on rc20.2 the swept 5-minute pill.
-      - [ ] nit (NOW-LOADING-1 review): `addrs_listed` ignores the
-        clients/runner scope (an address listed only under the runner card
-        counts as known on the client side); each loading poll reads all of
-        `agent_reports` at the 3 s live rate; device count counts addresses
-        while rows group by agent ("2 devices loading", one row); demo job
-        card shows 31.5 MB/s (swept window) next to a 6.4 MB/s runner row.
-      - [x] (ANDROID-DL-1) Android Downloads subline counts the plain job poll
-        (`DownloadsScreen.kt` ~422-435, `partitionJobs(controller.jobs)`),
-        not the ranged History list it shows; same "N in history" bug the
-        web fixed in DOWNLOADS-3 (rc20.1). Port the web `history-paging.js`
-        count and the first-10 + "Show more" paging.
-      - [x] (ANDROID-DL-1) Android Downloads follows LIVE-DELAY-1 (default range live,
-        `active_clients` in the live answer); the Kotlin twin test no longer
-        pins the web default
-      - [x] (ANDROID-REDESIGN-1a/1b/1c, POLISH-1; Add a device is open decision ANDROID-ADD-DEVICE-1) Android follow-up of the rc20 redesign: Clients cards, Add a
-        device tabs, Downloads, Settings section nav, Library toolbar and
-        detail tabs, sheet motion where it fits Material
-      - [x] **VERIFY-LABEL-1** (web; roadmap "Decided 2026-10-17") the Downloads
-        button "Complete now" is renamed "Verify"; the Verifying state keeps
-        its animated circular arrows
-      - [x] (ANDROID-GAPS-1) ANDROID-GAPS-1 Remove PC, onboarding stores the SteamID, client
-        rename and Delete history in the app
-      - [x] APP-NIGHT-GOLDEN-1 night golden identical to the day golden (works as designed, see the Android package cut above)
-      - tuning defaults from the Sunday test, if not shipped in rc20.x
-        (the rc20.x box moves here)
-      - [x] **RUNNER-RETRY-1** (98b99b9; runner/api; user decision 2026-10-18: build
-        it although AIO removed the cause — "error messages that never show
-        up do no harm") retry the prefill when SteamPrefill reports "Unable
-        to detect Lancache server!" (e.g. 3 attempts with a pause, then
-        fail with a clear job error); test with a simulated slow/failed
-        heartbeat.
-      - [ ] nit (RUNNER-RETRY-1 review): `runner_mark.announce` runs once
-        before attempt 1, a successful retry may run unmarked
-        (prefill.py:611, worker.py:326); runner_identity.py docstring
-        "at most VAULT_PREFILL_TIMEOUT_SECONDS" is now up to 3x plus pauses;
-        stub_prefill `lancache_failures.txt` counter never reset.
-      - [x] close: release gate (roadmap "Release plan"), tag `v0.1.0-rc21` (2026-11-01: tag on 5d94d11, main CI 41275492016 and Publish 41275885575 green, verify 627/0; rollout Antrag A-20261101-01 filed; prod rollout check pending)
-
-    - [ ] **rc21.1 — mapping and name fixes from the prod rollout** (operator
-      decision 2026-11-01: patch, not rc22, with every item below incl.
-      PAUSE-ALL-GC-1, JOB-SIZE-1 and RUNNER-NAME-1; `dev.sh diag db` requested
-      in Antrag A-20261101-02)
-      - [x] **MAP-ATTRIB-1** (473610f; three review rounds incl. a simulation on a full read-only prod export; attribution only with evidence, one-time cleanup removes 5 and restores 3 pairs on prod, see docs/handover/rc21-1-rollout-notes.md) (api) a prefill maps every depot whose directory
-        changed during its run to the running app (`prefill.py`
-        `diff_depots` / `apply_observed_mapping`, ~884-990), so traffic a PC
-        loads in parallel lands on the wrong game. Prod evidence 2026-11-01:
-        Wanderburg (3624140) owns HELLDIVERS 2 depots 436781, 553851, 553854
-        and Ubisoft Connect's 1716751 (GC job 251 planned them under
-        3624140; `gc.py:1440` plans only the app's own mapped depots), while
-        HD2's GC (job 260, execute) no longer lists 436781. Fix: only map
-        observed depots the app really has (oracle depot list / recorded
-        manifest), plus a one-time cleanup of wrong rows; check GC keep sets
-        stay intact. Likely the cause of Wanderburg staying "Cached · not
-        verified" after its verify (foreign pairs have no target, figure
-        unknown; job 250 "0 depots observed").
-      - MAP-ATTRIB-1 review (2026-11-01, simulated on a read-only export of
-        prod): the cleanup also removes (1465471, 1203620) — Enshrouded
-        holding 1465470's depot — and Enshrouded's own depot 1203621 is not
-        mapped on prod although its own recorded manifest (job 205,
-        2026-10-31) and the oracle list name it (replace-step drift, MAP-DRIFT
-        family). Added to MAP-ATTRIB-1: the one-time step also restores a
-        missing own mapping when the app's own recorded manifest AND its
-        oracle list both name the depot; the step stamps once the temp cache
-        was readable (skips logged for the operator), so it never becomes a
-        permanent startup rule. The rc21.1 rollout Antrag must list the
-        expected removed and restored pairs.
-        Final expected prod effect (reviewer simulation on a full read-only
-        export, b97a62e): removed (436781, 3624140), (553851, 3624140),
-        (553854, 3624140), (1716751, 3624140), (1465471, 1203620); restored
-        (292033, 292030), (292036, 292030), (1203621, 1203620) — restores only
-        from the app's own record (containing_appid A or NULL) whose gid equals
-        the oracle public gid. Depot dirs measured on prod 2026-11-01 (operator,
-        read-only): 292033 3.47 GiB, 292036 3.77 GiB, 1203621 42.97 GiB, all
-        present; these are the "unmapped" depots of the storage balance.
-      - [x] **TOOL-NAMES-1** (4971b52; oracle_names.py: at most 2 oracle lookups per 60 s refresher tick for apps no source names, backoff, oracle off = no request; GC can only gain protection, pinned by tests) (api) Steam Tool/Config apps without a store
-        page show "Unknown app" (prod: 3990420 "Steam Frame Wireless Adapter
-        Driver", Tool, no depots; 1716750 "Ubisoft Connect PC Client",
-        Config). Store GetItems answers success != 1, they are not in the
-        owned list, and the oracle name exists only for apps the update
-        check sends (cached, not `not_owned`). Fix: fetch the oracle name for
-        rows without any name (rate-limited, metadata only).
-      - [x] measured on prod with the operator (2026-11-01, read-only
-        `docker exec ... python3 sqlite3 mode=ro`): `depot_app_map` maps
-        3624140 (Wanderburg) to 436781 (owner 436780), 553851 and 553854
-        (owner 553850 HD2) and 1716751 (owners 1716750 Ubisoft Connect and
-        3751950 AC Black Flag Resynced, which legitimately loaded it); each
-        true owner is still mapped and has a recorded manifest.
-        `cache_completeness` for 3624140: the four foreign pairs are
-        `no_target`, its own depot 3624141 is `ok` 562739696/562739696, so
-        the figure is unknown -> "Cached · not verified" (root cause
-        confirmed). Most likely source: prefill job 228 (2026-10-31
-        11:48-12:31Z, 43 min) while the true owners' depots were loaded
-        (manifests recorded 12:42Z and 13:02Z). HD2 shows "Current" after GC
-        job 260 (execute, 4.94 GB freed: old builds only). Until the fix: GC
-        for 3624140 stays safe (keep set includes every owner's recorded
-        manifest), but no Wanderburg verify.
-      - [x] **PAUSE-ALL-GC-1** (4c017e7; queued GC jobs pause and resume, a running GC still 409; Pause all includes queued GC; sheet shows "GC paused"; History "GC dry run (nothing deleted)"; ADR-0016 addendum) (api + web) "Pause
-        all" pauses prefill jobs only; queued GC jobs answer 409 and run at
-        once (prod 2026-11-01: GC jobs 256-258 ran at 06:48:13 right after
-        "Pause all", looking like a cleared queue). With Auto-GC on execute,
-        "Pause all" must also hold queued GC jobs. Also: a dry-run GC job
-        reads "Garbage collected" in History although nothing was deleted.
-      - [ ] nit (PAUSE-ALL-GC-1 review): a paused GC also blocks
-        miss-triggered prefills for its app (documented); a paused execute GC
-        resumed after switching VAULT_AUTO_GC still executes (documented,
-        cancel instead); GcFlowTest "an unrecognized job status keeps
-        polling" also asserts the known status "queued" (rename or use a second
-        unknown status).
-      - [x] **ANDROID-PAUSE-GC-1** (e793874; Android Pause all incl. queued GC, dialog/toast literals pinned, paused GC word and card note, dry-run label, GcFlow paused text; web `confirmGcNote` removed) (android; follow-up of PAUSE-ALL-GC-1)
-        Android "Pause all" still skips queued GC jobs: BulkJobs.kt queued
-        phase incl. GC, `gcRunning`/`gcQueued`, the three new web literals
-        (`confirmGcRunning`, `confirmGcHeldOne`, `confirmGcHeldMany`) in the
-        twin pins, DownloadsBulkBar.kt:86 note, JobPartition.kt paused GC word
-        and the dry-run label (needs `gc_execute` on JobSummary), the GC sheet
-        flow's paused state, and the stale "unreachable in practice" comment
-        (JobPartition.kt:135); the toast suffix literals `gcPartOne` /
-        `gcPartMany`; GcFlow.kt paused flag and text; then drop
-        `WORDING.confirmGcNote` from the web.
-      - [ ] nit (TOOL-NAMES-1 review): a cached, not-owned app (prod 1716750
-        Ubisoft Connect) gets a one-off oracle verdict from the name lookup
-        and shows "Update available" it cannot act on until the not_owned
-        window expires; consider hiding update_available for not_owned apps.
-      - [x] **JOB-SIZE-1** (365b472; preview-based expected size and runner-scoped progress for a first download, ETA from the live runner speed with an EMA, per-source divisor; README privacy wording names the second trigger) (api + web) a first
-        download says "Speed not measured yet: the server does not know this
-        game's depots yet" (prod: Subnautica job 254); use the D19 depot
-        preview (expected depots and size from the oracle) for the job card.
-        Scope addition (operator 2026-11-01): an ETA on the running job card
-        (remaining bytes / smoothed download speed, MISS bytes only, hidden
-        while unstable, for verify runs or above 24 h; "about N min left").
-      - [x] **RUNNER-NAME-1** (47973c4 + goldens 0c1d6c5/91b9610, merge fix 95587ff; PRODUCT_NAME constant per platform, ProductNameWebTwinTest ties web, Kotlin and app_name) (web + android) the "Prefill runner" row and
-        captions read the product name from one constant (operator decision
-        2026-11-01: today "SteamHangar", "GameHangar" with D18), so it is
-        clear who loads.
-      - [x] **STORAGE-BALANCE-1** (40fea0e; `storage_balance` in `/v1/cache/summary`, INFO line after each update check from a non-blocking size snapshot, expert card in Settings) (api + web; operator decision 2026-11-01:
-        Weg A, a storage balance in the product, not a dev-only check) after
-        every update check a log line and fields in `/v1/cache/summary`:
-        planned (current manifests of measured apps, shared depots counted
-        once), present (of those on disk), on disk (size walk), and the rest
-        split as far as known: unmeasured apps, unmapped depots, old-build
-        orphans (GC plan); an expert-mode "Storage balance" row and a warning
-        above a threshold (e.g. > 15 % or > 50 GB unexplained). Prod
-        measurement 2026-11-01 (`zfs list` + read-only DB): on disk 575 GB
-        (refer; used 581 GB), planned 346.2 GB / present 346.2 GB over 39
-        depots, so about 229 GB (40 %) is outside the measured manifests:
-        63 mapped depots but only 39 measured (21 of 57 apps measured; the
-        unmeasured ones are mostly content packages, DLCs, tool/config and
-        not-owned apps, e.g. 378640-378649, 370000-370003, 2506210-2506280,
-        436780, 1716750, 228980), plus 3 unmapped depots with 38.7 GB of
-        latest manifests; old-build orphans not yet sized.
-        Implementation note (review 2026-11-01): "unexplained" is 0 by
-        construction (every depot dir in exactly one class) and can only go
-        negative; the warning therefore counts old builds + |unexplained|
-        (> 15 % of on disk or > 50 GiB) and will stay on on prod until GC has
-        reclaimed old builds (Auto-GC cleans a game only after its own
-        prefill). The balance line reads the size snapshot non-blocking
-        (`SizeCache.peek`) and is skipped when the snapshot was invalidated.
-      - [x] **MAP-LOSS-1** (ec1f134; root cause: rc20.2 replace step on 2026-10-31 — Enshrouded job 205 `added=[1465471] removed=[1203621]`, Witcher job 207 `removed=[292033, 292036, ...]` — plus `skip_own_mapping` blocking the same run's re-map; fix: the replace step keeps an untouched depot named by the app's own temp-cache files, own recorded manifests or the oracle list; keep-only) (api; finding 2026-11-01, MAP-ATTRIB-1 review) an
-        app's OWN depot loses its mapping row although its own recorded
-        manifest and the oracle name it (prod: Enshrouded 1203621, The
-        Witcher 3 292033/292036; restored once by MAP-ATTRIB-1). Find the
-        cause (the replace step on partial evidence, GROUP-VERIFIED / MAP-DRIFT
-        family; Enshrouded job 205 on 2026-10-31 is a candidate) so it cannot
-        recur; the one-time restore does not prevent it.
-      - [ ] nit (MAP-LOSS-1 review): a depot Steam moved away keeps its old
-        row (keep-only, GC keeps more) and can leave an old completeness target
-        ("Update available"/"not verified") until DELETE /v1/mapping; the
-        oracle list also keeps an existing package-depot row on the game
-        (docstring should say so); the kept-reason line names all three
-        sources at once.
-      - [ ] nit (MAP-ATTRIB-1 review): one oracle_branch_manifests query per
-        restore candidate; the inlined `apps` INSERT duplicates upsert_mapping
-        on purpose (it commits inside BEGIN IMMEDIATE).
-      - [ ] nit (STORAGE-BALANCE-1 review): the balance line is skipped
-        when a job or GC invalidated the size snapshot and nothing read the
-        sizes since; the expert card is in no golden (Expert panel hidden in
-        every golden view).
-      - [ ] nit (JOB-SIZE-1 review): the live runner speed counts all of
-        the runner's depots, so a completeness ETA can run a little short;
-        a not-yet-applied runner period leaves runner-scoped figures at 0
-        for up to one sweep; `etaSmoother` keeps a rate across leaving and
-        re-entering Downloads (clear it on mount); the preview total
-        includes owned DLC and language depots (older D19 behaviour).
-      - [ ] nit (RUNNER-NAME-1 review): mini line "SteamHangar 25.6 GB of
-        it" could read "By SteamHangar: ..."; KDoc line widths in
-        ClientsPage.kt / DownloadsHero.kt; web/tests/now-loading.test.js:47
-        uses 192.168.1.50 (SAMPLE-IP-1).
-      - [x] **ANDROID-RC21-1-TWINS** (1878935 + fixup 40c5731; Storage balance expert card, first-download size and ETA with EMA keyed by jobs-list identity, cleared on screen start) (android; follow-ups of rc21.1 web
-        packages) STORAGE-BALANCE-1 expert card from `storage_balance`
-        (hidden when absent); JOB-SIZE-1 job card "of ~X (expected size)" and
-        the ETA with the same hide rules and EMA, the new JobThroughputOut
-        fields incl. `eta_bytes_per_second` / `eta_speed_source`.
-      - [x] **WEB-ETA-EMA-1** (5288e02; EMA steps once per new jobs list, cleared on mount; also closes the JOB-SIZE-1 web nit) (web; ANDROID-RC21-1-TWINS review should-fix,
-        before the rc21.1 tag) `downloads.js:1983` steps the ETA smoother with
-        the object `mergeLive` returns on every 3 s live tick while its jobs
-        are the cached 30 s summary's, so the default range takes ~10 EMA steps
-        per real sample (almost no smoothing). Key the step on the jobs list
-        identity like Android, and clear the smoother on view mount (JOB-SIZE-1
-        nit); add the missing test.
-      - [ ] nit (ANDROID-RC21-1-TWINS review): StorageBalanceCardTest uses
-        contains-style pins (use assertCalledFrom like D15dWiringTest);
-        `smoother.observe` runs as a composition side effect (idempotent); a
-        malformed `storage_balance` fails the whole summary decode on Android.
-      - [x] close: release gate, tag `v0.1.0-rc21.1` (2026-11-01, operator's yes: tag on a65fede, main CI 41298914431 green, verify 627/0; rollout Antrag A-20261101-03 filed; prod rollout check pending)
 
     - [ ] **rc22 — release hardening, no new features** (packages cut
       2026-11-01 in the planning session, user yes the same day; each
@@ -4299,7 +520,7 @@ below carry their own later dates, item 12 is the current one).
       - [ ] **CI-SIGN-PIN-1** (ci; CI-FIX-3 follow-up) pin the APK signing
         certificate fingerprint in CI.
       - [ ] **RELEASE-NOTES-1** (docs) v0.1.0 release notes (B box).
-      - [ ] **DOC-DIET-1** (docs + agents, user decision 2026-11-01,
+      - [x] **DOC-DIET-1** (docs + agents, user decision 2026-11-01,
         Weg A; first rc22 package) every coder/reviewer start reads
         `PROJECT_PLAN.md` (292 KB) and `LEARNINGS.md` (87 KB), roughly
         100k tokens per agent. Split the plan into a core (sections 1-6,
@@ -4357,6 +578,15 @@ below carry their own later dates, item 12 is the current one).
         covers; demo render (`dev.sh test-web-shots`) is fine. Candidate
         fix: `border-radius: inherit` on `img.cover` plus `isolation:isolate`
         on `.cap` (`web/css/kit.css:817`).
+      - [ ] nit (DOC-DIET-1 review): the "Open boxes" column of the
+        section 7 table is hard-coded and goes stale when section 12 items
+        are ticked (drop it or derive it in the line-check test); label
+        references "item 13 B/C/D1" in post-0.1.0-roadmap.md, ADR-0017 and
+        web/tests/README.md could point to the archive files directly;
+        tools/README.md should name where the line-check test lives;
+        WORKPACKAGES.md:1120 cites an old plan line range. Core plan is
+        85.8 KB, not 70: section 12 keeps every open item's full text and
+        shrinks as rc22 ticks them (orchestrator choice, Weg B).
       - [ ] remaining nits: MAP-DRIFT-1 fail-safe tests, claim-vs-move race
         test, aria-live on queue move, D19WiringTest pin,
         regrow-without-idle-gap test
@@ -4364,7 +594,7 @@ below carry their own later dates, item 12 is the current one).
         real-device checks, rollout gates (h) and (i), release notes) and
         the failed-jobs measurement (Subnautica, Timberborn, Hogwarts
         Legacy; roadmap "Before v0.1.0") are part of rc22; their boxes stay
-        in B and are ticked there, not repeated here
+        in section 12 (origin item 13 B) and are ticked there, not repeated here
       - [ ] close: release gate, every open B box ticked or moved by the
         user, measurements written up; then tag **`v0.1.0` final**
     - **v0.1.x:** bug fixes only. The public announcement (WP 5.6,
@@ -4454,3 +684,682 @@ below carry their own later dates, item 12 is the current one).
     `v0.1.0-rc7` with CORE-FIX-3 per the 2026-10-03 decision); code for D2 and D3 still waits for `v0.1.0` (the freeze
     holds for them until then, and every merge to `main` before the final
     tag would ride into the release).
+
+---
+
+## 12. Carried-over open items
+
+Every box that was still open when its phase or version block moved to
+[`docs/plan-archive/`](plan-archive/README.md) (DOC-DIET-1, rc22). The text is
+unchanged apart from the origin in parentheses; ticked sub-items are left out
+(they stay in the archive). The archive keeps the original line; when an item
+is done, tick it HERE, not in the archive.
+
+### From Phase 4b ([archive](plan-archive/phase-4a-4b.md))
+
+- [ ] (origin: Phase 4b) tsnet Go module + gomobile build (`.aar`), auth-key handling
+      *(deliberately POST-V1: the profile abstraction from WP 4b.2 makes
+      this additive, and the System-VPN profile covers Tailscale via the
+      regular Tailscale app on day one)*
+
+### From Phase 5 ([archive](plan-archive/phase-5.md))
+
+- [ ] (origin: Phase 5) Announcement: r/selfhosted, r/homelab, LanCache Discord (stay fair:
+      frame as a complement/alternative, not a "LanCache killer").
+      Waits for v0.6.0 (user decision 2026-10-16: after the D18 rename;
+      2026-10-18, ADR-0029: once schedules are in).
+
+### From Phase 6 ([archive](plan-archive/phase-6-s-track.md))
+
+- [ ] (origin: Phase 6) Multi-target delivery: `VAULT_WEBHOOK_TARGETS` — N receivers, each
+      with its own URL, event filter, format and headers, so n8n and Discord
+      can be fed at the same time (today: exactly one URL)
+- [ ] (origin: Phase 6) Vendor format adapters `generic|discord|slack` (user decision
+      2026-08-10: adapters in the backend, NOT a free-form body template —
+      Discord must work without a relay; the cost is that we maintain two
+      foreign formats). Includes honouring `Retry-After` on 429, which
+      Discord does send and the current 3-attempt/0.2-0.5 s backoff ignores
+- [ ] (origin: Phase 6) `app.updated` — the update notification. **No oracle dependency**
+      (user decision 2026-08-10, superseding the earlier "either source"
+      answer): the trigger is the existing non-forced scheduler sweep, which
+      per `docs/research/phase3-manifests.md` costs ~3 s and zero bytes for
+      an up-to-date app and is therefore already the manifest check. The
+      changed manifest ids come from WP 3.2 ingestion, the byte/`Updated`
+      counters from the WP 3.3 summary parser — so this is a notification
+      hook on machinery that already runs, not new detection.
+      The honest semantics are "the vault HAS this update" rather than
+      "an update is available"; for a homelab that is the more actionable
+      message. `VAULT_MANIFEST_ORACLE` (ADR-0006 tier 3) stays exactly what
+      it is — an opt-in pre-emptive badge — and never becomes a
+      precondition for notifications
+- [ ] (origin: Phase 6) Outbound auth beyond Basic-in-URL: custom headers (n8n commonly wants
+      a header token) + optional HMAC-SHA256 signature, plus a per-event
+      `event_id` so a receiver can deduplicate across retries
+- [ ] (origin: Phase 6) `POST /v1/webhooks/test` — fire a synthetic event at a target. Needed
+      by any settings UI (Phase 4) and turns webhook setup from guesswork
+      into one click
+- [ ] (origin: Phase 6) Integration docs: n8n in BOTH directions (receiving events; calling
+      `/v1/jobs` to trigger a prefill), Discord, ntfy
+- [ ] (origin: Phase 6) Structured log export — opt-in `VAULT_EVENT_LOG_STDOUT` mirroring the
+      cache-event TSV (WP 3.10) to vault-core's stdout, so Loki/Promtail/
+      Vector-style collectors can ingest the machine-readable events without
+      mounting the volume (user request 2026-08-17: keep it open for the
+      community even though the requester uses Dozzle). Deliberately NOT a
+      Dozzle gap: Dozzle reads container stdout, where vault-core's
+      human-readable per-request log with HIT/MISS/BYPASS already is — a
+      file-tailing log viewer is what the TSV would need, and no popular
+      Docker log viewer does that. Cost side: doubles the line volume inside
+      the json-file ring buffer, and the config-drift check's pinned
+      `access_log` counts must be updated in the same change. Off by default
+- [ ] (origin: Phase 6) Named, scoped API keys — the direct consequence of inviting external
+      systems in (user question 2026-08-10). Today there is exactly ONE
+      key: `auth.require_api_key` compares against `VAULT_API_KEY` for every
+      router, so the key an n8n flow needs in order to enqueue a prefill is
+      the same key that may `DELETE /v1/cache/{appid}`. Wanted: several
+      named keys (web UI, agent, Android app, n8n) with a coarse scope —
+      read / enqueue / destructive — each revocable on its own, so a leaked
+      automation token does not mean rotating every agent in the house.
+      Note this is about BLAST RADIUS, not about identity: it does not make
+      the vault multi-user
+- [ ] (origin: Phase 6) Payload scoping per target: a Discord channel is a room full of
+      people, and `client.bypass_*` payloads carry `client_id` plus every
+      IP address a device reported from, while job/update events reveal
+      which games the household owns. A `full|minimal` payload mode per
+      target (minimal drops device and address fields) is the cheap,
+      correct fix — authentication cannot solve a receiver-side visibility
+      problem
+
+### From §11 items 1-12 ([archive](plan-archive/next-steps-items-1-12.md))
+
+2. [ ] (origin: §11 items 1-12) **First real-world rollout** — joint interactive session with the
+   operator (see the Deployment section of `docs/WORKPACKAGES.md`). The two
+   operator-side network blockers are cleared (measured by the operator,
+   2026-10-01): the VPN subnet router advertises only the current networks,
+   and LAN clients get no IPv6 DNS server. One check stays for the rollout
+   itself: with the DNS rewrite active, the AAAA answer for the cache name
+   must not be a public address. Precondition decided 2026-10-01: the
+   egress subnet becomes configurable (WP DEPLOY-FIX-2) so a production
+   stack can run next to a test stack; the rollout started with tag
+   v0.1.0-rc3. Gate (b) found that a bind-mounted cache
+   (VAULT_CACHE_PATH) fails on Docker 28 because of vault-api's
+   `:nocopy` (fixed in WP DEPLOY-FIX-3, verify now runs bind mode too);
+   production moves to v0.1.0-rc5, which carries the fix. Findings from
+   the operator's first phone test on rc5 (2026-10-02), fixed in WP
+   WEB-FIX-3 (phone layout hardening), WEB-FIX-4 (job titles for
+   owned-only games; plain-language hints plus Retry for a missing Steam
+   login and for a cache name resolving to a public IP) and WEB-FIX-5
+   (dismissible hint when the browser's "Desktop site" mode renders the
+   UI at desktop width - the root cause of the zoomed-out phone view).
+   Prefill on the production stack needs vault-core on its own address
+   and `extra_hosts` for the cache name on vault-runner. This session is also
+   where the honest still-open lists in `web/tests/README.md` and
+   `app/README.md` get verified — real screen reader, phone browser cover
+   art, GC against real on-disk chunks, real multi-client bypass detection.
+7. [ ] (origin: §11 items 1-12) **User-gated:** WP 5.5 — the machinery is no longer the gate. The
+   GitHub org exists, the repo lives at `steamhangar/steamhangar`, and the
+   full publish path is built and reviewed (WP CI-3 + WP AGENT-BIN, see §7
+   Phase 5's CI bullet): images, signed APK, agent binaries, checksums.
+   What remains are user actions only (steps (a)-(d) at the end of this
+   item), and review's standing advice is a throwaway pre-release first, named
+   `v0.1.0-rc1`: three things in the tree bake `0.1.0` —
+   `vault_api.__version__` (served as `server_version` by the
+   authenticated `GET /v1/settings`; `/v1/health` returns only
+   `{"status":"ok"}`), the compose `VAULT_IMAGE_TAG` default, and the
+   `org.opencontainers.image.version` LABEL in the api, core, dns and
+   deploy/proxy Dockerfiles. (Superseded 2026-10-03 by WP VER-1: the
+   Dockerfile labels and `server_version` now come from the build args
+   publish.yml derives from the tag, `dev` for local builds; only
+   `vault_api.BASE_VERSION`, the fallback outside an image, and the
+   compose `VAULT_IMAGE_TAG` default still say `0.1.0`.) What the tag sets: since DEPLOY-FIX-1/APP-FIX-1 the APK's
+   versionName is the tag without its `v` (build.gradle.kts falls back to
+   `0.1.0` for local builds only), and the published images are tagged
+   (and labelled, via docker/metadata-action) with the same string. With
+   `v0.1.0-rc1` the APK and images say `0.1.0-rc1`, a semver pre-release
+   of the baked `0.1.0` base; a `v0.0.1-rc1` would ship images and an APK
+   whose version is older than the `server_version` inside them. The path has never executed and the
+   release page is the only place its end-to-end result can be seen
+   (re-pushing the SAME tag double-appends release notes; known, commented
+   at the site). WP 5.6
+   (announcement) stays gated on the user's own end-to-end test with the
+   Android app. Phase 6 integrations are deliberately post-release.
+   **Remaining release steps (2026-10-01, all user actions):**
+   (a) merge PR `wp/pre-freeze-review` once its CI is green — the first
+   android-tests run there is the first compile of the APP changes;
+   (b) one-time GitHub settings BEFORE setting the signing secrets: an
+   Environment `release` with a `v*`-tag deployment rule, the four
+   `ANDROID_*` secrets placed in it (not as repo secrets), and a `v*` tag
+   ruleset (see app/README "CI signing secrets"); (c) push the tag
+   `v0.1.0-rc1` from main; (d) check the release page's "Verify this
+   release" block. After the first push, the GHCR packages must be made
+   public.
+11. [ ] (origin: §11 items 1-12) **Macvlan deploy example — vault-core on its own LAN IP** (operator
+    request 2026-08-30, roadmap entry — not yet a scoped work package).
+    Steam clients require plain HTTP on port 80 (Steam's choice), so on
+    a host whose port 80 is already owned by a reverse proxy (Traefik,
+    NPM — the homelab default) vault-core needs a second address. Today
+    that means a host-side IP alias created in the host platform's own
+    UI (so it survives reboots). The comfortable
+    shipped answer: a documented compose override giving vault-core its
+    own LAN IP via a macvlan network — Docker-native, no host network
+    clicks, the established lancache pattern. Must ship as an EXAMPLE
+    with its caveats stated, not as a silent default: the host cannot
+    reach a macvlan container directly (affects the host-side health
+    probes and any same-host DNS rewrite target), the parent interface
+    and address range are operator-specific, and the interaction with
+    the host platform's container manager needs a real test on the
+    deployment this was requested for. Belongs in deploy/examples/ beside
+    minimal-lan and tuned-setup, with a verify recipe; footprint deploy/ +
+    docs only.
+
+### From item 13 B ([archive](plan-archive/v0.1.0-road-a-c.md))
+
+- [ ] (origin: item 13 B) Signed APK: operator creates and backs up the keystore, puts
+  the four `ANDROID_*` secrets into the `release` Environment, then
+  dispatches the publish workflow on the release tag (app/README).
+- [ ] (origin: item 13 B) Standard-user check: `install-task.ps1` (AGENT-FEAT-1, with the
+  AtLogOn trigger) registers the task on a non-admin Windows account
+  (CI's harness runs as admin).
+- [ ] (origin: item 13 B) Real-device checks from the honest open lists
+  (`web/tests/README.md`, `app/README.md`): screen reader, phone
+  cover art, GC against real chunks, multi-client bypass detection,
+  bottom-nav behaviour with Desktop site off.
+- [ ] (origin: item 13 B) Rollout gates (h) and (i) by the operator: re-measure with the
+  DNS rewrite, scheduler on, stack in the operator's stack repo,
+  SQLite dump in the backup job.
+- [ ] (origin: item 13 B) Release notes for `v0.1.0`: the DS-Lite/CGNAT behaviour, the
+  `extra_hosts` requirement with a dedicated `VAULT_CORE_BIND`, the
+  bind-mount precondition (`cache/depot` + `tmp`; since SEC-FIX-5 only
+  `cache/depot` is 101:101, the rest root:root, migrated at start; a
+  rollback to an older image needs the old ownership back).
+  Also, for the release candidate after rc12 (D7 CORE-FIX-4,
+  ADR-0021; user decision 2026-10-04: fixed before `v0.1.0`): a Steam
+  client downloading an app that is NOT in the cache used to open one
+  upstream connection per chunk, so behind DS-Lite/CGNAT a MISS burst
+  could exhaust the subscriber's port quota (first client test,
+  2026-10-04: 1838x `113: Host is unreachable` across 14 edge hosts in
+  ~16 s). Now: new env vars `VAULT_UPSTREAM_EDGE` (compose default
+  `dist-fra1.discovery.steamserver.net`, on out of the box; empty =
+  legacy per-name pool = rollback, which keeps the old limitation),
+  `VAULT_UPSTREAM_MAX_CONNS` (default 16, 1..64, no off switch) and the
+  forwarded `VAULT_PREFILL_MAX_THREADS` (floor for the cap). Behaviour:
+  all MISSes go through ONE pooled edge (the client's Host only has to
+  pass the allowlist), a global cap answers 503 above C concurrent
+  upstream connections, three new log fields (`upstream_host`, `host`,
+  `limit_conn`). Keep `VAULT_UPSTREAM_RATE=4m` with an empty
+  `VAULT_UPSTREAM_RATE_WINDOW` (user decision 2026-10-04) until the
+  post-rollout measurements are stable. Post-rollout check (ADR-0021
+  "After rollout", deploy/README.md): `113` count 0, connect-time
+  dominated by `0.000`, established :80 sockets <= 2C, and the
+  Host-for-all-names inference confirmed (uncached app update without
+  hash mismatch, no edge-mode-only 4xx/5xx). Scheduler mitigation
+  stays: prefill every installed app of an active PC, window e.g.
+  `06:00-24:00`. Windows agent installer notes from
+  AGENT-FIX-2: a re-install keeps the key, client id and (when the
+  registry has none) a working library root from `env.txt`; going back to the hostname-derived id
+  needs uninstall + install; the registry SteamPath wins over an
+  earlier explicit `-LibraryRoot`. AGENT-FIX-3 (release candidate
+  after rc12): the Scheduled Task no longer flashes a console window
+  on every run; it launches `powershell.exe` through
+  `conhost.exe --headless` (direct `powershell.exe` action as before
+  when `conhost.exe` is missing), logging unchanged. Existing installs
+  keep the old action until `install-task.ps1` is re-run once.
+  WEB-FIX-10: the web UI's Windows install command trims spaces
+  around the pasted key (as `install-task.ps1` does), still starts the
+  first report when the download folder cannot be removed (warning
+  only), and its steps say to press Enter once more if nothing happens.
+  DEPS-1 (release candidate after rc12): the vault-api image ships
+  SteamPrefill 3.7.2 instead of 3.7.1 (upstream fix: a DLC depot that
+  links to itself without a manifest no longer breaks a prefill);
+  no setting, flag or file format changes.
+  WEB-FEAT-6: web and app show a running prefill of an already
+  completed game as "Updating" (turning arrows) and a forced re-run of
+  one as "Verifying", instead of "Downloading".
+  CORE-FIX-4d (release candidate after rc12): the HTTPS passthrough's
+  connection caps are tunable via `VAULT_TLS_CLIENT_MAX_CONNS` (per
+  client address, default 64, 1..256) and `VAULT_TLS_MAX_CONNS` (total,
+  default 256, 1..400, per-client <= total); defaults unchanged, an
+  invalid value stops vault-core's boot. A Steam client over the
+  per-client cap retries refused connections at once, which a gateway
+  may log as a SYN flood; count the `status=503` passthrough lines
+  before raising it.
+  API-FIX-5 (release candidate after rc13): newer games get their real
+  cover art instead of the fallback tile. vault-api looks covers up in
+  the background through Steam's store API on `api.steampowered.com`
+  (no key; the list of tracked app ids and the server's address go to
+  Valve, always on), stores them (schema v18, new table) and serves
+  `cover_url`; offline vaults keep the old covers and log one warning
+  per failure streak. A rollback to an older image refuses the v18
+  database (as for every schema bump).
+
+### From item 13 D ([archive](plan-archive/v0.1.0-road-d.md))
+
+- [ ] (origin: item 13 D) **D1 CORE-FEAT-1 — upstream keepalive to the Steam CDN.**
+  nginx pools connections only for named `upstream` groups; a
+  variable `proxy_pass` first looks the name up among the defined
+  groups, then falls back to the resolver. Plan: one `upstream`
+  block per known edge host (`server <host> resolve; keepalive N;`
+  with a shared zone), rendered at container start from a list;
+  unknown hosts keep today's path, so the Host header, the
+  path-faithful store and the loop guard stay unchanged. Before
+  building: measure on production with a handful of requests whether
+  Valve edges keep connections alive. Benefits Steam clients too,
+  which also download through vault-core.
+  **Pulled ahead of `v0.1.0` by user decision 2026-10-02.** ADR-0017
+  accepted 2026-10-02 with decisions 1A 2B 3A 4B 5A 6A (static env
+  list `VAULT_UPSTREAM_POOL_HOSTS`, shipped seed in `.env.example`,
+  `keepalive 8` per edge with a ceiling of 32 idle = at most 4 edges,
+  list changes by container recreate, rate cap untouched plus a CI
+  pin, `error` restored in `proxy_next_upstream`). Measurement done
+  on the operator's DS-Lite line (ADR-0017 "Measurement"): the edge
+  keeps connections alive and holds an idle one for at least 60 s.
+  Ships in `v0.1.0-rc7` together with CORE-FIX-3 (user decision
+  2026-10-03, reversing the earlier Weg B), each switchable off
+  independently; freeze exception in ADR-0016. Packages:
+- [ ] (origin: item 13 D) **D2 AUTH-FEAT-1 — Steam login by QR code from the web UI.**
+  A small own helper on SteamKit2 (`BeginAuthSessionViaQRAsync`)
+  runs in the runner container, emits only the rotating challenge
+  URL, polls, and writes SteamPrefill's `Config/account.config`
+  (refresh token) directly; vault-api relays URL and status only, so
+  no password and no token cross the API. Endpoints behind the API
+  key, short-lived, rate-limited. The terminal login with a Steam
+  Guard code stays as the fallback, because Steam's location check
+  can block app/QR approval when the phone is far from the server.
+  Includes the Settings "Steam session: present / missing" status.
+  Amends ADR-0004 and needs the freeze opened for two endpoints.
+- [ ] (origin: item 13 D) **D3 MULTI-1 — several Steam accounts per household.**
+  SteamPrefill keeps one session per install (`Config/` next to the
+  binary). Plan: one `Config/` per account, the job carries the
+  account, the runner picks the account that owns the app; the
+  library shows the union of several SteamIDs with an owner hint;
+  QR login (D2) per account. The cache itself is already
+  account-agnostic (chunks are keyed by depot path), so a game
+  cached by one account is a HIT for every client in the house.
+  Steam Families sharing is deliberately not pursued for now.
+- [ ] (origin: item 13 D) **D4** IPv6 egress (operator network, optional): Steam CDN
+  hosts publish AAAA records and IPv6 bypasses the CGNAT. The
+  operator's host runs without global IPv6 on purpose; a network
+  decision, not a code change.
+- [ ] (origin: item 13 D) **D5** Named, scoped API keys and per-target payload scoping
+  (Phase 6, already listed there).
+- [ ] (origin: item 13 D) **D6 CLIENT-1 — a proper desktop client** (user request
+  2026-10-03: "moderner und professioneller", no scheduled tasks).
+  Replace the script + Scheduled Task / systemd timer packaging with:
+  a Windows installer (MSI via WiX or Inno Setup, Apps & Features
+  entry, clean uninstall, later winget); a background service that
+  watches the Steam library folders and reports on change, plus a
+  light heartbeat for presence; an optional tray app (status, last
+  report, version, "open Hangar", settings and connection test); set-up
+  by pairing from the web UI's "PCs" list (short code or QR) instead
+  of typing the API key, ideally one revocable key per PC (D5);
+  update offers driven by `GET /v1/about` (follow-up from WEB-FIX-8:
+  a real "newer release available" check against GitHub releases
+  belongs here too, so the About table can say "Update available"
+  instead of only comparing vault-core with vault-api; it needs an
+  egress decision, since vault-api reaches the internet only through
+  the egress proxy's allowlist and GitHub is not on it); code signing
+  (SmartScreen) as an explicit cost decision; Linux/SteamOS as a package with a
+  systemd user service. Open decision: service + tray (reports
+  without a logged-on user, sees all users' libraries, needs admin to
+  install) versus tray-only (per user, no admin).
+- [ ] (origin: item 13 D) **D7 CORE-FIX-4 — hard cap on concurrent upstream connections**
+  (user decision 2026-10-04, after the first Steam-client MISS test
+  behind CGNAT; see the release-notes item in B). The ADR-0017 pool
+  caps idle connections per listed edge (8 per group, at most 4
+  groups); it does not cap in-flight connections, and a Steam client's
+  concurrency is not ours to cap. Research first what nginx OSS
+  offers (`max_conns` without the Plus-only `queue`, `limit_conn` on
+  the client side, a local forward proxy with a connection pool),
+  and whether pooling by edge name fits when a client uses 14 edges.
+  Needs an ADR-0017 addendum and a freeze note.
+  **Timing (user, 2026-10-04): BEFORE `v0.1.0`**, not after the tag;
+  designed in ADR-0021 (one pooled edge, global `limit_conn` cap),
+  built as CORE-FIX-4a..4d. 4a (core: hook, configs, preflight, drift
+  check, Dockerfile, hook test, ADR-0016 freeze note) is the first
+  package; the box stays open until 4b-4d are done.
+  **Status:** 4a (core), 4b (live verify checks) and 4c (compose
+  forwarding with edge mode on by default, `.env.example`, deploy and
+  core docs, release notes) are done; 4d is done in changed form
+  (user decision 2026-10-09, "Weg A"): instead of lowering the 443
+  passthrough caps to 32/16 they are operator-tunable
+  (`VAULT_TLS_CLIENT_MAX_CONNS` default 64, `VAULT_TLS_MAX_CONNS`
+  default 256, ADR-0021 addendum 2026-10-09). **Measured 2026-10-10**
+  (operator line, client on `:80`): 0x `113` errors, upstream connect
+  time ~0, 16-23 upstream sockets, no SYN floods. **Still open**, so
+  the box stays unticked: the `:443` measurement and the default of
+  `VAULT_TLS_CLIENT_MAX_CONNS` (WORKPACKAGES carry-over 2). Related
+  open measurement: CAP-503-LOOP-1 (roadmap audit list).
+- [ ] (origin: item 13 D) **D8 SCHED-FEAT-1 — weekday schedules, several windows per day** (user request
+  2026-10-04: "the night check is no use if I come home at 17:00 and
+  the update came during the day"). Today `schedule_window` is one
+  `HH:MM-HH:MM` range (editable in Settings, applies at the next
+  sweep); allow a list of ranges. Until then `06:00-24:00` covers it.
+  Scope extended by the user on 2026-10-04: per-weekday schedules and
+  several different windows per day (e.g. Mon-Fri 12:00-16:00 and
+  22:00-06:00, weekend all day). The download-rate cap window
+  (`VAULT_UPSTREAM_RATE_WINDOW`, env-only in vault-core) must follow
+  the same schedule, or be replaced by it.
+  **Rate per window** (user 2026-10-14 "nachts ungedrosselt tagsüber
+  gedrosselt", 2026-10-15 "off testen für das nachtfenster"; folded in
+  2026-10-16): several windows per day, a "throttle" checkbox per
+  window, and an unthrottled window also works with the scheduler off
+  (it then only lifts the rate cap). Since rc18 there is one download
+  window (D16a-1); `VAULT_UPSTREAM_RATE_WINDOW` stays a deprecated env
+  pin until D8 replaces it.
+- [ ] (origin: item 13 D) **D29 PAIR-2 — proper device pairing** (labelled "D9 PAIR-2"
+  here until 2026-10-16, which clashed with roadmap D9 TOOL-APPS-2;
+  follows PAIR-1, user decision 2026-10-04). PAIR-1 hands every new
+  device the one shared API key. Replace that with short-lived pairing
+  codes (the web UI shows a code or QR valid for minutes, the device
+  trades it for its own
+  key) and one named, revocable key per device, so removing a phone or
+  PC revokes only its key. Builds on D5 (named, scoped API keys) and is
+  the pairing step D6's desktop client needs. Needs new endpoints, so
+  an ADR and the freeze opened; the `steamhangar://pair` URI gets a
+  `v=2` with a code instead of a key.
+
+### From rc19 ([archive](plan-archive/rc19.md))
+
+- [ ] (origin: rc19) **rc19 Downloads and card block** (run 2026-10-15/16; details in
+  `docs/handover/rc19-run-plan.md` and
+  `docs/handover/post-0.1.0-roadmap.md`; tag not yet cut).
+- [ ] (origin: rc19) **rc19.2 follow-ups** (2026-10-16, patch release on top of rc19)
+- [ ] (origin: rc19) **rc19.3** (2026-10-16, throughput diagnostics and tuning switches)
+  - LIVE-DELAY-1 (client downloads show more than 1 min late on the
+    Downloads page) moved to the rc20 block below (user decision
+    2026-10-16): analysis and fix before DOWNLOADS-1.
+
+### From rc20 ([archive](plan-archive/rc20.md))
+
+- [ ] (origin: rc20) **rc20 web redesign** (decided 2026-10-16, mockup round with the
+  operator; reference: `docs/design/rc20/`, run notes:
+  `docs/handover/rc20-run-plan.md`). The redesign packages are web
+  only, no schema change, no new env value. Order: LAYOUT-1 and
+  SHEET-MOTION-1 first (shared base), then the page packages;
+  LIVE-DELAY-1 lands before DOWNLOADS-1. The three non-web packages
+  below (user decisions 2026-10-16) ride in the same rc.
+  - [ ] nit (LIBRARY-DETAIL-1): tab keyboard focus is lost on a structural
+    re-render of the detail sheet; `.detail-box-danger` hard-codes an rgba
+    (no `--danger-soft` token yet); optional `tabindex=0` on tabpanels;
+    move `add-device-sheet.js` onto `components/tabs.js`
+  - [ ] nit: Exit animation for the nine confirm-dialog call sites
+    (.dialog-backdrop toggles .on directly; currently animates in only)
+  - [ ] nit: Add-a-device tabs have no icons and the dialog has no
+    numbered steps, unlike the mockup (`docs/design/rc20/`)
+  - [ ] nit (DOWNLOADS-1): the generic failure text could add "If it fails
+    again, check the log"
+  - [ ] nit (LIBRARY-1): hard-coded CSS fallbacks (`--tool-h` is not in
+    theme.css) and a stale header comment in `library.js`
+  - [ ] **Rework after the operator's visual check (2026-10-17).** The
+    packages above shipped the structure of the mockups (columns, tabs,
+    nav, split button, drag queue) but not their anatomy: the page
+    title, tiles, pills, section labels, segs and field cards were
+    re-styled per page from the old primitives, so every page reads as
+    "old look, new layout". Root causes and remedies are the UI kit
+    (`docs/design/rc20/kit.html`, approved 2026-10-17) and web
+    screenshot goldens. Decisions: Clients cards one per row in three
+    zones; Downloads hero with the four totals beside the graph and
+    three columns below; `--dim-2` raised to about #7A91A0 (5:1) and
+    no text below 11px; pills wrap the existing `status-icon.js` disc
+    (shape first, word second, colour third; glyph box 60% of the disc;
+    motion means "right now" and stays as is).
+    - [ ] nit (DOWNLOADS-2 review): the bypass banner (`.banner-wrap`,
+      `--w-text`) is narrower than the Downloads page at BP-M.
+    - [ ] nit (WEB-GOLDENS-1 review): goldens for one open sheet per page
+      (library detail, add a device) deferred; `dev.sh test-web-shots`
+      is operator infrastructure, requested as Antrag A-20261017-01.
+- [ ] (origin: rc20) **rc20.x (optional patch)**: new defaults for `VAULT_NGINX_AIO` /
+  `VAULT_NGINX_WORKERS` only if the Sunday cold-game test (ADR-0027,
+  box in the rc19.3 block) says so, with a new ADR carrying the numbers;
+  otherwise the item moves to rc21. Test 2026-10-18: AIO qualifies
+  (about 5-7 times faster cold, link-limited), WORKERS=2 gets no default.
+  rc20.2 is taken, so the slot is rc20.3 or rc21: open decision
+  AIO-DEFAULT-1 in the roadmap (Weg A code default + ADR, B prod `.env`
+  only, C both, D measure more).
+  - [ ] VERIFY-COLD-1: verify window back on after AIO is live on prod
+    (user decision 2026-10-18); devbox watches the first verify run.
+    AIO is live on prod since 2026-10-18 12:40Z (A-20261018-02; idle
+    heartbeat from outside 5x 200 in 0.8-0.9 ms). Prod has
+    `VAULT_SCHEDULE_WINDOW=off` pinned in `.env`, so the window cannot
+    be switched in Settings. Decided 2026-10-18: Weg A, a manual
+    verify run (Complete all / Verify on several large games) started
+    by the operator AFTER his vacation; the devbox probes the heartbeat
+    every 5 s, iostat partition lines and the duration.
+    Pre-measurement 2026-10-18 20:40-21:08 (prod rc20.2, AIO=threads,
+    Auto-GC dry-run; manual Verify of Enshrouded, AC Black Flag
+    Resynced, Gothic 1 Remake, Hogwarts Legacy done, No Man's Sky
+    stopped; cache partly warm, no drop_caches): heartbeat from outside
+    327 probes, all 200, p50 0.9 ms, p95 3.0 ms, max 9.1 ms (without AIO
+    on 2026-10-18: up to 7.6 s); the four data partitions read about
+    209 MB/s summed (p50, max 236 MB/s, incl. parity); about 238 GB in
+    ~25 min (approximate, job times not taken exactly). Every job: all
+    HIT, "0 depots observed", Auto-GC queued in dry-run mode (A-20261018-03
+    check done). Open for the full run: cold data, exact job durations.
+  - [ ] nit (AUTO-VERIFY-1): local `dev.sh test-web-shots` fails
+    `clients-pair-shown-400` at 0.42 % inside the QR (the case encodes
+    the serving URL/port); pin a fixed URL in the case. Android
+    Downloads note does not read `auto_complete_cached` yet (says
+    "complete automatically" when off).
+    Also Android: the setting renders as a free-text field, not an
+    Off/On toggle (`SettingsScreen.kt:316-341` special-cases only
+    auto_gc, sweep_include_cached, webhook_events); Android demo
+    (`DemoState.kt` ~920, `scheduleOut()`) lacks `auto_complete_cached`.
+  - [ ] nit (MOBILE-1b review): real "Download app" button state is in
+    no golden (pairing cases render the demo note); no real-device
+    check of safe-area insets yet.
+  - [ ] nit (GROUP-VERIFIED-1 review): `routers/games.py:175-185`
+    comment and api/README.md (~646, event-sweep section ~4470) still
+    describe the old `last_manifest_check` rule; flaky
+    `web/tests/clients-merged-card-wiring.test.js:103-108` (2 s wall
+    clock under full-suite load: wait for the event or raise it).
+  - [ ] nit (MOBILE-1b review): Library toolbar at 1000 px puts the
+    search (180 px) and the chips in a narrow left column under the
+    title (on main already, not changed by MOBILE-1b); check against
+    the kit layout.
+  - [ ] nit (UI-COLD-CACHED-1 review): no backoff when walks keep
+    failing (one ERROR per expired read, bounded by request rate);
+    theoretical waiter starvation after a failed walk; the Thread.start
+    test patches `threading` process-wide
+  - [ ] nit (TP-REPORT-2 review): `parse_probe` accepts `nan`/`inf`/
+    negative values (core/tools/throughput-report.py:327-342, 365);
+    README probe example `date +%s.%N` needs a `%s` fallback.
+
+### From rc21 ([archive](plan-archive/rc21.md))
+
+- [ ] (origin: rc21) **rc21 — Android parity and cache health** (cut 2026-10-17; web
+  and API packages first, Android packages and golden images only after
+  the operator's rc20 visual check; no rc21 tag without the operator's yes;
+  rc20 visual check PASSED, operator 2026-10-18: Android packages unblocked)
+  - [ ] nit (CACHE-REPAIR-UI-1 review): the sheet's Repair buttons use
+    `withButtonBusy` (`disabled`, no "Checking…") unlike the Downloads row
+    (aria-disabled + "Checking…"); demo route has no `not_owned` 409
+    branch; a flow closed during execute only re-reads the store, no toast
+  - [ ] nit (TEST-HYGIENE-1 review): Lint 3 blind spots (guard
+    ancestors must all appear in the rule's ancestors, so
+    `.kit .grid.selecting .pick` vs `.kit .card .pick[hidden]` is not
+    flagged; `.kit.<page>` treated as `.kit`) should be stated in the
+    lint header; ten web test files still use `until(..., 2000)`
+    (clients-live, clients-view-wiring, clients-nav-refresh,
+    clients-rename-wiring, steam-library-setting, onboarding-steamid,
+    downloads-names-loading, downloads-layout, downloads-updates-wiring,
+    downloads-owned-preloaded).
+  - [ ] nit (FIX-POP-HIDDEN-1): `.pop` has no box-shadow and
+    `.pop.menu` min-width is 100% where the Library mockup shows 260px
+    plus shadow; dead `.cl-list > p` rule; the Clients empty state repeats
+    the "Add a device" accessible name.
+  - [ ] nit (UNMAPPED-FLAG-1, VERSION-HEALTH-1): `get_game` scans all of
+    `depot_manifests` for one appid (add `AND appid = ?`); library card
+    keeps the green check at 100% with unmapped depots and Android lacks
+    the note (Android parity package); VERSION-HEALTH-1 chose the startup
+    log line, `/v1/health` stays a fixed body (fingerprinting decision)
+  - [ ] nit (rc20 reviews): CLIENTS-3 `tab:null` wiring check is a regex
+    over source (use a spy); `getSettings` call on Clients has no guard
+    against a detached view; tile wording "Version differs from the
+    server" could read "differs from the server version"
+  - [ ] nit (rc20 reviews): SETTINGS-1 nav label "Other settings" is
+    vague; stale comment about the `api.schedule()` refetch after save
+    in `settings.js` (check whether `state.schedule` is still needed)
+  - [ ] nit (rc20 reviews): LIVE-DELAY-1 `active_clients` under-reports
+    for up to 5 minutes after a vault-api restart (ring not filled yet);
+    no test for a live answer with the feed ok but `active_clients`
+    null or missing
+  - [ ] nit (GRAPH-RECENT-1 review): the newest, still-open bucket is
+    divided by the full bucket length, so early in a minute it draws far
+    below the header speed (N1, handed to RUNNER-SPLIT-1); summary tiles
+    (served, average, peak, hit rate) and job-card speeds stay swept, so
+    the graph's newest point can briefly exceed "Peak"; Android demo
+    `watcher_window_seconds = 30` vs web 60 (`DemoTraffic.kt:210`) and
+    Android ignores the new `now` block (header and "Loading now" still
+    lag there: Android Downloads follow-up); a brand-new PC loading
+    before its first sweep counts in "Loading now" but has no Clients
+    card yet; runner traffic counts as client traffic in the ring until
+    a sweep extends the runner's address window on a new UTC day
+    (relevant for NOW-LOADING-1).
+  - [ ] nit (RUNNER-SPLIT-1 review): redundant `when is not None` in
+    `_series_point` (traffic.py ~748); `/v1/throughput/live` still divides
+    its running 5/15/60 s point by the full bucket length (N1 fixed only
+    for the series); a running ring bucket that only partly covers its
+    bucket (api restarted mid-bucket) still reads too low; demo summary
+    says the runner was 60 % HIT while its points say 0 % (kept for
+    golden stability). Android: read the runner split, add the
+    "Verifying" pill and count runner HITs as cache in the graph.
+  - Android package cut (orchestrator, 2026-10-31, operator's yes to run
+    rc21 incl. Android): each package builds and tests only in GitHub CI
+    (push `wp/*`, app goldens via a `wp/<name>-goldens` branch).
+    - [ ] nit (ANDROID-DL-1 review): `ClientsScreenshotTest.kt:96`
+      `heightDp = 640` cuts the 360dp/font130 Downloads golden through the
+      axis captions and hides the legend (raise to ~760 with the next app
+      goldens round, ANDROID-DL-2); Kotlin `splitGeometry` always draws
+      the split (fields default to 0) where the web falls back to one
+      line; TalkBack focus stays on "Show N more" (web moves it to the
+      first new row); the two graph fills are hard to tell apart in the
+      night golden (REDESIGN-1b); import order in `DownloadsStats.kt`.
+    - [ ] nit (ANDROID-GAPS-1 review): the Rename button leaves an empty
+      band at the bottom of nameable Clients cards (`ClientsScreen.kt:273`,
+      REDESIGN-1a); busy dialog buttons are not visually disabled (guards
+      exist); `startLibraryLookup` guard could also check
+      `lookupJob?.isActive`; leaving onboarding via Cancel/Demo or an
+      activity recreate still cancels a running lookup; Look up uses the
+      current step-1 fields, not the verified ones; no Remove on the
+      Clients page cards (web has it, REDESIGN-1a); demo Delete history
+      does not zero the synthetic traffic like the web demo's "since" cut.
+    - [ ] nit (ANDROID-DL-2 review): focus after "Show more" goes to a
+      wrapper Box (input focus; TalkBack accessibility focus may not
+      follow, check on a device); "Show job" only scrolls, no focus;
+      Repair only in the sheet's completeness block (web also in header
+      and Maintenance tab, REDESIGN-1b); a flow reset during execute only
+      re-reads (inherited from the web).
+    - [ ] nit (ANDROID-REDESIGN-1a review): `SectionLabel` sets
+      `contentDescription` on an uppercase Text; inside merged cards
+      TalkBack may read "Connected, CONNECTED" (check on a device; else
+      `clearAndSetSemantics { text = ... }`); 12dp gap above DEVICES
+      before the first answer; no agent-only cards when the overview
+      returns 404 (web shows them); footer buttons wrap below a long
+      last-active line; no golden for the bypass row or the empty state;
+      the PC list is fetched twice while the PCs sheet is open.
+    - [ ] nit (ANDROID-REDESIGN-1b review): `DETAIL_TABS_TAG` unused
+      (use it in the 1c sheet screenshot test or drop it); the Overview
+      "Cache" fact lacks `groupCompletenessLine` (group figure only on
+      Maintenance); the graph grew 72 -> 88dp; accepted deviations to note
+      in rc20-visual-check.md so the device check does not flag them:
+      Filters only with metadata, store details first on Overview
+      (CARD-LAYOUT-1 pin); `strings.xml:210` hint `http://192.168.1.50:8080`
+      belongs to SAMPLE-IP-1.
+    - [ ] nit (ANDROID-REDESIGN-1c review; KDoc and Overview ISO times fixed in POLISH-1): hero runner mini item and the
+      0-devices caption descriptions differ from the web tile titles;
+      downloads_stats shot heights 1000/1250 leave empty canvas;
+      the "Surveyor Outfits" package row squeezes its name at 360dp/1.3.
+    - [ ] nit (ANDROID-POLISH-1 review): `assertOneControlRow` does not
+      check the sort button (`LibraryScreenshotTest.kt:646-659`);
+      `EXPERT_SECTION_ID` duplicates the id literal from
+      `SettingsLayout.SECTIONS`; import order in `GameDetailSheet.kt:67`;
+      at 360dp/1.3 with metadata Select still wraps alone (documented
+      worst case).
+    - [ ] nit (APP-NIGHT-GOLDEN-1 review): a blind golden refresh would
+      silently accept a changed night shot; add a test asserting the
+      night shot equals its notnight twin pixel for pixel.
+  - Cancel question (NOW-LOADING-1, answered from code, reviewer-checked;
+    no prod measurement): a cancelled job's SteamPrefill does not keep
+    loading. `cancel_job` only sets `stop_request` (jobs.py ~894-990);
+    the runner polls it every 0.2 s (prefill.py:122, prefill_runner.py
+    ~215-251) and stops the child with SIGTERM, then SIGKILL after 5 s
+    (prefill.py ~750-781); the job reads "cancelled" only after the
+    process is reaped (prefill_runner.py ~281-298, worker.py ~376-383,
+    ~918-921). The operator's screenshot (pill "Downloading", ACTIVE
+    empty) was log flush (5 s, nginx.conf.template:671) plus window lag,
+    on rc20.2 the swept 5-minute pill.
+  - [ ] nit (NOW-LOADING-1 review): `addrs_listed` ignores the
+    clients/runner scope (an address listed only under the runner card
+    counts as known on the client side); each loading poll reads all of
+    `agent_reports` at the 3 s live rate; device count counts addresses
+    while rows group by agent ("2 devices loading", one row); demo job
+    card shows 31.5 MB/s (swept window) next to a 6.4 MB/s runner row.
+  - tuning defaults from the Sunday test, if not shipped in rc20.x
+    (the rc20.x box moves here)
+  - [ ] nit (RUNNER-RETRY-1 review): `runner_mark.announce` runs once
+    before attempt 1, a successful retry may run unmarked
+    (prefill.py:611, worker.py:326); runner_identity.py docstring
+    "at most VAULT_PREFILL_TIMEOUT_SECONDS" is now up to 3x plus pauses;
+    stub_prefill `lancache_failures.txt` counter never reset.
+
+### From rc21.1 ([archive](plan-archive/rc21.1.md))
+
+- [ ] (origin: rc21.1) **rc21.1 — mapping and name fixes from the prod rollout** (operator
+  decision 2026-11-01: patch, not rc22, with every item below incl.
+  PAUSE-ALL-GC-1, JOB-SIZE-1 and RUNNER-NAME-1; `dev.sh diag db` requested
+  in Antrag A-20261101-02)
+  - MAP-ATTRIB-1 review (2026-11-01, simulated on a read-only export of
+    prod): the cleanup also removes (1465471, 1203620) — Enshrouded
+    holding 1465470's depot — and Enshrouded's own depot 1203621 is not
+    mapped on prod although its own recorded manifest (job 205,
+    2026-10-31) and the oracle list name it (replace-step drift, MAP-DRIFT
+    family). Added to MAP-ATTRIB-1: the one-time step also restores a
+    missing own mapping when the app's own recorded manifest AND its
+    oracle list both name the depot; the step stamps once the temp cache
+    was readable (skips logged for the operator), so it never becomes a
+    permanent startup rule. The rc21.1 rollout Antrag must list the
+    expected removed and restored pairs.
+    Final expected prod effect (reviewer simulation on a full read-only
+    export, b97a62e): removed (436781, 3624140), (553851, 3624140),
+    (553854, 3624140), (1716751, 3624140), (1465471, 1203620); restored
+    (292033, 292030), (292036, 292030), (1203621, 1203620) — restores only
+    from the app's own record (containing_appid A or NULL) whose gid equals
+    the oracle public gid. Depot dirs measured on prod 2026-11-01 (operator,
+    read-only): 292033 3.47 GiB, 292036 3.77 GiB, 1203621 42.97 GiB, all
+    present; these are the "unmapped" depots of the storage balance.
+  - [ ] nit (PAUSE-ALL-GC-1 review): a paused GC also blocks
+    miss-triggered prefills for its app (documented); a paused execute GC
+    resumed after switching VAULT_AUTO_GC still executes (documented,
+    cancel instead); GcFlowTest "an unrecognized job status keeps
+    polling" also asserts the known status "queued" (rename or use a second
+    unknown status).
+  - [ ] nit (TOOL-NAMES-1 review): a cached, not-owned app (prod 1716750
+    Ubisoft Connect) gets a one-off oracle verdict from the name lookup
+    and shows "Update available" it cannot act on until the not_owned
+    window expires; consider hiding update_available for not_owned apps.
+  - [ ] nit (MAP-LOSS-1 review): a depot Steam moved away keeps its old
+    row (keep-only, GC keeps more) and can leave an old completeness target
+    ("Update available"/"not verified") until DELETE /v1/mapping; the
+    oracle list also keeps an existing package-depot row on the game
+    (docstring should say so); the kept-reason line names all three
+    sources at once.
+  - [ ] nit (MAP-ATTRIB-1 review): one oracle_branch_manifests query per
+    restore candidate; the inlined `apps` INSERT duplicates upsert_mapping
+    on purpose (it commits inside BEGIN IMMEDIATE).
+  - [ ] nit (STORAGE-BALANCE-1 review): the balance line is skipped
+    when a job or GC invalidated the size snapshot and nothing read the
+    sizes since; the expert card is in no golden (Expert panel hidden in
+    every golden view).
+  - [ ] nit (JOB-SIZE-1 review): the live runner speed counts all of
+    the runner's depots, so a completeness ETA can run a little short;
+    a not-yet-applied runner period leaves runner-scoped figures at 0
+    for up to one sweep; `etaSmoother` keeps a rate across leaving and
+    re-entering Downloads (clear it on mount); the preview total
+    includes owned DLC and language depots (older D19 behaviour).
+  - [ ] nit (RUNNER-NAME-1 review): mini line "SteamHangar 25.6 GB of
+    it" could read "By SteamHangar: ..."; KDoc line widths in
+    ClientsPage.kt / DownloadsHero.kt; web/tests/now-loading.test.js:47
+    uses 192.168.1.50 (SAMPLE-IP-1).
+  - [ ] nit (ANDROID-RC21-1-TWINS review): StorageBalanceCardTest uses
+    contains-style pins (use assertCalledFrom like D15dWiringTest);
+    `smoother.observe` runs as a composition side effect (idempotent); a
+    malformed `storage_balance` fails the whole summary decode on Android.
