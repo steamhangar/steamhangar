@@ -665,6 +665,17 @@ their open boxes (items 2, 7 and 11) are in section 12. Item 13 stays here.
         (fixed in NITS-APP-1: `DownloadsStats.kt` imports sorted, KDoc on
         `VerifySpeedTest.poll`)
       - [ ] DEV-MODS-1 live check once the operator loads the mods as
+        (partly checked 2026-11-01 after A-20261101-05: read-brake refuses
+        a whole read of `docs/WORKPACKAGES.md` with the grep hint, a ranged
+        read of `PROJECT_PLAN.md` passes; the core accepts output-trim's
+        rewritten Bash result (marker shown), but on `dev.sh test-web`
+        (13,520 TAP lines) it omitted only 596 lines and gave no file
+        hint, so the harness still persisted 528 KB: finding
+        OUTPUT-TRIM-TAP-1, trim TAP `ok`/YAML blocks to the summary plus
+        `not ok` blocks; token-meter writes counters only, under
+        `~/.claude/plugins/data/token-meter/<session>.jsonl` (=
+        `CLAUDE_PLUGIN_DATA`). Open: `/tokens`, `/ci`, `/antraege`, `/wp`
+        are user commands, the operator checks them)
         managed mods (Antrag after 1a): core accepts output-trim's rewritten
         Bash result (`{ result, context }` and the `isError` branch); which
         directory `CLAUDE_PLUGIN_DATA` really resolves to.
@@ -712,13 +723,20 @@ their open boxes (items 2, 7 and 11) are in section 12. Item 13 stays here.
         start; `LiveTier.active_clients()` stays address-based (tests only);
         a mid-file start without a complete line uses the read moment as
         `_data_from` (one bucket can read slightly high).
-      - [ ] VERIFY-FAST-1 dev.sh part (Antrag A-20261101-06: `dev.sh verify`
+      - [x] VERIFY-FAST-1 dev.sh part (Antrag A-20261101-06: `dev.sh verify`
         defaults to lean, `verify full` runs everything) (operator decision
         2026-11-01: Weg A, lean default; release gate becomes `verify full`) and the first lean
         measurement incl. the live check of the 6d stand-in chunk. Full run
         on the worktree 2026-11-01: 627 PASS / 0 FAIL, sections 1-11 287 s
         (s1 1, s2 10, s3 3, s4 40, s5 31, s6 59, s7 8, s8 12, s9 26, s10 76,
         s11 18, cleanup 3; image builds not timed).
+        Checked 2026-11-01 after A-20261101-06 on main 6827739: `dev.sh
+        verify` = `VERIFY_SECTIONS=lean`, 207 PASS / 0 FAIL in 26 s, 6d
+        seeds the local stand-in chunk (101:101) and passes; `verify full`
+        627 PASS / 0 FAIL in 274 s, no skip lines; `verify bogus` exits 2
+        before the verify stack starts. Finding DEVSH-VERIFY-ARGS-1
+        (operator side, dev.sh): `verify bogus` stops the dev stack first
+        and only then rejects the argument; validate before stopping.
       - [ ] nit (VERIFY-FAST-1 review): steps of sections 1-3 and 7-11 are
         selectable only as whole sections; non-preset subsets are for
         debugging only (hidden on-disk state between steps).

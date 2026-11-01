@@ -2040,6 +2040,15 @@ and VERIFY-COLD-1 is prose in the Sunday-test box of the rc19.3 block.
   same eviction and the same client. The two AIO runs differed by 1.4 %.
   Cause unknown (ZFS metadata or prefetch state, other host load). Repeat
   baselines in future tuning tests; one baseline is not enough.
+- **OUTPUT-TRIM-TAP-1 (dev tooling, found 2026-11-01):** the DEV-MODS-1
+  output-trim mod omitted only 596 of 13,520 lines of `dev.sh test-web`
+  (node TAP) and gave no file hint, so the harness still persisted 528 KB.
+  Candidate: for TAP output keep the summary plus every `not ok` block and
+  drop `ok` lines with their YAML blocks; name the full-output file.
+- **DEVSH-VERIFY-ARGS-1 (operator dev.sh, found 2026-11-01):** `dev.sh
+  verify <bad id>` stops the dev stack before verify-stack.sh rejects the
+  argument (exit 2). Candidate: validate the section list before stopping
+  (Antrag when convenient; the dev stack needs `dev.sh up` afterwards).
 - **HIT-PATH-1 (measurement):** the server-to-client HIT throughput (~91
   Mbit/s seen) has only an idle baseline. Partly answered 2026-10-18:
   with AIO the hit path reached 726-741 Mbit/s average and about 940 Mbit/s
