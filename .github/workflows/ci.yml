@@ -1000,6 +1000,7 @@ jobs:
         run: |
           shellcheck --severity=warning -e SC1007 \
             deploy/tests/verify-stack.sh \
+            deploy/tests/verify-sections.sh \
             deploy/proxy/*.sh \
             dns/docker-entrypoint.sh \
             core/docker/*.sh
@@ -1133,4 +1134,10 @@ jobs:
         # Docker, the Compose v2 plugin, dnsutils (dig) and Python 3
         # preinstalled, which is everything the script needs; no extra
         # package installs.
+        # WP VERIFY-FAST-1: the nightly gate runs EVERY section. `full` is
+        # also the script's default, set here explicitly so a later default
+        # change (or a lean preset meant for the dev instance) can never
+        # thin out this job silently.
+        env:
+          VERIFY_SECTIONS: full
         run: bash deploy/tests/verify-stack.sh
