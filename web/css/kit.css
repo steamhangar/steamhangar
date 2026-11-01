@@ -715,6 +715,15 @@
 .kit.view-settings .about-head-text p{ margin:0; }
 .kit.view-settings .about-table{ margin-top:0; font-size:var(--fs-3); }
 .kit.view-settings .about-table .about-row > th, .kit.view-settings .about-table .about-row > td{ vertical-align:middle; }
+/* RELEASE-SPLIT-1c: product version line and component list above the table. */
+.kit.view-settings .about-release{ display:grid; gap:var(--sp-2); margin:0 0 var(--sp-3); min-width:0; }
+.kit.view-settings .about-release-line{ margin:0; font:600 var(--fs-4)/1.35 var(--ui); color:var(--text); overflow-wrap:anywhere; }
+.kit.view-settings .about-release-list{ display:grid; grid-template-columns:max-content minmax(0, 1fr); gap:4px var(--sp-3); margin:0; font-size:var(--fs-3); }
+.kit.view-settings .about-release-item{ display:contents; }
+.kit.view-settings .about-release-list dt{ color:var(--dim); }
+.kit.view-settings .about-release-list dd{ margin:0; min-width:0; overflow-wrap:anywhere; }
+.kit.view-settings .about-release-list .mono{ font-family:var(--mono); }
+.kit.view-settings .about-release-since{ color:var(--dim); }
 
 /* Save bar: one row (dot + status | Discard | Save), sticky at the bottom
    of the right column, above the phone's bottom nav (--nav-h is 0 once the

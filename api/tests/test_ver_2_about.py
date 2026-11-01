@@ -151,7 +151,8 @@ def test_health_stays_fixed_and_version_free(client: TestClient) -> None:
 
 def test_about_lists_six_components_in_fixed_order_with_exact_fields(client: TestClient) -> None:
     body = client.get("/v1/about", headers=HEADERS).json()
-    assert list(body) == ["components"]
+    # RELEASE-SPLIT-1c added `release` (test_release_split_1c.py).
+    assert list(body) == ["components", "release"]
     assert [c["name"] for c in body["components"]] == NAMES
     for c in body["components"]:
         assert set(c) == {"name", "version", "commit", "status", "checked_at", "detail"}

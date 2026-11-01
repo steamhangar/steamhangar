@@ -883,7 +883,8 @@ jobs:
           # `_BUILD` the version stamped on the baked files, `_MINIMUM` the
           # oldest client the server supports (`minimum_version` in
           # .github/components.json). All are versions from the secret-free
-          # component-plan job.
+          # component-plan job. WP RELEASE-SPLIT-1c: the server component's
+          # version for GET /v1/about (`release`), also api/Dockerfile only.
           build-args: |
             VAULT_VERSION=${{ needs.build-version.outputs.version }}
             VAULT_COMMIT=${{ needs.build-version.outputs.commit }}
@@ -893,6 +894,7 @@ jobs:
             VAULT_APP_VERSION=${{ needs.component-plan.outputs.app_version }}
             VAULT_APP_BUILD=${{ needs.component-plan.outputs.app_artifact_version }}
             VAULT_APP_MINIMUM=${{ needs.component-plan.outputs.app_minimum }}
+            VAULT_SERVER_COMPONENT_VERSION=${{ needs.component-plan.outputs.server_version }}
 
       # Review round 2 (S3): a green build here proves buildx SUCCEEDED,
       # not that what got pushed is what was declared -- exactly the gap
@@ -2196,8 +2198,51 @@ jobs:
           APK_SHA256: ${{ needs.android-build.outputs.apk_sha256 || needs.android-reuse.outputs.apk_sha256 }}
           APP_VERSION: ${{ needs.component-plan.outputs.app_artifact_version }}
           AGENT_VERSION: ${{ needs.component-plan.outputs.agent_artifact_version }}
+          # WP RELEASE-SPLIT-1c: the "Components" block (ADR-0031 item 9):
+          # each component's version from the plan, and whether this run
+          # built it. All from secret-free jobs.
+          PRODUCT_VERSION: ${{ needs.build-version.outputs.version }}
+          SERVER_COMPONENT: ${{ needs.component-plan.outputs.server_version }}
+          AGENT_COMPONENT: ${{ needs.component-plan.outputs.agent_version }}
+          APP_COMPONENT: ${{ needs.component-plan.outputs.app_version }}
+          SERVER_BUILT: ${{ needs.component-plan.outputs.server_build }}
+          AGENT_BUILT: ${{ needs.component-plan.outputs.agent_build }}
+          APP_BUILT: ${{ needs.component-plan.outputs.app_build }}
         run: |
           set -eu
+          # WP RELEASE-SPLIT-1c: one line per component. A component whose
+          # version is this release's was rebuilt; an older one is
+          # "unchanged since" its version (plus "rebuilt" when a dry run
+          # still built it). Fails closed on a malformed plan output.
+          release_re='[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+(\.[0-9A-Za-z]+)*)?'
+          component_line() {
+            label="$1"; version="$2"; built="$3"
+            if ! printf '%s' "$version" | grep -Eqx "$release_re"; then
+              echo "::error::component-plan version for ${label} is '${version}', not a release version" >&2
+              return 1
+            fi
+            case "$built" in
+              true|false) ;;
+              *) echo "::error::component-plan build flag for ${label} is '${built}', not true|false" >&2; return 1 ;;
+            esac
+            if [ "$version" = "$PRODUCT_VERSION" ]; then
+              echo "- ${label} \`${version}\` -- rebuilt"
+            elif [ "$built" = "true" ]; then
+              echo "- ${label} \`${version}\` -- unchanged since ${version}, rebuilt"
+            else
+              echo "- ${label} \`${version}\` -- unchanged since ${version}"
+            fi
+          }
+          if ! printf '%s' "$PRODUCT_VERSION" | grep -Eqx "$release_re"; then
+            echo "::error::product version '${PRODUCT_VERSION}' is not a release version" >&2
+            exit 1
+          fi
+          components="$RUNNER_TEMP/release-components.md"
+          {
+            component_line Server "$SERVER_COMPONENT" "$SERVER_BUILT"
+            component_line Agent "$AGENT_COMPONENT" "$AGENT_BUILT"
+            component_line App "$APP_COMPONENT" "$APP_BUILT"
+          } > "$components"
           # WP CI-FIX-DIST: an APK was signed but its certificate output is
           # empty (e.g. dropped as secret-like) -- say so instead of
           # printing "No signed Android APK" on a release that has one.
@@ -2237,6 +2282,13 @@ jobs:
           {
             echo ""
             echo "<!-- steamhangar:verify:start -->"
+            echo "## Components"
+            echo ""
+            echo "SteamHangar \`${PRODUCT_VERSION}\`. Each component carries the release in"
+            echo "which it last changed (ADR-0031):"
+            echo ""
+            cat "$components"
+            echo ""
             echo "## Verify this release"
             echo ""
             echo "Image digests pushed by this release's workflow run. Pin one in"

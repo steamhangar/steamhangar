@@ -1118,6 +1118,7 @@ jobs:
             VAULT_APP_VERSION=
             VAULT_APP_BUILD=
             VAULT_APP_MINIMUM=
+            VAULT_SERVER_COMPONENT_VERSION=
 
   verify-stack:
     name: deploy / verify-stack

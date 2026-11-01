@@ -949,6 +949,19 @@ function handleGetAbout() {
           "Optional (compose profile dns); most setups use their own DNS rewrite instead. Not checked: vault-api has no network path to vault-dns (egress lock, ADR-0011), and a test query would itself be DNS traffic.",
       },
     ],
+    // WP RELEASE-SPLIT-1c: product and component versions. The demo vault
+    // is one release whose three components all changed in it: the same
+    // version as the vault-api row above and as demoClients() (/v1/dist,
+    // /v1/settings), so no page contradicts another. "Unchanged since" is
+    // covered with fake answers in web/tests/release-split-1c.test.js.
+    release: {
+      version: DEMO_DIST_VERSION,
+      components: [
+        { name: "server", version: DEMO_DIST_VERSION },
+        { name: "agent", version: demoClients().agent.version },
+        { name: "app", version: demoClients().app.version },
+      ],
+    },
   };
 }
 

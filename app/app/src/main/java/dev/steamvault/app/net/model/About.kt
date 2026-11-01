@@ -31,8 +31,30 @@ data class AboutComponentOut(
     val detail: String? = null,
 )
 
+/** One component of [AboutReleaseOut] (`ReleaseComponentOut`): `server`,
+ * `agent` or `app` and the release in which it last changed (`null` when
+ * the image states none). */
+@Serializable
+data class AboutReleaseComponentOut(
+    val name: String,
+    val version: String? = null,
+)
+
+/**
+ * WP RELEASE-SPLIT-1c (ADR-0031, ABOUT-VERSION-1 Weg A): `release` of
+ * `GET /v1/about` (`ReleaseOut`): the product version (`null` unless it is
+ * a release version) and each component's version. Absent on a server
+ * before 1c (defaults to `null`).
+ */
+@Serializable
+data class AboutReleaseOut(
+    val version: String? = null,
+    val components: List<AboutReleaseComponentOut> = emptyList(),
+)
+
 /** `GET /v1/about`'s envelope (`vault_api/routers/about.py::AboutOut`). */
 @Serializable
 data class AboutOut(
     val components: List<AboutComponentOut> = emptyList(),
+    val release: AboutReleaseOut? = null,
 )

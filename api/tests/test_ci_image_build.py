@@ -213,6 +213,8 @@ def test_image_build_build_args_carry_the_ci_version_and_commit() -> None:
         # WP RELEASE-SPLIT-1b: present for key parity, empty (no bundled client).
         "VAULT_AGENT_VERSION": "", "VAULT_AGENT_BUILD": "", "VAULT_AGENT_MINIMUM": "",
         "VAULT_APP_VERSION": "", "VAULT_APP_BUILD": "", "VAULT_APP_MINIMUM": "",
+        # WP RELEASE-SPLIT-1c: no server component version (About shows none).
+        "VAULT_SERVER_COMPONENT_VERSION": "",
     }
 
 

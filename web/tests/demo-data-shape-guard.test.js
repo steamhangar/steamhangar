@@ -84,7 +84,7 @@ test("sanity: the field reader sees the four AGENT-FEAT-1 fields in ClientOut (p
   }
 });
 
-test("sanity: the field reader sees ComponentOut's six fields and AboutOut's one, exactly", () => {
+test("sanity: the field reader sees ComponentOut's six fields and AboutOut's two, exactly", () => {
   assert.deepEqual(
     modelFields(aboutRouterSrc, "ComponentOut"),
     ["name", "version", "commit", "status", "checked_at", "detail"],
@@ -92,9 +92,12 @@ test("sanity: the field reader sees ComponentOut's six fields and AboutOut's one
   );
   assert.deepEqual(
     modelFields(aboutRouterSrc, "AboutOut"),
-    ["components"],
-    "AboutOut as read differs from {components} — GRAMMAR drift if the model is unchanged (widen modelFields), VALUE drift otherwise",
+    ["components", "release"],
+    "AboutOut as read differs from {components, release} — GRAMMAR drift if the model is unchanged (widen modelFields), VALUE drift otherwise",
   );
+  // WP RELEASE-SPLIT-1c.
+  assert.deepEqual(modelFields(aboutRouterSrc, "ReleaseOut"), ["version", "components"]);
+  assert.deepEqual(modelFields(aboutRouterSrc, "ReleaseComponentOut"), ["name", "version"]);
 });
 
 test("MUTATION TARGET: every demo /v1/clients row has EXACTLY ClientOut's keys", async () => {
@@ -122,6 +125,18 @@ test("MUTATION TARGET: demo /v1/about has EXACTLY AboutOut's keys, and every com
       driftMessage(`demo component ${c.name}`, "ComponentOut", expected, "update handleGetAbout()"),
     );
   }
+  // WP RELEASE-SPLIT-1c: `release` and its component entries.
+  const releaseFields = modelFields(aboutRouterSrc, "ReleaseOut").sort();
+  assert.deepEqual(sortedKeys(about.release), releaseFields, driftMessage("demo /v1/about release", "ReleaseOut", releaseFields, "update handleGetAbout()"));
+  const entryFields = modelFields(aboutRouterSrc, "ReleaseComponentOut").sort();
+  for (const c of about.release.components) {
+    assert.deepEqual(sortedKeys(c), entryFields, driftMessage(`demo release component ${c.name}`, "ReleaseComponentOut", entryFields, "update handleGetAbout()"));
+  }
+  assert.deepEqual(
+    about.release.components.map((c) => c.name),
+    literalMembers(aboutRouterSrc, "ReleaseComponentOut", "name"),
+    "VALUE drift: ReleaseComponentOut's name list/order changed — update handleGetAbout()",
+  );
 });
 
 test("demo /v1/about: the server's six names in the server's order, statuses from the server's set", async () => {

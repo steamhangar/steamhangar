@@ -137,6 +137,8 @@ import {
   checkedText,
   classifyAboutError,
   describeComponents,
+  describeRelease,
+  unchangedSinceText,
   DASH_LABEL,
 } from "../lib/about-view.js";
 import {
@@ -1184,8 +1186,10 @@ function buildConnectionCard() {
 /** Module state, survives re-mounts like `state` above. `phase`:
  * "idle" | "loading" | "loaded" | "too_old" | "error". `components` is
  * kept across a failed Refresh (the last good table stays visible under
- * the error line); a "too old" answer clears it. */
-const about = { phase: "idle", components: null, error: null, gen: 0 };
+ * the error line); a "too old" answer clears it. `release` (WP
+ * RELEASE-SPLIT-1c) is the answer's `release` object, kept and cleared
+ * with `components`. */
+const about = { phase: "idle", components: null, release: null, error: null, gen: 0 };
 /** Component name -> the user's open/closed choice for its (i) details
  * (WP WEB-FIX-8). Module state, so a Refresh (which rebuilds the table)
  * keeps it; without a choice the row's `infoOpenByDefault` applies. */
@@ -1240,6 +1244,7 @@ async function loadAbout({ announce = false } = {}) {
     const components = aboutComponents(response);
     if (!components) throw new Error("the server's answer has no component list");
     about.components = components;
+    about.release = response.release ?? null;
     about.error = null;
     about.phase = "loaded";
   } catch (err) {
@@ -1247,6 +1252,7 @@ async function loadAbout({ announce = false } = {}) {
     if (classifyAboutError(err) === "too_old") {
       about.phase = "too_old";
       about.components = null;
+      about.release = null;
       about.error = null;
     } else {
       about.phase = "error";
@@ -1423,6 +1429,42 @@ function buildAboutTable(components) {
   return table;
 }
 
+/**
+ * WP RELEASE-SPLIT-1c (ADR-0031, ABOUT-VERSION-1 Weg A): the product
+ * version as the main line, then a definition list with one entry per
+ * component ("Server", "Agent", "App") and "(unchanged since ...)" for a
+ * component older than the product. `null` (nothing built) for a server
+ * before 1c or a local build.
+ */
+function buildReleaseBlock(release) {
+  const view = describeRelease(release);
+  if (!view) return null;
+  const block = el("div", "about-release");
+  block.dataset.role = "about-release";
+  if (view.productLine) {
+    const line = el("p", "about-release-line", view.productLine);
+    line.dataset.role = "about-product";
+    block.appendChild(line);
+  }
+  const list = el("dl", "about-release-list");
+  for (const row of view.rows) {
+    const item = el("div", "about-release-item");
+    item.dataset.component = row.name;
+    const dd = el("dd", null);
+    dd.appendChild(el("span", "mono", row.version));
+    if (row.unchangedSince) {
+      dd.appendChild(document.createTextNode(" "));
+      const since = el("span", "about-release-since", unchangedSinceText(row.unchangedSince));
+      since.dataset.role = "about-unchanged-since";
+      dd.appendChild(since);
+    }
+    item.append(el("dt", null, row.label), dd);
+    list.appendChild(item);
+  }
+  block.appendChild(list);
+  return block;
+}
+
 function paintAboutChecked() {
   if (!aboutEls) return;
   const text = about.components ? checkedText(about.components, Date.now()) : null;
@@ -1446,6 +1488,8 @@ function paintAbout() {
       nodes.push(line);
     }
     if (about.components) {
+      const release = buildReleaseBlock(about.release);
+      if (release) nodes.push(release);
       nodes.push(buildAboutTable(about.components));
     } else if (about.phase === "loading" || about.phase === "idle") {
       nodes.push(el("p", "empty", "Loading component versions…"));

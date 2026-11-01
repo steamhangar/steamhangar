@@ -133,10 +133,14 @@ export function appDownloadPlan(response, origin) {
   const art = findArtifact(index, APP_ARTIFACT_ID);
   if (!art || typeof art.name !== "string") return { kind: "none", version: index.version };
   const size = typeof art.size === "number" ? art.size : null;
+  // RELEASE-SPLIT-1c (1b review nit): a download plan reports the version
+  // the APK carries (its name), not the server's: a reused APK is older.
+  // The "none" plans keep the server's version (noAppText names it).
+  const appVersion = clientFilesVersion(index, "app");
   const local = localPath(index, art, index.apk_alias_url) || localPath(index, art, art.local_url);
-  if (local) return { kind: "download", source: "local", url: `${origin}${local}`, name: art.name, size, version: index.version };
-  const release = releaseUrl(index, art, clientFilesVersion(index, "app"));
-  if (release) return { kind: "download", source: "release", url: release, name: art.name, size: null, version: index.version };
+  if (local) return { kind: "download", source: "local", url: `${origin}${local}`, name: art.name, size, version: appVersion };
+  const release = releaseUrl(index, art, appVersion);
+  if (release) return { kind: "download", source: "release", url: release, name: art.name, size: null, version: appVersion };
   return { kind: "none", version: index.version };
 }
 

@@ -690,7 +690,7 @@ route, see "Auth").
 | GET    | `/v1/steam/owned-games`            | `?steamid=<SteamID64>` — relay `GetOwnedGames`. `200` with `{configured: true, game_count, games: [{appid, name, playtime_forever, img_icon_url, rtime_last_played}]}` (`rtime_last_played` added WP 4h.1: Unix-epoch seconds or `null` — see "rtime_last_played — absence is not zero" below); `409` if no key is configured; `422` for an unusable `steamid`; `502` for any upstream failure. **`playtime_forever`/`rtime_last_played` are each independently OMITTED from the JSON body entirely** (not sent as `0`/`null`) unless `VAULT_RELAY_EXPOSE_PLAYTIME`/`VAULT_RELAY_EXPOSE_LAST_PLAYED` are set — WP 4h.0, ADR-0010, see "The privacy gate" below. See "Steam Web API relay" below |
 | GET    | `/v1/steam/player-summaries`       | `?steamid=<SteamID64>` — relay `GetPlayerSummaries`. `200` with `{configured: true, players: [{steamid, personaname, avatar, avatarmedium, avatarfull, personastate}]}`; same `409`/`422`/`502` shape as `owned-games`. See "Steam Web API relay" below |
 | GET    | `/v1/settings`                     | Settings-API work package (ADR-0009): `{readonly, server_version, clients, settings: [{key, effective, source, fallback, applies, env_only, env_var, value, editable, risky, expert, grammar, target, env_visible, shadowed}, ...]}` — every overridable key plus informational env-only ones. `source` is `db`/`env`/`default`; `applies` is `immediately`/`next_sweep`/`restart-required`. See "Persisted settings" below |
-| GET    | `/v1/about`                        | WP VER-2: `{components: [{name, version, commit, status, checked_at, detail}, ...]}` for `vault-api` (also the web UI), `vault-core`, `vault-runner`, `steamprefill`, `vault-proxy`, `vault-dns`, in that order. `status` is `ok`/`unreachable`/`not_in_use`/`unknown`; `version`/`commit` are a string, `"invalid"` or `null`. Cached 60 s; never slow, never `5xx` for a missing component. See "Component versions" below |
+| GET    | `/v1/about`                        | WP VER-2: `{components: [{name, version, commit, status, checked_at, detail}, ...]}` for `vault-api` (also the web UI), `vault-core`, `vault-runner`, `steamprefill`, `vault-proxy`, `vault-dns`, in that order. `status` is `ok`/`unreachable`/`not_in_use`/`unknown`; `version`/`commit` are a string, `"invalid"` or `null`. Cached 60 s; never slow, never `5xx` for a missing component. See "Component versions" below. WP RELEASE-SPLIT-1c: plus `release` = `{version, components: [{name, version}]}` (`server`, `agent`, `app`), the product version and each component's version (ADR-0031), `null` values for a local build |
 | GET    | `/v1/dist`                         | WP DIST-1a: index of the release downloads: `{version, release, local_base, release_base, apk_alias_url, artifacts: [{id, name, version, local, size, sha256, local_url, release_url, url, source}, ...], clients}`. The files themselves are public under `/dist/<name>` (see "Auth" and "Release downloads"). WP RELEASE-SPLIT-1b: agent files and APK are named and linked by their own version (`artifacts[].version`); `clients` = `{agent, app}`, each `{version, build, minimum, same_build}` or `null` (local build), the same object as in `GET /v1/settings` (ADR-0031) |
 | PATCH  | `/v1/settings`                     | Partial update: `null` clears an override (revert to env/default), any other value sets it, validated with the SAME grammar `config.py` applies at startup. `200` with the same shape `GET` returns. `422` for an invalid value, an unknown key, a recognised-but-environment-only key (distinct detail) or a broken cross-variable rule; `409` for a key set via env (D16b); `428` for a risky key without `?confirm_risky=true`; `403` if `VAULT_SETTINGS_READONLY` is set. See "Persisted settings" below |
 
@@ -6625,6 +6625,19 @@ Each entry also has `checked_at` (UTC, when vault-api looked) and `detail`
 see "Build version"), or `null` (not known; a commit of `unknown` is `null`
 here). The response model is strict: unknown fields, names or status words
 cannot appear.
+
+**Product and component versions (WP RELEASE-SPLIT-1c, ADR-0031).** Next to
+`components` the answer carries `release`: `version` is the product version
+(`VAULT_BUILD_VERSION` when it is a release version, else `null`), and
+`components` lists `server`, `agent` and `app` in that order, each with the
+release in which it last changed: the server from
+`VAULT_SERVER_COMPONENT_VERSION` (build arg of the same name, set by
+publish.yml from the component plan), agent and app from the bundled client
+versions (`clients` in `GET /v1/settings`). A value outside the release
+grammar, and every value of a local build, is `null`. Not cached and not a
+probe: facts baked into the image. The About pages show the product version
+as the main line and "unchanged since <version>" for a component older
+than it (operator decision ABOUT-VERSION-1, Weg A).
 
 **vault-core: a file, not a probe.** vault-api has no network path to
 vault-core (the egress lock, ADR-0011: vault-api gets cross-container facts

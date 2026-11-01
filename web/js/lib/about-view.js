@@ -45,10 +45,22 @@
  * AboutCrossFrontendContractTest.kt (literals from this file) keep the two
  * on the same words.
  *
- * Pure: no DOM, no fetch. Covered in web/tests/about-view.test.js.
+ * WP RELEASE-SPLIT-1c (ADR-0031, ABOUT-VERSION-1 Weg A): the answer also
+ * carries `release` (`{version, components: [{name, version}]}`, server,
+ * agent, app). {@link describeRelease} turns it into the block above the
+ * table: the product version as the main line ("SteamHangar 0.1.0-rc23"),
+ * then one line per component, "unchanged since <version>" when the
+ * component is older than the product. A server before 1c (no `release`)
+ * and a local build (no component versions) show no block.
+ *
+ * Pure: no DOM, no fetch. Covered in web/tests/about-view.test.js and
+ * web/tests/release-split-1c.test.js.
  */
 
 import { formatAgo } from "./format.js";
+import { isReleaseVersion } from "./agent-install.js";
+import { compareReleaseVersions } from "./clients-page.js";
+import { PRODUCT_NAME } from "./product.js";
 
 /** Server-side answer cache, in seconds (api/vault_api/about.py
  * `CACHE_TTL_SECONDS`). Pinned against that constant in
@@ -294,4 +306,56 @@ export function checkedText(components, nowMs = Date.now()) {
 export function classifyAboutError(err) {
   const status = err && typeof err.status === "number" ? err.status : null;
   return status === 404 ? "too_old" : "error";
+}
+
+// ---------------------------------------------------------------------
+// Product and component versions (WP RELEASE-SPLIT-1c, ADR-0031)
+// ---------------------------------------------------------------------
+
+/** Component name -> label, in the order the block lists them. Android
+ * twin: `settings_about_release_*` (web/tests/release-split-1c.test.js). */
+export const RELEASE_LABELS = Object.freeze({ server: "Server", agent: "Agent", app: "App" });
+
+/** The main line: the product version (`GET /v1/about` `release.version`). */
+export function productLine(version) {
+  return `${PRODUCT_NAME} ${version}`;
+}
+
+/** The note after an older component's version. */
+export function unchangedSinceText(since) {
+  return `(unchanged since ${since})`;
+}
+
+/** A component's value: its version, plus "(unchanged since <since>)" when
+ * it is older than the product. Android twin:
+ * `settings_about_release_unchanged` ("%1$s (unchanged since %2$s)"). */
+export function releaseValueText(version, since) {
+  return since ? `${version} ${unchangedSinceText(since)}` : version;
+}
+
+/**
+ * The block above the component table, or `null` when there is nothing to
+ * show (a server before 1c, a local build without component versions).
+ * Only release versions are shown; a component without one is left out.
+ * `unchangedSince` is the component's version when it is older than the
+ * product version (natural pre-release order, `compareReleaseVersions`).
+ * @param {unknown} release
+ * @returns {{product: string | null, productLine: string | null,
+ *   rows: {name: string, label: string, version: string, unchangedSince: string | null, text: string}[]} | null}
+ */
+export function describeRelease(release) {
+  if (!release || typeof release !== "object") return null;
+  const r = /** @type {any} */ (release);
+  const product = isReleaseVersion(r.version) ? r.version : null;
+  const list = Array.isArray(r.components) ? r.components : [];
+  const rows = [];
+  for (const [name, label] of Object.entries(RELEASE_LABELS)) {
+    const entry = list.find((c) => c && typeof c === "object" && c.name === name);
+    const version = entry && isReleaseVersion(entry.version) ? entry.version : null;
+    if (!version) continue;
+    const unchangedSince = product && compareReleaseVersions(version, product) === -1 ? version : null;
+    rows.push({ name, label, version, unchangedSince, text: releaseValueText(version, unchangedSince) });
+  }
+  if (rows.length === 0) return null;
+  return { product, productLine: product ? productLine(product) : null, rows };
 }

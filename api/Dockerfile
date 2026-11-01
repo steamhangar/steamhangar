@@ -347,6 +347,16 @@ ENV VAULT_CLIENT_AGENT_VERSION="${VAULT_AGENT_VERSION}" \
     VAULT_CLIENT_APP_BUILD="${VAULT_APP_BUILD}" \
     VAULT_CLIENT_APP_MINIMUM="${VAULT_APP_MINIMUM}"
 
+# --- Server component version (WP RELEASE-SPLIT-1c, ADR-0031) ---------------
+# The release in which the server component last changed (`server_version`
+# of publish.yml's component plan). NOT the product version: this image is
+# rebuilt in every release, so VAULT_BUILD_VERSION above is always the
+# product version, while the server code may be unchanged since an older
+# release. GET /v1/about states both (`release`). A local build leaves it
+# empty: the About pages then show no component list.
+ARG VAULT_SERVER_COMPONENT_VERSION=
+ENV VAULT_SERVER_COMPONENT_VERSION="${VAULT_SERVER_COMPONENT_VERSION}"
+
 # EXACTLY ONE uvicorn worker, on purpose and permanently. vault-api runs a single
 # background job-queue thread per process and repairs orphaned 'running' jobs at
 # startup; a second process would fail the first one's genuinely running job and
