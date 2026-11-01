@@ -4214,6 +4214,10 @@ below carry their own later dates, item 12 is the current one).
       - [ ] nit (MAP-ATTRIB-1 review): one oracle_branch_manifests query per
         restore candidate; the inlined `apps` INSERT duplicates upsert_mapping
         on purpose (it commits inside BEGIN IMMEDIATE).
+      - [ ] **ANDROID-RC21-1-TWINS** (android; follow-ups of rc21.1 web
+        packages) STORAGE-BALANCE-1 expert card from `storage_balance`
+        (hidden when absent); JOB-SIZE-1 job card "of ~X (expected size)" and
+        the ETA with the same hide rules, the 7 new JobThroughputOut fields.
       - [ ] close: release gate, tag `v0.1.0-rc21.1`
 
     - [ ] **rc22 — release hardening, no new features** (packages to be cut
