@@ -2055,6 +2055,18 @@ and VERIFY-COLD-1 is prose in the Sunday-test box of the rc19.3 block.
   The API pauses (or holds) the runner while client MISS traffic is seen
   and resumes it after an idle gap; must not lose the job's progress and
   must show the reason in the Downloads UI (web + app twin).
+- **APP-EXPERT-SWITCH-1 (android, operator 2026-11-01, screenshot; rc23):**
+  the "Show expert settings" switch at the bottom of Settings > About
+  needs a rework: in the off state the dark track and thumb read as
+  disabled, and the switch sits on the About tab below the disclaimer.
+  Design pass (state contrast like the app's other switches, placement);
+  check the web twin.
+- **PROXY-VERSION-1 (api + app/web, seen 2026-11-01 on rc22; candidate):**
+  About lists vault-proxy as "Version — · commit —" although the image
+  carries `VAULT_BUILD_VERSION` and the OCI version label; `about.py`
+  reports the proxy without a version by design. Either report it (the
+  proxy's own version endpoint or the release components) or hide the
+  version line for components that do not report one.
 - **APP-DL-CARD-1 (android, operator 2026-11-01, screenshot; rc23 by operator decision 2026-11-01):** the
   Downloads page's active-job card ("Breathedge, job #266 ... 0 MB/s · 0
   GB loaded so far", Pause/Cancel) looks unpolished next to the

@@ -470,7 +470,8 @@ their open boxes (items 2, 7 and 11) are in section 12. Item 13 stays here.
       twin check first), APP-DL-CARD-1 (design pass of the active-job
       card), OUTPUT-TRIM-TAP-1 (dev tooling), CAP-503-FIX-1 Weg A
       (operator decision 2026-11-01: client priority, the runner pauses
-      while a PC downloads); details in the roadmap
+      while a PC downloads), APP-EXPERT-SWITCH-1 (operator 2026-11-01),
+      candidate PROXY-VERSION-1; details in the roadmap
     - v0.2.0 rename: D18 incl. logo, LAUNCHER-PREP-1
     - v0.3.0 privacy: D22 then LIBRARY-META-1d
     - v0.4.0 agents and devices: Weg B for agents with the installer (D6
