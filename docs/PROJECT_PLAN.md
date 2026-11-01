@@ -4139,6 +4139,18 @@ below carry their own later dates, item 12 is the current one).
         "Pause all", looking like a cleared queue). With Auto-GC on execute,
         "Pause all" must also hold queued GC jobs. Also: a dry-run GC job
         reads "Garbage collected" in History although nothing was deleted.
+      - [ ] **ANDROID-PAUSE-GC-1** (android; follow-up of PAUSE-ALL-GC-1)
+        Android "Pause all" still skips queued GC jobs: BulkJobs.kt queued
+        phase incl. GC, `gcRunning`/`gcQueued`, the three new web literals
+        (`confirmGcRunning`, `confirmGcHeldOne`, `confirmGcHeldMany`) in the
+        twin pins, DownloadsBulkBar.kt:86 note, JobPartition.kt paused GC word
+        and the dry-run label (needs `gc_execute` on JobSummary), the GC sheet
+        flow's paused state, and the stale "unreachable in practice" comment
+        (JobPartition.kt:135); then drop `WORDING.confirmGcNote` from the web.
+      - [ ] nit (TOOL-NAMES-1 review): a cached, not-owned app (prod 1716750
+        Ubisoft Connect) gets a one-off oracle verdict from the name lookup
+        and shows "Update available" it cannot act on until the not_owned
+        window expires; consider hiding update_available for not_owned apps.
       - [ ] **JOB-SIZE-1** (api + web) a first
         download says "Speed not measured yet: the server does not know this
         game's depots yet" (prod: Subnautica job 254); use the D19 depot
