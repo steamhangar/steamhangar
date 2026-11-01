@@ -515,6 +515,12 @@ their open boxes (items 2, 7 and 11) are in section 12. Item 13 stays here.
         download QR automatically (and the reverse). Applies to the wide and
         the narrow layout; `add-device-sheet.js`, `kit.css`, web tests and
         a `test-web-shots` golden. No Android twin (ANDROID-ADD-DEVICE-1).
+      - [ ] **NITS-API-2** (api + web/android twins; user decisions
+        2026-11-01 on NITS-API-1 skips) NOT-OWNED-UPDATE-1 Weg A: no
+        `update_available` for cached, not-owned apps; LOADING-COUNT-1 Weg A:
+        the "now loading" device count counts agents like its rows;
+        LIVE-DIVISOR-1 Weg A: the live rate of a partly covered bucket
+        divides by the covered seconds. RETRY-REANNOUNCE-1 stays (Weg B).
       - [ ] **SAMPLE-IP-1** (tests/examples; user decision 2026-11-01,
         Weg A) sweep the generic `192.168.1.x` examples to `10.0.0.x`.
       - [x] **CI-SIGN-PIN-1** (ci; CI-FIX-3 follow-up) pin the APK signing

@@ -344,16 +344,20 @@ once decided (the decision then lives in the item it belongs to).
   found no cache? Weg A: re-announce (hits the 300 s negative cache, so
   only after it expires); Weg B (recommended): keep as is, a sent mark
   covers retries for its 7-day period.
+  **Decided 2026-11-01: Weg B (keep as is).**
 - **NOT-OWNED-UPDATE-1** (NITS-API-1, 2026-11-01; TOOL-NAMES-1 nit): hide
   `update_available` for cached, not-owned apps? Weg A: hide it (nothing
   the operator can update); Weg B: keep it with a "not owned" hint.
   No recommendation yet.
+  **Decided 2026-11-01: Weg A (hide `update_available` for cached, not-owned apps), rc22 package NITS-API-2.**
 - **LOADING-COUNT-1** (NITS-API-1, 2026-11-01; NOW-LOADING-1 nit): the
   device count counts addresses while the rows group by agent. Weg A
   (recommended): count agents like the rows; Weg B: keep addresses.
+  **Decided 2026-11-01: Weg A (count agents), rc22 package NITS-API-2.**
 - **LIVE-DIVISOR-1** (NITS-API-1, 2026-11-01; RUNNER-SPLIT-1 nit): the
   live endpoint divides by the full bucket even for a partly covered
   bucket. Weg A (recommended): divide by the covered seconds; Weg B: keep.
+  **Decided 2026-11-01: Weg A (divide by the covered seconds), rc22 package NITS-API-2.**
 - **SAMPLE-IP-1** (found 2026-10-31, rc22 NITS-AUDIT-1 candidate): about 45
   files in app/, web/tests, agent/, api/tests, dns/ and docs/design use
   `192.168.1.x` as a generic home-LAN example. It is the most common router
