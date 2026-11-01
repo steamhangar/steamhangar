@@ -273,7 +273,7 @@ def test_A1_observed_depot_without_evidence_is_not_mapped(conn: sqlite3.Connecti
     """MUTATION TARGET (A1): before the fix 436781 was added to Wanderburg."""
     upsert_mapping(conn, OLD_DEPOT, OLD_APP, None)
     change = apply_observed_mapping(
-        conn, WANDERBURG, {OWN_DEPOT, OLD_DEPOT}, manifest_named={OWN_DEPOT}, owned={OWN_DEPOT}
+        conn, WANDERBURG, {OWN_DEPOT, OLD_DEPOT}, manifest_named={OWN_DEPOT}, owned={OWN_DEPOT}, oracle_listed=None
     )
     assert mapped(conn, WANDERBURG) == {OWN_DEPOT}
     assert owners(conn, OLD_DEPOT) == {OLD_APP}
@@ -284,7 +284,7 @@ def test_A1_observed_depot_without_evidence_is_not_mapped(conn: sqlite3.Connecti
 
 def test_A1_an_unmapped_foreign_depot_is_not_mapped_either(conn: sqlite3.Connection) -> None:
     change = apply_observed_mapping(
-        conn, WANDERBURG, {OWN_DEPOT, 999}, manifest_named=set(), owned={OWN_DEPOT}
+        conn, WANDERBURG, {OWN_DEPOT, 999}, manifest_named=set(), owned={OWN_DEPOT}, oracle_listed=None
     )
     assert pairs(conn) == {(OWN_DEPOT, WANDERBURG)}
     assert change.not_attributed == {999}
@@ -295,7 +295,7 @@ def test_A2_no_evidence_never_adds_a_second_owner(conn: sqlite3.Connection) -> N
     depots no other app maps."""
     upsert_mapping(conn, OLD_DEPOT, OLD_APP, None)
     change = apply_observed_mapping(
-        conn, WANDERBURG, {OWN_DEPOT, OLD_DEPOT}, manifest_named=None, owned=None
+        conn, WANDERBURG, {OWN_DEPOT, OLD_DEPOT}, manifest_named=None, owned=None, oracle_listed=None
     )
     assert mapped(conn, WANDERBURG) == {OWN_DEPOT}
     assert owners(conn, OLD_DEPOT) == {OLD_APP}
@@ -307,7 +307,7 @@ def test_A2_no_evidence_never_adds_a_second_owner(conn: sqlite3.Connection) -> N
 def test_A3_evidence_still_adds_a_shared_depot(conn: sqlite3.Connection) -> None:
     upsert_mapping(conn, 228989, 228980, "Redist")
     change = apply_observed_mapping(
-        conn, 440, {441, 228989}, manifest_named={441, 228989}, owned={441, 228989}
+        conn, 440, {441, 228989}, manifest_named={441, 228989}, owned={441, 228989}, oracle_listed=None
     )
     assert owners(conn, 228989) == {228980, 440}
     assert change.not_attributed == set()
@@ -323,7 +323,10 @@ def test_A4_removal_does_not_depend_on_the_filter(conn: sqlite3.Connection) -> N
         conn.commit()
         for depotid in (1, 2, 3, 4):
             upsert_mapping(conn, depotid, 440, None)
-        change = apply_observed_mapping(conn, 440, {1, 2}, manifest_named={3}, owned=owned)
+        change = apply_observed_mapping(
+            conn, 440, {1, 2}, manifest_named={3}, owned=owned,
+            oracle_listed=None,
+        )
         results.append((change.removed, mapped(conn, 440)))
     assert all(r == ({4}, {1, 2, 3}) for r in results), results
 

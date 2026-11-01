@@ -87,6 +87,7 @@ import time
 from dataclasses import dataclass, field
 from typing import AbstractSet, Callable, Iterable
 
+from vault_api import map_attrib
 from vault_api.config import (
     DEFAULT_PREFILL_MAX_THREADS,
     MAX_PREFILL_MAX_THREADS,
@@ -909,6 +910,7 @@ def apply_observed_mapping(
     *,
     manifest_named: AbstractSet[int] | None,
     owned: AbstractSet[int] | None,
+    oracle_listed: AbstractSet[int] | None,
 ) -> "MappingChange":
     """Replace ``appid``'s depot mapping with ``observed`` (ADR-0003 decision 3).
 
@@ -953,9 +955,25 @@ def apply_observed_mapping(
       "evidence read, it names nothing". Measured trigger:
       HELLDIVERS 2's forced verify (2026-10-18) wrote into 4 of its 11
       depots and the replace dropped the other 7, the main depot included.
-      What is still removed: a mapped depot that no manifest of the app names
-      (or that has no bytes left). SteamPrefill's temp cache keeps every
-      manifest it ever fetched, so a depot Steam really moved to another app
+    - **...and never the app's own recorded or oracle-listed depot (WP
+      MAP-LOSS-1).** The temp-cache files are not the only evidence: a mapped
+      depot is also kept when the app's own recorded manifest names it
+      (``map_attrib.own_recorded_depots``: the app is the containing app of a
+      ``depot_manifests`` row, read here from ``conn`` so no caller can skip
+      it) or when ``oracle_listed`` (``map_attrib.oracle_depots``; ``None``
+      when the oracle is off or silent) names it. Measured trigger: on
+      rc20.2, Enshrouded's update run (job 205, 2026-10-31) wrote no bytes
+      into its own depot 1203621 (every chunk a HIT) and the replace removed
+      it; The Witcher 3's run (job 207) did the same to 292033 and 292036.
+      Each had just recorded its own manifest for the depot, and ingestion
+      could not map it back because removed depots are skipped
+      (``skip_own_mapping``). Keeping such a row is GC-safe: GC plans the
+      depot with the app's recorded manifest as a claim (keep set), and a row
+      is only kept, never added, so no foreign mapping can appear here.
+      What is still removed: a mapped depot that no manifest file, own
+      recorded manifest or oracle depot list of the app names (with
+      ``manifest_named``, also one that has no bytes left). SteamPrefill's
+      temp cache keeps every manifest it ever fetched, so a depot Steam really moved to another app
       stays mapped while its old ``.bin`` exists -- the fail-safe direction;
       ``DELETE /v1/mapping/{depotid}/{appid}`` remains the correction path.
     - **Additive across apps.** Only rows for *this* ``appid`` are touched. A
@@ -987,7 +1005,12 @@ def apply_observed_mapping(
         # The manifest evidence could not be read: no removal at all.
         protected = set(unobserved)
     else:
-        protected = unobserved & set(manifest_named)
+        # WP MAP-LOSS-1: an unobserved depot stays when ANY evidence names it
+        # as the app's own; removal needs every source to be silent.
+        keep = set(manifest_named)
+        keep |= map_attrib.own_recorded_depots(conn, appid)
+        keep |= set(oracle_listed or ())
+        protected = unobserved & keep
     stale = unobserved - protected
     for depotid in sorted(stale):
         delete_mapping(conn, depotid=depotid, appid=appid)
@@ -1068,7 +1091,7 @@ class MappingChange:
             reason = (
                 "the manifest evidence could not be read"
                 if self.evidence_unreadable
-                else "named by this app's manifests, bytes on disk"
+                else "named by this app's manifest files, recorded manifests or oracle depot list"
             )
             text += f" kept_unobserved={sorted(self.protected)} ({reason})"
         if extra:

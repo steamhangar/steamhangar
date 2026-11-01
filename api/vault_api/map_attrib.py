@@ -30,9 +30,11 @@ own (safe only because every true owner still had its own recorded manifest).
    (``oracle_dlc_links``), i.e. the depots ``oracle_branch_manifests`` holds
    for them.
 
-Evidence can only widen what is mapped; it never removes anything (the
-replace step of ``apply_observed_mapping`` is unchanged and still decides
-removals from the observed set and ``manifest_named``).
+Evidence can only widen what is mapped; it never removes anything. The
+replace step of ``apply_observed_mapping`` decides removals from the
+observed set and keeps an unobserved depot that ``manifest_named``, the
+app's own recorded manifest (``own_recorded_depots``) or its oracle depot
+list names (WP MAP-LOSS-1).
 
 ## The one-time cleanup (``cleanup_foreign_mappings``)
 
@@ -146,6 +148,27 @@ def recorded_depots(conn: sqlite3.Connection, appid: int) -> set[int]:
         conn.execute(
             "SELECT DISTINCT depotid FROM depot_manifests "
             "WHERE appid = ? OR containing_appid = ?",
+            (appid, appid),
+        ).fetchall(),
+        "depotid",
+    )
+
+
+def own_recorded_depots(conn: sqlite3.Connection, appid: int) -> set[int]:
+    """Depots whose recorded manifest names ``appid`` as its containing app,
+    or that ``appid`` recorded without naming a containing app (WP
+    MAP-LOSS-1).
+
+    Narrower than ``recorded_depots`` on purpose: a content-package depot the
+    game recorded with the package as containing app belongs to the package
+    (the ownership model of GROUP-VERIFIED-1 and of the restore below), not
+    to the game. ``prefill.apply_observed_mapping`` never removes one of
+    these depots from the app's mapping on a run that did not write into it.
+    """
+    return _ids(
+        conn.execute(
+            "SELECT DISTINCT depotid FROM depot_manifests "
+            "WHERE containing_appid = ? OR (appid = ? AND containing_appid IS NULL)",
             (appid, appid),
         ).fetchall(),
         "depotid",
