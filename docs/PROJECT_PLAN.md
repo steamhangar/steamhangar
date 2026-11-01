@@ -4020,7 +4020,7 @@ below carry their own later dates, item 12 is the current one).
           row so typical vaults with metadata get one control row.
         - [ ] nit (ANDROID-REDESIGN-1c review; KDoc and Overview ISO times fixed in POLISH-1): hero runner mini item and the
           0-devices caption descriptions differ from the web tile titles;
-          downloads_stats shot heights 1000/1250 leave empty canvas; Overview
+          downloads_stats shot heights 1000/1250 leave empty canvas;
           the "Surveyor Outfits" package row squeezes its name at 360dp/1.3.
         - [ ] nit (ANDROID-POLISH-1 review): `assertOneControlRow` does not
           check the sort button (`LibraryScreenshotTest.kt:646-659`);
