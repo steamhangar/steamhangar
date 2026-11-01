@@ -86,7 +86,7 @@ test("MUTATION PIN: heroModel maps the figures onto the kit anatomy (big, pill, 
   assert.deepEqual(f.status, { kind: "cached", text: "Serving", tone: "ok" });
   assert.deepEqual(f.caption, ["Limit ", { b: "8 MB/s" }, ", all day", " · ", "2 devices loading"]);
   assert.deepEqual(f.mini.map((i) => i.key), ["average", "peak", "runner"]);
-  assert.deepEqual(f.mini[2].parts, ["Prefill runner ", { b: "20.0 GB" }, " of it, ", { b: "5.0 GB" }, " from the cache"]);
+  assert.deepEqual(f.mini[2].parts, ["SteamHangar ", { b: "20.0 GB" }, " of it, ", { b: "5.0 GB" }, " from the cache"]);
   assert.deepEqual(
     f.tiles.map((t) => `${t.label}=${t.value}${t.unit}`),
     ["Served=60.0GB", "From internet=25.0GB", "Saved by cache=50.0GB", "Hit rate=83%"],

@@ -1,5 +1,6 @@
 package dev.steamvault.app.ui.traffic.logic
 
+import dev.steamvault.app.PRODUCT_NAME
 import dev.steamvault.app.net.model.CurrentOut
 import dev.steamvault.app.net.model.LoadingAppOut
 import dev.steamvault.app.net.model.LoadingSourceOut
@@ -115,8 +116,12 @@ const val LOADING_UNATTRIBUTED = "Unattributed traffic"
 const val LOADING_NEW_DEVICE = "New device"
 const val LOADING_NO_JOB = "No running job"
 
-/** The runner row's name when the server sends none (web literal). */
-const val LOADING_RUNNER_NAME = "Prefill runner"
+/**
+ * WP RUNNER-NAME-1: the runner row is titled [PRODUCT_NAME] (not the
+ * server's "Prefill runner") and its detail starts with this, so it is
+ * clear that the server itself loads (web `LOADING_RUNNER_DETAIL`).
+ */
+const val LOADING_RUNNER_DETAIL = "this server"
 
 /** A source without games (the Clients page's wording, web `gamesText`). */
 const val LOADING_NO_GAME = "content not linked to one game"
@@ -171,7 +176,8 @@ private fun cacheWord(row: LoadingSourceOut): String? {
  * live window, from the same read of the ring as the big number, the pill
  * and the device count, so they agree:
  *
- *  - the prefill runner: its job's game ([LOADING_NO_JOB] when the runner
+ *  - the prefill runner, titled [PRODUCT_NAME] with [LOADING_RUNNER_DETAIL]
+ *    first in its detail (WP RUNNER-NAME-1): its job's game ([LOADING_NO_JOB] when the runner
  *    still has traffic in the window but no prefill job runs, e.g. right
  *    after a cancel), the phase in the pill's words ("Downloading" /
  *    "Verifying"), a pending stop request;
@@ -206,8 +212,7 @@ fun loadingNowModel(throughput: ThroughputOut?): LoadingNowModel? {
                     "cancel" -> parts.add(LOADING_CANCEL_REQUESTED)
                     "pause" -> parts.add(LOADING_PAUSE_REQUESTED)
                 }
-                val name = if (!src.name.isNullOrEmpty()) src.name else LOADING_RUNNER_NAME
-                rows.add(LoadingNowRow("runner", LOADING_KIND_RUNNER, name, parts.joinToString(" · "), speed))
+                rows.add(LoadingNowRow("runner", LOADING_KIND_RUNNER, PRODUCT_NAME, (listOf(LOADING_RUNNER_DETAIL) + parts).joinToString(" · "), speed))
             }
             LOADING_KIND_CLIENT -> {
                 val known = src.known != false
@@ -275,16 +280,18 @@ fun limitParts(rateCap: String): List<HeroPart> {
     return listOf(HeroPart(m.groupValues[1]), HeroPart(m.groupValues[2], bold = true), HeroPart(m.groupValues[3]))
 }
 
-/** The runner's share for the mini line (web `runnerParts`), `null` when the server sent none. */
+/** The runner's share for the mini line (web `runnerParts`), `null` when the server sent none.
+ * WP RUNNER-NAME-1: named by the product ("SteamHangar 23.0 GB of it"). */
 fun runnerParts(summary: SummaryOut?): List<HeroPart>? {
     val runner = summary?.prefill_runner ?: return null
     if (runner.bytes_served <= 0) return null
     val size = formatTrafficBytes(runner.bytes_served) ?: return null
     val cached = if (runner.hit_bytes > 0) formatTrafficBytes(runner.hit_bytes) else null
+    val who = "$PRODUCT_NAME "
     return if (cached != null) {
-        listOf(HeroPart("Prefill runner "), HeroPart(size, bold = true), HeroPart(" of it, "), HeroPart(cached, bold = true), HeroPart(" from the cache"))
+        listOf(HeroPart(who), HeroPart(size, bold = true), HeroPart(" of it, "), HeroPart(cached, bold = true), HeroPart(" from the cache"))
     } else {
-        listOf(HeroPart("Prefill runner "), HeroPart(size, bold = true), HeroPart(" of it"))
+        listOf(HeroPart(who), HeroPart(size, bold = true), HeroPart(" of it"))
     }
 }
 

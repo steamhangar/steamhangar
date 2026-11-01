@@ -129,8 +129,8 @@ test("MUTATION TARGET: header tiles — ok shows every figure; stale dashes only
   );
   assert.equal(ok.clients.detail, "machines with cache traffic in the last 15 min");
   assert.match(ok.clients.title, /3 machines loaded something in the last 24 hours/);
-  assert.equal(ok.current.detail, "all traffic incl. prefill runner, 5-10 min window · 10.0 MB/s by the prefill runner");
-  assert.equal(ok["hit-rate"].detail, "clients only, runner excluded");
+  assert.equal(ok.current.detail, "all traffic incl. SteamHangar, 5-10 min window · 10.0 MB/s by SteamHangar");
+  assert.equal(ok["hit-rate"].detail, "clients only, own prefill excluded");
   const stale = Object.fromEntries(headerTiles(throughput("stale")).map((t) => [t.key, t.value]));
   assert.equal(stale.current, DASH);
   assert.equal(stale.clients, DASH);
@@ -152,7 +152,7 @@ test("MUTATION TARGET: TILE-INTERNET — the tile is the server's all-scope miss
   assert.equal(tile(base.summary).value, "10.0 GB", "no runner figures: client misses");
   assert.equal(tile({ ...base.summary, internet_bytes: 0 }).value, "0 GB", "a real zero prints");
   assert.equal(tile({ ...base.summary, miss_bytes: undefined }).value, DASH);
-  assert.match(tile(base.summary).title, /came from the internet, the server's own prefill downloads included/);
+  assert.match(tile(base.summary).title, /came from the internet, SteamHangar's own prefill downloads included/);
   assert.equal(headerTiles(throughput("ok")).length, 8, "2x4 grid");
 });
 
@@ -161,7 +161,7 @@ test("MUTATION TARGET: the hit-rate tile is the BYTE hit rate, the base 'Saved b
   assert.equal(t.value, "83%", "byte_hit_rate 0.833, not hit_rate 0.5");
   assert.equal(
     t.title,
-    "Share of the bytes your machines loaded in the last 24 hours that came from the cache. The server's own prefill downloads are not counted.",
+    "Share of the bytes your machines loaded in the last 24 hours that came from the cache. SteamHangar's own prefill downloads are not counted.",
   );
   const noBytes = throughput("ok", { summary: { ...throughput("ok").summary, byte_hit_rate: null } });
   assert.equal(headerTiles(noBytes).find((x) => x.key === "hit-rate").value, DASH, "no fallback to the request rate");
@@ -173,16 +173,16 @@ test("MUTATION TARGET: D15-RUNNER — saved, hit rate and active clients say the
     summary: { ...base.summary, prefill_runner: { bytes_served: 4 * GIB, hit_bytes: 3 * GIB, miss_bytes: GIB, requests: 9, hits: 6, misses: 3, errors: 0 } },
   });
   const tiles = Object.fromEntries(headerTiles(withRunner).map((t) => [t.key, t]));
-  assert.equal(tiles.loaded.detail, "4.0 GB by the prefill runner, 3.0 GB of that from the cache");
-  assert.match(tiles.loaded.title, /only when the prefill runner had no cache hits/);
-  assert.equal(tiles["hit-rate"].detail, "clients only, runner excluded");
+  assert.equal(tiles.loaded.detail, "4.0 GB by SteamHangar, 3.0 GB of that from the cache");
+  assert.match(tiles.loaded.title, /only when SteamHangar's own prefill downloads had no cache hits/);
+  assert.equal(tiles["hit-rate"].detail, "clients only, own prefill excluded");
   const rated = headerTiles(throughput("ok", { summary: { ...base.summary, prefill_runner: { ...withRunner.summary.prefill_runner, byte_hit_rate: 0.75 } } }));
-  assert.equal(rated.find((t) => t.key === "hit-rate").detail, "clients only, runner excluded (runner: 75%)");
+  assert.equal(rated.find((t) => t.key === "hit-rate").detail, "clients only, own prefill excluded (SteamHangar: 75%)");
   assert.equal(JOB_SPEED_NOTE, "Exclusive depots only: bytes on depots that belong to this game alone, from every address.");
   assert.match(tiles.loaded.title, /prefill downloads included/);
   assert.match(tiles.saved.title, /prefill downloads are not counted/);
   assert.match(tiles["hit-rate"].title, /prefill downloads are not counted/);
-  assert.match(tiles.clients.title, /prefill runner is not counted/);
+  assert.match(tiles.clients.title, /SteamHangar's own prefill downloads are not counted/);
   assert.doesNotMatch(tiles.clients.title, /count as one of them/);
   // Older server (no prefill_runner) or an idle runner: no detail line.
   assert.equal(Object.fromEntries(headerTiles(base).map((t) => [t.key, t])).loaded.detail, null);

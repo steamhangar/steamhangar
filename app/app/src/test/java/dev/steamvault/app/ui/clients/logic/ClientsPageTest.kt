@@ -102,6 +102,11 @@ class ClientsPageTest {
     @Test
     fun `D15-RUNNER the runner is titled by the server and described as the server's prefill downloads`() {
         assertEquals("Prefill runner", clientName(runner))
+        // WP RUNNER-NAME-1: the card shows the product's name; clientName keeps
+        // the server's rule (web twin-pinned), clientTitle overrides the runner only.
+        assertEquals("SteamHangar", clientTitle(runner))
+        assertEquals("SteamHangar", clientTitle(runner.copy(display_name = "Anything else")))
+        assertEquals(clientName(agent), clientTitle(agent))
         assertEquals("This server's prefill downloads · 172.18.0.1", clientKindText(runner))
         assertEquals("This server's prefill downloads", clientKindText(runner.copy(addresses = emptyList())))
         assertNull(installedText(runner))
@@ -113,7 +118,7 @@ class ClientsPageTest {
         // Counted like the web counts it (every overview entry).
         assertEquals("2 clients · 2 connected", clientsSummaryText(listOf(agent, runner)))
         val card = clientCardView(MergedClient(runner, null), "24h", null, now)
-        assertEquals("Prefill runner", card.name)
+        assertEquals("SteamHangar", card.name)
         assertEquals("This server's prefill downloads · 172.18.0.1", card.meta)
         assertEquals(ClientKind.RUNNER, card.kind)
         assertEquals(listOf("loaded", "hitrate", "unlinked"), card.stats.map { it.key })

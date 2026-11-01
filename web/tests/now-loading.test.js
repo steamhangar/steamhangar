@@ -106,8 +106,9 @@ const rowsOf = (sources, opts) => loadingNowModel(mergeNow(answer(sources, opts)
 test("a downloading runner names its job's game and the pill's word", () => {
   const [row] = rowsOf([RUNNER_DL]);
   assert.equal(row.kind, "runner");
-  assert.equal(row.name, "Prefill runner");
-  assert.equal(row.detail, `No Man's Sky · job #200 · ${PILL_DOWNLOADING}`);
+  // WP RUNNER-NAME-1: titled by the product, not the server's "Prefill runner".
+  assert.equal(row.name, "SteamHangar");
+  assert.equal(row.detail, `this server · No Man's Sky · job #200 · ${PILL_DOWNLOADING}`);
   assert.equal(row.speed, "30.0 MB/s");
 });
 
@@ -124,11 +125,11 @@ test("runner traffic without a running job says so (the cancel case)", () => {
   const orphan = { ...RUNNER_DL, job: null };
   const t = mergeNow(answer([orphan]));
   const [row] = loadingNowModel(t).rows;
-  assert.equal(row.detail, `${LOADING_NO_JOB} · No Man's Sky · ${PILL_DOWNLOADING}`);
+  assert.equal(row.detail, `this server · ${LOADING_NO_JOB} · No Man's Sky · ${PILL_DOWNLOADING}`);
   // The pill still says Downloading: the row explains it.
   assert.equal(heroStatus(t.current).text, PILL_DOWNLOADING);
   const bare = rowsOf([{ ...orphan, apps: [] }])[0];
-  assert.equal(bare.detail, `${LOADING_NO_JOB} · ${PILL_DOWNLOADING}`);
+  assert.equal(bare.detail, `this server · ${LOADING_NO_JOB} · ${PILL_DOWNLOADING}`);
 });
 
 test("a pending cancel is shown on the runner row", () => {
@@ -198,7 +199,7 @@ test("the live view takes the rows from the live answer only", () => {
   const summary = { ...answer(stale), loading_sources: stale };
   const live = { event_feed: feed, current: current(30 * MIB, 30 * MIB, 0), active_clients: 0, active_window_seconds: 17, loading_sources: [RUNNER_DL] };
   const merged = mergeLive(summary, live);
-  assert.deepEqual(loadingNowModel(merged).rows.map((r) => r.name), ["Prefill runner"]);
+  assert.deepEqual(loadingNowModel(merged).rows.map((r) => r.name), ["SteamHangar"]);
   // A live answer without the field (older server): no block, never the
   // summary's rows of another window.
   const older = { ...live };
@@ -236,7 +237,9 @@ test("the block is a labelled list, one item per source, hidden when idle", () =
   const items = list.querySelectorAll("li");
   assert.equal(items.length, 2);
   assert.equal(items[0].dataset.kind, "runner");
-  assert.ok(items[0].textContent.includes("Prefill runner"));
+  assert.ok(items[0].textContent.includes("SteamHangar"));
+  assert.ok(items[0].textContent.includes("this server · "));
+  assert.ok(!items[0].textContent.includes("Prefill runner"));
   assert.ok(items[0].textContent.includes("No Man's Sky"));
   assert.ok(items[0].textContent.includes("30.0 MB/s"));
   assert.equal(items[1].dataset.kind, "unattributed");

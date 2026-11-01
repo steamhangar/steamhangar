@@ -136,6 +136,8 @@ test("JOB-SIZE-1: the tooltip says where an expected line's figures come from", 
   assert.equal(jobSpeedNote({ ...firstDownload(), expected: false }), JOB_SPEED_NOTE);
   assert.equal(jobSpeedNote(undefined), JOB_SPEED_NOTE);
   assert.match(JOB_SPEED_EXPECTED_NOTE, /estimate/);
+  // WP RUNNER-NAME-1: the runner is named by the product here too.
+  assert.match(JOB_SPEED_EXPECTED_NOTE, /count SteamHangar's own prefill bytes/);
 });
 
 test("JOB-SIZE-1 wiring: the Downloads view sets the line's tooltip through jobSpeedNote", () => {
