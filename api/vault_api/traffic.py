@@ -1057,17 +1057,47 @@ def exclusive_depots_for_app(conn: sqlite3.Connection, appid: int) -> list[int]:
 
 
 def depots_bytes_since(
-    conn: sqlite3.Connection, depotids: list[int], tier: str, start: str
+    conn: sqlite3.Connection,
+    depotids: list[int],
+    tier: str,
+    start: str,
+    scope: Scope | None = None,
 ) -> int:
-    """All addresses' bytes on ``depotids`` from ``start`` on, in ``tier``."""
+    """All addresses' bytes on ``depotids`` from ``start`` on, in ``tier``
+    (only the rows in ``scope`` when given, WP JOB-SIZE-1)."""
     if not depotids:
         return 0
     placeholders = ",".join("?" for _ in depotids)
+    where, params = scope.sql() if scope is not None else ("", [])
     row = conn.execute(
         f"""
         SELECT COALESCE(SUM(bytes_served), 0) AS b FROM client_depot_traffic
-        WHERE tier = ? AND bucket_at >= ? AND depotid IN ({placeholders})
+        WHERE tier = ? AND bucket_at >= ? AND depotid IN ({placeholders}){where}
         """,
-        (tier, start, *depotids),
+        (tier, start, *depotids, *params),
     ).fetchone()
     return int(row["b"]) if row is not None else 0
+
+
+def depots_miss_bytes_since(
+    conn: sqlite3.Connection,
+    depotids: list[int],
+    tier: str,
+    start: str,
+    scope: Scope | None = None,
+) -> int:
+    """WP JOB-SIZE-1: the MISS part of ``depots_bytes_since`` (served minus
+    HIT bytes): what the cache fetched from the internet for ``depotids``,
+    only the rows in ``scope`` when given."""
+    if not depotids:
+        return 0
+    placeholders = ",".join("?" for _ in depotids)
+    where, params = scope.sql() if scope is not None else ("", [])
+    row = conn.execute(
+        f"""
+        SELECT COALESCE(SUM(bytes_served - hit_bytes), 0) AS b FROM client_depot_traffic
+        WHERE tier = ? AND bucket_at >= ? AND depotid IN ({placeholders}){where}
+        """,
+        (tier, start, *depotids, *params),
+    ).fetchone()
+    return max(0, int(row["b"])) if row is not None else 0

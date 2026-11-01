@@ -119,7 +119,9 @@ from pydantic import BaseModel
 
 from vault_api import (
     agent_reports,
+    cache_completeness,
     client_names,
+    depot_preview,
     event_sweep,
     live_tier,
     peer_hops,
@@ -256,6 +258,53 @@ class JobThroughputOut(BaseModel):
     #: of this game" (0) from "all of them are shared" (> 0 with
     #: ``exclusive_depots`` 0).
     mapped_depots: int = 0
+    #: WP JOB-SIZE-1, additive. ``true`` when the server knows no depots of
+    #: this game yet (``mapped_depots`` 0, a first download) and the D19 depot
+    #: preview (oracle, both switches on) supplied the EXPECTED depots instead:
+    #: ``bytes_per_second`` and ``bytes_since_start`` then count the PREFILL
+    #: RUNNER's bytes on those expected depots (only the ones no app has
+    #: mapped; a household PC loading the same game is not job progress), and
+    #: the two ``expected_*`` sizes are the oracle's public-branch totals of
+    #: exactly those depots. An estimate until the run's own mapping exists;
+    #: nothing is written to ``depot_app_map``. ``false`` (and the rest
+    #: 0/null) otherwise, also when the preview is off, failed or pending.
+    expected: bool = False
+    #: How many expected depots the figures count (0 unless ``expected``).
+    expected_depots: int = 0
+    #: Expected installed size (oracle ``size``), null when unknown.
+    expected_size_bytes: int | None = None
+    #: Expected download size (oracle ``download``), the figure comparable to
+    #: ``bytes_since_start`` (the cache stores the downloaded chunks).
+    expected_download_bytes: int | None = None
+    #: WP JOB-SIZE-1 (ETA), additive. The prefill runner's MISS bytes/s on
+    #: the counted depots over the swept window (what the cache fetched from
+    #: the internet for this job). A Verify or cache-only run has 0 here.
+    #: Null like ``bytes_per_second``.
+    miss_bytes_per_second: float | None = None
+    #: Estimated bytes this run still has to load (runner traffic only), or
+    #: null when unknown. ``remaining_source`` ``preview``: a first download,
+    #: ``expected_download_bytes`` minus the runner's bytes so far, HIT or
+    #: MISS (every chunk is requested once, so this is chunks still to
+    #: REQUEST). ``completeness``: a mapped game, the stored completeness
+    #: figure of its exclusive depots (current target manifests: expected
+    #: minus present at the check) minus the runner's MISS bytes since the
+    #: later of the check and the job's start (bytes still to FETCH from the
+    #: internet); unknown when any of those depots is unmeasured for its
+    #: current target.
+    remaining_bytes: int | None = None
+    remaining_source: Literal["preview", "completeness"] | None = None
+    #: The speed an ETA divides ``remaining_bytes`` by, matched to the
+    #: source: ``preview`` -> the runner's total bytes/s, ``completeness`` ->
+    #: the runner's MISS bytes/s. ``eta_speed_source`` ``live``: the live
+    #: tier's runner speed (``now.current``, a ~15-20 s window; only the
+    #: running prefill job, the runner loads one job at a time). ``window``:
+    #: the live tier is not available, so the job's own swept figure, and
+    #: only once that window starts at or after the job's start (an older
+    #: window would dilute the speed with time before the job). Null with no
+    #: remainder or no undiluted speed. ``ETA = remaining_bytes /
+    #: eta_bytes_per_second``; clients smooth it over polls.
+    eta_bytes_per_second: float | None = None
+    eta_speed_source: Literal["live", "window"] | None = None
 
 
 class LiveCurrentOut(BaseModel):
@@ -598,13 +647,66 @@ def _summary(
     )
 
 
+#: WP JOB-SIZE-1: where ``remaining_bytes`` comes from.
+REMAINING_PREVIEW = "preview"
+REMAINING_COMPLETENESS = "completeness"
+
+ExpectFn = Callable[[sqlite3.Connection, int], "depot_preview.JobExpectation | None"]
+#: (conn, appid, exclusive depots) -> the stored completeness figure.
+FigureFn = Callable[[sqlite3.Connection, int, list[int]], cache_completeness.Completeness]
+
+
+def _since_tier(now: datetime, moment: datetime) -> str:
+    recent = now - moment <= traffic.TIER_RETENTION[traffic.TIER_5M]  # type: ignore[operator]
+    return traffic.TIER_5M if recent else traffic.TIER_1H
+
+
+def _mapped_remaining(
+    conn: sqlite3.Connection,
+    figure: cache_completeness.Completeness,
+    depots: list[int],
+    started: datetime,
+    now: datetime,
+    runner: traffic.Scope | None,
+) -> int | None:
+    """WP JOB-SIZE-1: internet bytes a mapped app still lacks.
+
+    The stored completeness figure (current target manifests, chunk sizes)
+    says what was missing when it was measured; every runner MISS on the
+    app's exclusive depots since then (or since the job's start, the later
+    of the two) filled part of it. Unknown (``None``) when the figure is.
+    """
+    if figure.expected_bytes is None or figure.present_bytes is None:
+        return None
+    missing = max(0, figure.expected_bytes - figure.present_bytes)
+    checked = parse_utc_iso(figure.checked_at) if figure.checked_at else None
+    since = max(started, checked) if checked is not None else started
+    tier = _since_tier(now, since)
+    # Rows are per bucket, so "since" rounds DOWN to its bucket start: up to
+    # one bucket (5 min) of MISS bytes before it may count as filled. That
+    # errs towards a smaller remainder, never towards a stuck one.
+    filled = traffic.depots_miss_bytes_since(
+        conn, depots, tier, traffic.bucket_iso(since, tier), runner
+    )
+    return max(0, missing - filled)
+
+
 def _job_throughput(
     conn: sqlite3.Connection,
     window: traffic.CurrentWindow | None,
     now: datetime,
     feed_on: bool,
     oracle_enabled: bool = False,
+    expect: ExpectFn | None = None,
+    figure_of: FigureFn | None = None,
+    runner: traffic.Scope | None = None,
 ) -> list[JobThroughputOut]:
+    """``expect`` (WP JOB-SIZE-1) answers the expected depots of an app the
+    vault has not mapped yet, ``figure_of`` the stored completeness figure of
+    a mapped one (for ``remaining_bytes``); ``runner`` scopes the job's own
+    progress to the prefill runner's rows (``None``: every address, tests of
+    older callers). ``None`` callables leave their fields at the
+    pre-JOB-SIZE-1 defaults. The ETA speed is filled in by ``_with_eta``."""
     rows = conn.execute(
         "SELECT id, appid, started_at FROM jobs WHERE status = ? AND type = ? ORDER BY id",
         (STATUS_RUNNING, JOB_TYPE_PREFILL),
@@ -617,21 +719,55 @@ def _job_throughput(
         appid = int(row["appid"])
         started_at = row["started_at"]
         depots = traffic.exclusive_depots_for_app(conn, appid)
+        mapped = int(
+            conn.execute(
+                "SELECT COUNT(*) FROM depot_app_map WHERE appid = ?", (appid,)
+            ).fetchone()[0]
+        )
+        expectation = expect(conn, appid) if expect is not None and mapped == 0 else None
+        counted = list(expectation.depotids) if expectation is not None else depots
+        # The card's speed and "so far": every address on the app's own
+        # depots for a mapped game (as before JOB-SIZE-1); the runner only
+        # for expected depots, which nothing has confirmed belong to this job.
+        shown = runner if expectation is not None else None
         rate: float | None = None
+        miss_rate: float | None = None
         since_start: int | None = None
-        if feed_on and depots:
+        remaining: int | None = None
+        remaining_source: str | None = None
+        if feed_on and counted:
             if window is not None:
                 rate = (
-                    traffic.depots_bytes_since(conn, depots, traffic.TIER_5M, window.start)
+                    traffic.depots_bytes_since(
+                        conn, counted, traffic.TIER_5M, window.start, shown
+                    )
+                    / window.seconds
+                )
+                miss_rate = (
+                    traffic.depots_miss_bytes_since(
+                        conn, counted, traffic.TIER_5M, window.start, runner
+                    )
                     / window.seconds
                 )
             started = parse_utc_iso(started_at) if isinstance(started_at, str) else None
             if started is not None:
-                recent = now - started <= traffic.TIER_RETENTION[traffic.TIER_5M]  # type: ignore[operator]
-                tier = traffic.TIER_5M if recent else traffic.TIER_1H
+                tier = _since_tier(now, started)
+                start_bucket = traffic.bucket_iso(started, tier)
                 since_start = traffic.depots_bytes_since(
-                    conn, depots, tier, traffic.bucket_iso(started, tier)
+                    conn, counted, tier, start_bucket, shown
                 )
+                if expectation is not None:
+                    if expectation.download_bytes is not None:
+                        # A first download requests every chunk once, HIT or
+                        # MISS, so all the runner loaded so far is progress
+                        # (``since_start`` is runner-scoped here).
+                        remaining = max(0, expectation.download_bytes - since_start)
+                        remaining_source = REMAINING_PREVIEW
+                elif figure_of is not None:
+                    remaining = _mapped_remaining(
+                        conn, figure_of(conn, appid, depots), depots, started, now, runner
+                    )
+                    remaining_source = REMAINING_COMPLETENESS if remaining is not None else None
         result.append(
             JobThroughputOut(
                 job_id=int(row["id"]),
@@ -641,12 +777,50 @@ def _job_throughput(
                 bytes_per_second=rate,
                 bytes_since_start=since_start,
                 exclusive_depots=len(depots),
-                mapped_depots=int(
-                    conn.execute(
-                        "SELECT COUNT(*) FROM depot_app_map WHERE appid = ?", (appid,)
-                    ).fetchone()[0]
-                ),
+                mapped_depots=mapped,
+                expected=expectation is not None,
+                expected_depots=len(expectation.depotids) if expectation else 0,
+                expected_size_bytes=expectation.size_bytes if expectation else None,
+                expected_download_bytes=expectation.download_bytes if expectation else None,
+                miss_bytes_per_second=miss_rate,
+                remaining_bytes=remaining,
+                remaining_source=remaining_source,
             )
+        )
+    return result
+
+
+def _with_eta(
+    jobs: list[JobThroughputOut],
+    live: LiveCurrentOut | None,
+    window: traffic.CurrentWindow | None,
+) -> list[JobThroughputOut]:
+    """WP JOB-SIZE-1: the ETA speed of each job with a remainder.
+
+    ``live`` (the ring's runner speed) belongs to the running prefill job:
+    the runner loads one job at a time, the oldest running one when a crash
+    ever left two (``_running_prefill_job``). Without it, the job's swept
+    figure is used only when its window started at or after the job did.
+    """
+    running_id = min((job.job_id for job in jobs), default=None)
+    window_start = parse_utc_iso(window.start) if window is not None else None
+    result: list[JobThroughputOut] = []
+    for job in jobs:
+        rate: float | None = None
+        source: str | None = None
+        preview = job.remaining_source == REMAINING_PREVIEW
+        if job.remaining_source is None:
+            pass
+        elif live is not None and job.job_id == running_id:
+            rate = live.runner_bytes_per_second if preview else live.runner_miss_bytes_per_second
+            source = "live"
+        else:
+            started = parse_utc_iso(job.started_at) if job.started_at else None
+            if window_start is not None and started is not None and window_start >= started:
+                rate = job.bytes_per_second if preview else job.miss_bytes_per_second
+                source = "window" if rate is not None else None
+        result.append(
+            job.model_copy(update={"eta_bytes_per_second": rate, "eta_speed_source": source})
         )
     return result
 
@@ -730,7 +904,14 @@ def get_throughput(
                 active_now = len(traffic.active_addrs(conn, now, minutes, clients))
                 runner_now = bool(traffic.active_addrs(conn, now, minutes, runner))
         jobs = _job_throughput(
-            conn, window, now, feed_on, settings.manifest_oracle_enabled
+            conn,
+            window,
+            now,
+            feed_on,
+            settings.manifest_oracle_enabled,
+            _job_expectation(request, settings),
+            _job_figure(settings),
+            runner,
         )
     # The ring is read after the connection is closed: tailing the log never
     # holds SQLite open.
@@ -747,9 +928,37 @@ def get_throughput(
         active_clients_now=active_now,
         runner_active_now=runner_now,
         summary=summary,
-        jobs=jobs,
+        jobs=_with_eta(jobs, now_out.current if now_out is not None else None, window),
         now=now_out,
     )
+
+
+def _job_expectation(
+    request: Request, settings: Settings
+) -> Callable[[sqlite3.Connection, int], depot_preview.JobExpectation | None] | None:
+    """WP JOB-SIZE-1: the preview service's expectation, or ``None`` when the
+    preview is off (``VAULT_DEPOT_PREVIEW`` or the oracle) or not wired."""
+    service = getattr(request.app.state, "depot_preview", None)
+    if not isinstance(service, depot_preview.DepotPreviewService):
+        return None
+    if not depot_preview.enabled(settings):
+        return None
+    return lambda conn, appid: service.job_expectation(conn, appid, settings)
+
+
+def _job_figure(settings: Settings) -> FigureFn:
+    """WP JOB-SIZE-1: the stored completeness figure of one app's exclusive
+    depots (read-only; no cache walk, no manifest read)."""
+
+    def figure(
+        conn: sqlite3.Connection, appid: int, depots: list[int]
+    ) -> cache_completeness.Completeness:
+        if not depots:
+            return cache_completeness.UNKNOWN
+        index = cache_completeness.load_index(conn, settings, [appid])
+        return index.figure((appid, depot) for depot in depots)
+
+    return figure
 
 
 def _ring_now(
