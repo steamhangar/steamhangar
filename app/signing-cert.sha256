@@ -1,0 +1,11 @@
+# WP CI-SIGN-PIN-1: SHA-256 of the Android RELEASE signing certificate.
+# Public value, not a secret: it is printed in every release body
+# ("Verify this release") and by `apksigner verify --print-certs`.
+# publish.yml (android-build, "Verify APK signature (apksigner)") refuses
+# to publish a signed APK whose certificate differs from this pin.
+#
+# Exactly one line of 64 hex characters, or no value line at all ("pin not
+# set": tag runs fail, other runs only warn). Comment lines start with '#'.
+# How to fill or change it: app/README.md, "Pinned release certificate".
+# Measured on v0.1.0-rc10, unchanged through v0.1.0-rc21.1.
+f095d5abda5acb23f3f07c9fa68a5526a514f1f4e600fca17162aa8d17c66172

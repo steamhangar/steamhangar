@@ -1042,6 +1042,10 @@ jobs:
       - name: Verify APK signature (apksigner)
         if: steps.signing_check.outputs.configured == 'true'
         id: verify
+        env:
+          # WP CI-SIGN-PIN-1: same expression as this job's `environment:`
+          # -- a run that may hold the release keystore must have the pin.
+          APK_PIN_STRICT: ${{ startsWith(github.ref, 'refs/tags/v') }}
         run: |
           set -eu
           TRANSCRIPT="$RUNNER_TEMP/apksigner-verify.txt"
@@ -1090,6 +1094,17 @@ jobs:
             echo "::error::no single signing certificate found -- refusing to publish this APK." >&2
             exit 1
           fi
+          # WP CI-SIGN-PIN-1: the certificate must be THE release
+          # certificate, pinned in the one committed place
+          # app/signing-cert.sha256 (public value, not a secret). A
+          # mismatch fails every run; an unset pin fails tag runs
+          # (APK_PIN_STRICT) and only warns otherwise. Release APK only:
+          # debug builds (ci.yml) are signed with a debug key and never
+          # reach this step.
+          if ! PIN_STATE="$(sh .github/scripts/apk-cert-digest.sh pin app/signing-cert.sha256 "$CERT_SHA256")"; then
+            echo "::error::signing certificate does not match app/signing-cert.sha256 (or the pin is not set) -- refusing to publish this APK." >&2
+            exit 1
+          fi
           echo "cert_sha256=${CERT_SHA256}" >> "$GITHUB_OUTPUT"
           {
             echo "### Android release APK -- signed and verified"
@@ -1097,6 +1112,11 @@ jobs:
             echo "- \`Verifies\`"
             echo "- \`Verified using v2 scheme (APK Signature Scheme v2): true\`"
             echo "- signing certificate SHA-256: \`${CERT_SHA256}\`"
+            if [ "$PIN_STATE" = "match" ]; then
+              echo "- matches the pinned release certificate (\`app/signing-cert.sha256\`)"
+            else
+              echo "- **pin not set**: \`app/signing-cert.sha256\` has no value, the certificate was NOT compared"
+            fi
           } >> "$GITHUB_STEP_SUMMARY"
 
       # Review round 2 (N4) -- recorded as a follow-up, deliberately NOT
@@ -1116,8 +1136,10 @@ jobs:
       # a mismatch -- not implemented in this package, since there is no
       # first real release yet to pin against.
       # WP SEC-FIX-2 (S5) did the first half: the verify step now extracts
-      # that fingerprint and publishes it (run summary + release body). The
-      # pinned COMPARISON is still open until the first signed release.
+      # that fingerprint and publishes it (run summary + release body).
+      # WP CI-SIGN-PIN-1 closed it: the verify step compares the
+      # fingerprint with the pin in app/signing-cert.sha256 (measured on
+      # v0.1.0-rc10) and refuses to publish on a mismatch.
       #
       # Pre-freeze project review, N4: the asset is named after the
       # release, not after Gradle's build variant. `app-release.apk` says

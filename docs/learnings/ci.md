@@ -79,3 +79,17 @@ at the end, under a dated heading, one entry each with the WP that proved it.
 - **A goldens-branch bot run records every frontend's goldens**: an
   Android-only package fast-forwards only to the bot commit for its own
   platform, never to unrelated web golden commits.
+
+## 2026-11-01 — rc22 (CI-SIGN-PIN-1)
+- **A public value that gates a release lives in ONE committed file, not
+  in a secret or a repo variable** (`app/signing-cert.sha256`): a change
+  is then a reviewed commit, tests can read it, and nothing about it gets
+  masked or dropped like a secret-like job output. Before pinning, check
+  the value is still current: the token-free releases API showed the rc10
+  certificate SHA-256 in every release body up to rc21.1.
+- **A new gate on release-only runs: fail where it matters, warn where it
+  cannot be satisfied yet.** The pin check takes its strictness from the
+  same expression as the job's `environment:`
+  (`startsWith(github.ref, 'refs/tags/v')`), so an unset pin fails a tag
+  run but only warns on a rehearsal; a mismatch or malformed pin fails
+  everywhere.

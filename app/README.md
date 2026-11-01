@@ -2230,6 +2230,27 @@ f095d5abda5acb23f3f07c9fa68a5526a514f1f4e600fca17162aa8d17c66172
 Every later release must show the same value — a different one means a
 different key, and Android will refuse it as an update.
 
+**Pinned release certificate (CI, WP CI-SIGN-PIN-1).** CI enforces that
+rule: `publish.yml`'s "Verify APK signature (apksigner)" step compares the
+signed APK's certificate SHA-256 with the pin in `app/signing-cert.sha256`
+(the one committed place; it is the public certificate digest, not a
+secret) and refuses to publish on a mismatch. The file holds `#` comment
+lines plus exactly one line of 64 hex characters. If it holds no value
+("pin not set"), a `v*` tag run fails and any other run only warns. Debug
+builds (`ci.yml`, `assembleDebug`, debug key) are never compared.
+
+Operator steps — first time (a fork, or the file was emptied):
+1. Push a release tag once with the pin empty; the run fails with
+   `pin not set` but its run summary and the check-run annotations show
+   the `certificate SHA-256 digest`. Or read it locally:
+   `apksigner verify --print-certs <signed-release.apk>`, line
+   `certificate SHA-256 digest` (not the SHA-1/MD5 lines).
+2. Write that value into `app/signing-cert.sha256`, commit, and cut a new
+   tag (tags are immutable).
+
+Changing the pin is only right for a deliberate key change, which breaks
+updates for every installed app; never edit it to make a red release green.
+
 ### Carry-over cleanup (`docs/WORKPACKAGES.md` Phase 4b header)
 
 Each item below was individually re-verified against the actual code

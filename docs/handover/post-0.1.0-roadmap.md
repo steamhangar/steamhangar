@@ -1964,7 +1964,11 @@ and VERIFY-COLD-1 is prose in the Sunday-test box of the rc19.3 block.
   - TalkBack group semantics are unverified;
   - `DownloadsStatsLiveTest` has a trivial last assertion;
   - AGENT-FIX-2 follow-up: registry lookup in the Go agent itself;
-  - CI-FIX-3 follow-up: pin the APK signing certificate fingerprint in CI;
+  - CI-FIX-3 follow-up: pin the APK signing certificate fingerprint in CI
+    (done in rc22 as CI-SIGN-PIN-1: pin in `app/signing-cert.sha256`;
+    operator steps for a first fill or a deliberate key change in
+    app/README.md "Pinned release certificate"; RELEASE-NOTES-1 should
+    mention that a release now fails on a foreign signing key);
   - `analyze.ps1` log format gap;
   - Hogwarts Legacy was missing next to Subnautica/Timberborn in the
     failed-jobs measurement note (added in "Before v0.1.0" above).

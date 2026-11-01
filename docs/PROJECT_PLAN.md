@@ -517,8 +517,13 @@ their open boxes (items 2, 7 and 11) are in section 12. Item 13 stays here.
         a `test-web-shots` golden. No Android twin (ANDROID-ADD-DEVICE-1).
       - [ ] **SAMPLE-IP-1** (tests/examples; user decision 2026-11-01,
         Weg A) sweep the generic `192.168.1.x` examples to `10.0.0.x`.
-      - [ ] **CI-SIGN-PIN-1** (ci; CI-FIX-3 follow-up) pin the APK signing
-        certificate fingerprint in CI.
+      - [x] **CI-SIGN-PIN-1** (ci; CI-FIX-3 follow-up) pin the APK signing
+        certificate fingerprint in CI. `publish.yml`'s verify step compares
+        the release APK's certificate SHA-256 with `app/signing-cert.sha256`
+        (pinned to the rc10 value, still on rc21.1) via
+        `apk-cert-digest.sh pin`; mismatch fails, unset pin fails tag runs
+        and warns elsewhere. Tests `api/tests/test_ci_sign_pin_1.py`;
+        operator steps in app/README.md "Pinned release certificate".
       - [ ] **RELEASE-NOTES-1** (docs) v0.1.0 release notes (B box).
       - [x] **DOC-DIET-1** (docs + agents, user decision 2026-11-01,
         Weg A; first rc22 package) every coder/reviewer start reads
@@ -616,6 +621,11 @@ their open boxes (items 2, 7 and 11) are in section 12. Item 13 stays here.
         hiding the pairing QR leaves the download QR blurred until the eye
         or a reopen. Local `test-web-shots` fails clients-pair-shown-400 on
         main too (1508 px, QR payload differs locally; see AUTO-VERIFY-1).
+      - [ ] nit (CI-SIGN-PIN-1 review): publish summary's else-branch treats
+        any non-`match` state as "pin not set" (check `= unset` explicitly);
+        the step's own error line duplicates the script's `::error::`;
+        actionlint not run on the devbox, the first rc22 tag run is the
+        real proof of the pin step.
       - [ ] remaining nits: MAP-DRIFT-1 fail-safe tests, claim-vs-move race
         test, aria-live on queue move, D19WiringTest pin,
         regrow-without-idle-gap test
