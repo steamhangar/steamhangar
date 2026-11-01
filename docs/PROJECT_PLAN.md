@@ -4212,13 +4212,19 @@ below carry their own later dates, item 12 is the current one).
         reclaimed old builds (Auto-GC cleans a game only after its own
         prefill). The balance line reads the size snapshot non-blocking
         (`SizeCache.peek`) and is skipped when the snapshot was invalidated.
-      - [ ] **MAP-LOSS-1** (api; finding 2026-11-01, MAP-ATTRIB-1 review) an
+      - [x] **MAP-LOSS-1** (ec1f134; root cause: rc20.2 replace step on 2026-10-31 — Enshrouded job 205 `added=[1465471] removed=[1203621]`, Witcher job 207 `removed=[292033, 292036, ...]` — plus `skip_own_mapping` blocking the same run's re-map; fix: the replace step keeps an untouched depot named by the app's own temp-cache files, own recorded manifests or the oracle list; keep-only) (api; finding 2026-11-01, MAP-ATTRIB-1 review) an
         app's OWN depot loses its mapping row although its own recorded
         manifest and the oracle name it (prod: Enshrouded 1203621, The
         Witcher 3 292033/292036; restored once by MAP-ATTRIB-1). Find the
         cause (the replace step on partial evidence, GROUP-VERIFIED / MAP-DRIFT
         family; Enshrouded job 205 on 2026-10-31 is a candidate) so it cannot
         recur; the one-time restore does not prevent it.
+      - [ ] nit (MAP-LOSS-1 review): a depot Steam moved away keeps its old
+        row (keep-only, GC keeps more) and can leave an old completeness target
+        ("Update available"/"not verified") until DELETE /v1/mapping; the
+        oracle list also keeps an existing package-depot row on the game
+        (docstring should say so); the kept-reason line names all three
+        sources at once.
       - [ ] nit (MAP-ATTRIB-1 review): one oracle_branch_manifests query per
         restore candidate; the inlined `apps` INSERT duplicates upsert_mapping
         on purpose (it commits inside BEGIN IMMEDIATE).

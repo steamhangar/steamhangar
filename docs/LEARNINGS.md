@@ -1446,3 +1446,8 @@ These are not style preferences; each entry cost a review round to learn.
 - **`diag db` takes plain SELECT only (no WITH) and cuts long cells**: read
   a `log_excerpt` with `substr(log_excerpt, i, 180)` and
   `replace(..., char(10), ' | ')`.
+- **Temp-cache `.bin` files are short-lived evidence** (clear-temp): any
+  keep decision must also read the durable record (`depot_manifests` with
+  containing app = A) and the oracle list. A replace-step removal plus
+  `skip_own_mapping` cannot be undone in the same job, so the protection
+  sits in the replace step itself (MAP-LOSS-1).
