@@ -4188,7 +4188,7 @@ below carry their own later dates, item 12 is the current one).
         captions read the product name from one constant (operator decision
         2026-11-01: today "SteamHangar", "GameHangar" with D18), so it is
         clear who loads.
-      - [ ] **STORAGE-BALANCE-1** (api + web; operator decision 2026-11-01:
+      - [x] **STORAGE-BALANCE-1** (40fea0e; `storage_balance` in `/v1/cache/summary`, INFO line after each update check from a non-blocking size snapshot, expert card in Settings) (api + web; operator decision 2026-11-01:
         Weg A, a storage balance in the product, not a dev-only check) after
         every update check a log line and fields in `/v1/cache/summary`:
         planned (current manifests of measured apps, shared depots counted
@@ -4221,6 +4221,10 @@ below carry their own later dates, item 12 is the current one).
       - [ ] nit (MAP-ATTRIB-1 review): one oracle_branch_manifests query per
         restore candidate; the inlined `apps` INSERT duplicates upsert_mapping
         on purpose (it commits inside BEGIN IMMEDIATE).
+      - [ ] nit (STORAGE-BALANCE-1 review): the balance line is skipped
+        when a job or GC invalidated the size snapshot and nothing read the
+        sizes since; the expert card is in no golden (Expert panel hidden in
+        every golden view).
       - [ ] **ANDROID-RC21-1-TWINS** (android; follow-ups of rc21.1 web
         packages) STORAGE-BALANCE-1 expert card from `storage_balance`
         (hidden when absent); JOB-SIZE-1 job card "of ~X (expected size)" and

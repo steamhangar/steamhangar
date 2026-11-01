@@ -1419,3 +1419,9 @@ These are not style preferences; each entry cost a review round to learn.
   out on purpose).
 - **`upsert_mapping` commits internally**: never call it inside a
   `BEGIN IMMEDIATE` that must stay atomic.
+- **Never call `SizeCache.get()` from a background check**: it starts a
+  walk on an expired snapshot and blocks on an invalidated one. Use the
+  non-blocking `SizeCache.peek()` and log the snapshot age.
+- **`zfs list` "G" is GiB**: server log lines compared with zfs use 2^30.
+- **A "the rest" bucket is 0 by construction when every item is in exactly
+  one class**: it can only go negative; don't promise a positive residual.
