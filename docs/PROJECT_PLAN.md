@@ -591,7 +591,8 @@ their open boxes (items 2, 7 and 11) are in section 12. Item 13 stays here.
       - [x] nit (ANDROID-VERIFY-SPEED-1 review): `FeedState` import out of
         order in `DownloadsStats.kt`; `VerifySpeedTest.poll(null)` uses
         `throughput!!` and needs a comment that refreshOnce is never called.
-<<<<<<< Updated upstream
+        (fixed in NITS-APP-1: `DownloadsStats.kt` imports sorted, KDoc on
+        `VerifySpeedTest.poll`)
       - [ ] DEV-MODS-1 live check once the operator loads the mods as
         managed mods (Antrag after 1a): core accepts output-trim's rewritten
         Bash result (`{ result, context }` and the `isError` branch); which
@@ -609,10 +610,6 @@ their open boxes (items 2, 7 and 11) are in section 12. Item 13 stays here.
         `Date.now()` (not `$.clock.now()`); read-back and SMALL_RANGE checks
         match loosely (fail open); kept files are never pruned (max-age or
         max-count prune later); no context assertion on the error branch.
-=======
-        (fixed in NITS-APP-1: `DownloadsStats.kt` imports sorted, KDoc on
-        `VerifySpeedTest.poll`)
->>>>>>> Stashed changes
       - [ ] nit (NITS-APP-1 review): NightGoldenTwinTest lives in src/test but
         reads src/testDebug goldens (also runs in the release task; could
         move to testDebug); a third local copy of the assertCalledFrom
