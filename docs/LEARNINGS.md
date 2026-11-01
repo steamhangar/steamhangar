@@ -1425,3 +1425,11 @@ These are not style preferences; each entry cost a review round to learn.
 - **`zfs list` "G" is GiB**: server log lines compared with zfs use 2^30.
 - **A "the rest" bucket is 0 by construction when every item is in exactly
   one class**: it can only go negative; don't promise a positive residual.
+- **An ETA's remainder and rate must be the same byte kind**: chunks still
+  to request / total runner speed for a first download, internet bytes
+  still to fetch / runner MISS speed for an update. A swept 5-10 min
+  window that starts before the job dilutes the rate; use the live tier's
+  runner speed for the running job.
+- **Every additive per-job API field needs a demo value in the same
+  package** (`demo-data-traffic.test.js` key parity); null/false keeps
+  goldens unchanged.

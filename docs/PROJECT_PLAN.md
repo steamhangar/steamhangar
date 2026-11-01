@@ -4177,7 +4177,7 @@ below carry their own later dates, item 12 is the current one).
         Ubisoft Connect) gets a one-off oracle verdict from the name lookup
         and shows "Update available" it cannot act on until the not_owned
         window expires; consider hiding update_available for not_owned apps.
-      - [ ] **JOB-SIZE-1** (api + web) a first
+      - [x] **JOB-SIZE-1** (365b472; preview-based expected size and runner-scoped progress for a first download, ETA from the live runner speed with an EMA, per-source divisor; README privacy wording names the second trigger) (api + web) a first
         download says "Speed not measured yet: the server does not know this
         game's depots yet" (prod: Subnautica job 254); use the D19 depot
         preview (expected depots and size from the oracle) for the job card.
@@ -4225,10 +4225,17 @@ below carry their own later dates, item 12 is the current one).
         when a job or GC invalidated the size snapshot and nothing read the
         sizes since; the expert card is in no golden (Expert panel hidden in
         every golden view).
+      - [ ] nit (JOB-SIZE-1 review): the live runner speed counts all of
+        the runner's depots, so a completeness ETA can run a little short;
+        a not-yet-applied runner period leaves runner-scoped figures at 0
+        for up to one sweep; `etaSmoother` keeps a rate across leaving and
+        re-entering Downloads (clear it on mount); the preview total
+        includes owned DLC and language depots (older D19 behaviour).
       - [ ] **ANDROID-RC21-1-TWINS** (android; follow-ups of rc21.1 web
         packages) STORAGE-BALANCE-1 expert card from `storage_balance`
         (hidden when absent); JOB-SIZE-1 job card "of ~X (expected size)" and
-        the ETA with the same hide rules, the 7 new JobThroughputOut fields.
+        the ETA with the same hide rules and EMA, the new JobThroughputOut
+        fields incl. `eta_bytes_per_second` / `eta_speed_source`.
       - [ ] close: release gate, tag `v0.1.0-rc21.1`
 
     - [ ] **rc22 — release hardening, no new features** (packages to be cut
