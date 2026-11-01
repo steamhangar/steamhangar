@@ -132,6 +132,23 @@ name: Publish
 # were pushed first): a release never ships images whose baked downloads
 # are missing. Artifacts are built fresh per run (no cache), so an image
 # can only ever carry files of its own version.
+#
+# --- Unchanged clients are reused (WP RELEASE-SPLIT-1b, ADR-0031) ----------
+# `component-plan` decides per component. With `enforce: true` in
+# .github/components.json an unchanged agent/app is NOT built: `agent-reuse`
+# / `android-reuse` download the files of its recorded version from that
+# version's GitHub Release, verify them and upload them under the same
+# artifact names (`release-agent`, `release-apk`). Exactly one of builder
+# and reuse job runs per client; `publish`, `android-release` and
+# `agent-binaries` accept either (`!cancelled()` plus explicit results),
+# and the baked/attached file names carry each client's artifact version
+# (the new version when built, the recorded one when reused):
+#
+#   component-plan --+--> agent-build | agent-reuse ------+
+#                    +--> android-build | android-reuse --+--> publish --> ...
+#
+# In dry run (`enforce: false`, rc22) both reuse jobs are skipped and
+# everything is built as before.
 on:
   push:
     tags:
@@ -230,12 +247,14 @@ jobs:
   # version in which it last changed; `.github/scripts/component-versions.py`
   # diffs the trees of the previous `v*` tag and this commit. Every build
   # job below waits for this plan and is gated by its `*_build` outputs.
-  # The manifest's `enforce` switch is OFF (dry run): every component is
-  # still built and the plan only lands in the run summary. With `enforce`
-  # on, an unchanged server retags its recorded images (vault-core,
-  # vault-dns, vault-proxy; vault-api is rebuilt because it bakes this
-  # run's agent files and APK) and components whose `reuse` is "none"
-  # (agent, app until RELEASE-SPLIT-1b) are still rebuilt.
+  # The manifest's `enforce` switch is ON from the rc22 tag on (operator
+  # decision 2026-11-01, ADR-0031): an unchanged server retags its
+  # recorded images (vault-core, vault-dns, vault-proxy; vault-api is
+  # always rebuilt because it bakes the client files and their versions)
+  # and an unchanged agent/app is reused from its recorded release
+  # (agent-reuse, android-reuse; WP RELEASE-SPLIT-1b). With `enforce`
+  # off (dry run) every component is built and the plan only lands in
+  # the run summary.
   # On tag runs the committed manifest must already carry the planned
   # versions (`component-versions.py write` in the release commit), so a
   # tag never publishes with a stale record; other runs skip that check.
@@ -256,6 +275,15 @@ jobs:
       agent_version: ${{ steps.plan.outputs.agent_version }}
       app_build: ${{ steps.plan.outputs.app_build }}
       app_version: ${{ steps.plan.outputs.app_version }}
+      # WP RELEASE-SPLIT-1b: the version stamped on the client files this
+      # run ships (the new version when built, the recorded one when
+      # reused), the minimum client versions the server states, and the
+      # stale-manifest guard's verdict.
+      agent_artifact_version: ${{ steps.plan.outputs.agent_artifact_version }}
+      agent_minimum: ${{ steps.plan.outputs.agent_minimum }}
+      app_artifact_version: ${{ steps.plan.outputs.app_artifact_version }}
+      app_minimum: ${{ steps.plan.outputs.app_minimum }}
+      previous_check: ${{ steps.plan.outputs.previous_check }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -278,6 +306,11 @@ jobs:
           echo "tag=${prev}" >> "$GITHUB_OUTPUT"
           echo "previous release tag: ${prev}"
 
+      # WP RELEASE-SPLIT-1b: with `enforce: true` the script also replays
+      # the previous tag's plan and exits 2 ("stale-manifest guard") when
+      # that tag's manifest does not record what the replay says; reuse
+      # would otherwise trust an outdated record. In dry run the verdict is
+      # only reported (summary, `previous_check` output).
       - name: Plan component builds
         id: plan
         env:
@@ -302,6 +335,11 @@ jobs:
           AGENT_VERSION: ${{ steps.plan.outputs.agent_version }}
           APP_BUILD: ${{ steps.plan.outputs.app_build }}
           APP_VERSION: ${{ steps.plan.outputs.app_version }}
+          AGENT_ARTIFACT_VERSION: ${{ steps.plan.outputs.agent_artifact_version }}
+          APP_ARTIFACT_VERSION: ${{ steps.plan.outputs.app_artifact_version }}
+          AGENT_MINIMUM: ${{ steps.plan.outputs.agent_minimum }}
+          APP_MINIMUM: ${{ steps.plan.outputs.app_minimum }}
+          PREVIOUS_CHECK: ${{ steps.plan.outputs.previous_check }}
         run: |
           set -eu
           bad=0
@@ -313,13 +351,27 @@ jobs:
             esac
           done
           for pair in "server_version=${SERVER_VERSION}" "agent_version=${AGENT_VERSION}" \
-                      "app_version=${APP_VERSION}"; do
+                      "app_version=${APP_VERSION}" \
+                      "agent_artifact_version=${AGENT_ARTIFACT_VERSION}" \
+                      "app_artifact_version=${APP_ARTIFACT_VERSION}"; do
             if ! printf '%s' "${pair#*=}" | grep -Eqx \
                 '[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+(\.[0-9A-Za-z]+)*)?|dev-[0-9a-f]{7,40}'; then
               echo "::error::plan output ${pair%%=*}='${pair#*=}' is not a version" >&2
               bad=1
             fi
           done
+          # A minimum is optional (empty) but never anything else.
+          for pair in "agent_minimum=${AGENT_MINIMUM}" "app_minimum=${APP_MINIMUM}"; do
+            if [ -n "${pair#*=}" ] && ! printf '%s' "${pair#*=}" | grep -Eqx \
+                '[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+(\.[0-9A-Za-z]+)*)?'; then
+              echo "::error::plan output ${pair%%=*}='${pair#*=}' is not a product version" >&2
+              bad=1
+            fi
+          done
+          case "$PREVIOUS_CHECK" in
+            match|mismatch|no-manifest|first-tag|unreadable) ;;
+            *) echo "::error::plan output previous_check='${PREVIOUS_CHECK}' is unknown" >&2; bad=1 ;;
+          esac
           if [ "$bad" -ne 0 ]; then
             exit 1
           fi
@@ -376,8 +428,25 @@ jobs:
     # puts the component-plan job (checkout with full history, plan, output
     # check, manifest check; about a minute) on the critical path of
     # every build.
-    needs: [build-version, component-plan, android-build, agent-build]
-    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    # WP RELEASE-SPLIT-1b: an unchanged agent/app is not built; its files
+    # come from `agent-reuse` / `android-reuse` (the recorded release)
+    # instead. A builder skipped BY THE PLAN must not skip this job, so the
+    # `if:` runs on `!cancelled()` and accepts per client exactly one of:
+    # the builder succeeded, or the plan said "do not build" (builder
+    # skipped) and the reuse job succeeded. A failed builder or reuse job,
+    # or a builder skipped for any other reason, still stops the release.
+    needs: [build-version, component-plan, android-build, android-reuse, agent-build, agent-reuse]
+    if: >-
+      ${{ !cancelled()
+      && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+      && needs.build-version.result == 'success'
+      && needs.component-plan.result == 'success'
+      && (needs.agent-build.result == 'success'
+          || (needs.agent-build.result == 'skipped' && needs.component-plan.outputs.agent_build == 'false'
+              && needs.agent-reuse.result == 'success'))
+      && (needs.android-build.result == 'success'
+          || (needs.android-build.result == 'skipped' && needs.component-plan.outputs.app_build == 'false'
+              && needs.android-reuse.result == 'success')) }}
     permissions:
       contents: read
       packages: write
@@ -442,8 +511,11 @@ jobs:
 
       # WP RELEASE-SPLIT-1a: build or reuse this leg. The server is one
       # component (ADR-0031): its `server_build` output covers all four
-      # images. vault-api is always built until RELEASE-SPLIT-1b, because
-      # it bakes the agent files and APK of THIS run (DIST-1a).
+      # images. vault-api is always built: it bakes the agent files and APK
+      # of their recorded versions (RELEASE-SPLIT-1b: from this run's build
+      # or from the reuse download) and their versions as build args, and
+      # an image retagged from the server's recorded release would carry
+      # the client files of THAT release, not of the current record.
       - name: Decide build or reuse (component plan)
         id: mode
         env:
@@ -673,9 +745,13 @@ jobs:
 
       # android-build uploads an APK only when it was signed (the release
       # keystore is configured); otherwise the image carries no APK and
-      # GET /v1/dist points at the release asset instead.
+      # GET /v1/dist points at the release asset instead. WP
+      # RELEASE-SPLIT-1b: `release-agent` / `release-apk` come from the
+      # builder or, for an unchanged client, from its reuse job (the
+      # recorded release's files, verified there); the plan ran exactly one
+      # of the two per client.
       - name: Download signed APK (vault-api only)
-        if: matrix.image == 'vault-api' && needs.android-build.outputs.configured == 'true'
+        if: matrix.image == 'vault-api' && (needs.android-build.outputs.configured || needs.android-reuse.outputs.configured) == 'true'
         uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: release-apk
@@ -695,13 +771,20 @@ jobs:
       # read from a job output -- see the rule at android-build's
       # `outputs:`. An empty/garbled output this step relies on fails it
       # with a message naming the output, never a `sha256sum ""`.
+      # WP RELEASE-SPLIT-1b: file names carry each client's ARTIFACT
+      # version (component-plan `*_artifact_version`): this run's version
+      # when the client was built, its recorded version when reused. The
+      # same two versions go into the image as build args, so
+      # vault_api/dist.py computes exactly these names.
       - name: Stage release downloads into api/dist (vault-api only)
         if: matrix.image == 'vault-api'
         working-directory: api/dist
         env:
           BUILD_VERSION: ${{ needs.build-version.outputs.version }}
-          APK_CONFIGURED: ${{ needs.android-build.outputs.configured }}
-          APK_SHA256: ${{ needs.android-build.outputs.apk_sha256 }}
+          AGENT_VERSION: ${{ needs.component-plan.outputs.agent_artifact_version }}
+          APP_VERSION: ${{ needs.component-plan.outputs.app_artifact_version }}
+          APK_CONFIGURED: ${{ needs.android-build.outputs.configured || needs.android-reuse.outputs.configured }}
+          APK_SHA256: ${{ needs.android-build.outputs.apk_sha256 || needs.android-reuse.outputs.apk_sha256 }}
           IS_TAG: ${{ startsWith(github.ref, 'refs/tags/v') }}
         run: |
           set -eu
@@ -709,6 +792,12 @@ jobs:
             echo "::error::build-version's version output is empty -- cannot derive the release file names" >&2
             exit 1
           fi
+          for pair in "agent_artifact_version=${AGENT_VERSION}" "app_artifact_version=${APP_VERSION}"; do
+            if [ -z "${pair#*=}" ]; then
+              echo "::error::component-plan's ${pair%%=*} output is empty -- cannot derive the release file names" >&2
+              exit 1
+            fi
+          done
           case "$APK_CONFIGURED" in
             true|false) ;;
             *) echo "::error::android-build's configured output is '${APK_CONFIGURED}', not true/false -- was it dropped as secret-like?" >&2; exit 1 ;;
@@ -717,20 +806,22 @@ jobs:
             # vault_api.dist.is_release_version's grammar: on any other tag
             # shape (e.g. v0.1.0+meta) the image would silently serve
             # nothing, so fail the release instead.
-            if ! printf '%s' "$BUILD_VERSION" | grep -Eqx '[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+(\.[0-9A-Za-z]+)*)?'; then
-              echo "::error::build version '${BUILD_VERSION}' is not a release version vault-api serves downloads for" >&2
-              exit 1
-            fi
+            for v in "$BUILD_VERSION" "$AGENT_VERSION" "$APP_VERSION"; do
+              if ! printf '%s' "$v" | grep -Eqx '[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+(\.[0-9A-Za-z]+)*)?'; then
+                echo "::error::version '${v}' is not a release version vault-api serves downloads for" >&2
+                exit 1
+              fi
+            done
           fi
           sha256sum --check --strict SHA256SUMS
           if [ "$APK_CONFIGURED" = "true" ]; then
-            apk="steamhangar-app-v${BUILD_VERSION}.apk"
+            apk="steamhangar-app-v${APP_VERSION}.apk"
             if ! printf '%s' "$APK_SHA256" | grep -Eqx '[0-9a-f]{64}'; then
               echo "::error::android-build's apk_sha256 output is '${APK_SHA256}', not a SHA-256 -- was it dropped as secret-like?" >&2
               exit 1
             fi
             if [ ! -f "$apk" ]; then
-              echo "::error::api/dist/${apk} missing -- the release-apk artifact does not carry the APK name derived from the build version" >&2
+              echo "::error::api/dist/${apk} missing -- the release-apk artifact does not carry the APK name derived from the app's artifact version" >&2
               exit 1
             fi
             got="$(sha256sum "$apk" | cut -d' ' -f1)"
@@ -740,14 +831,14 @@ jobs:
             fi
           fi
           if [ "$IS_TAG" = "true" ]; then
-            tag="v${BUILD_VERSION}"
+            tag="v${AGENT_VERSION}"
             want="vault-agent-${tag}-windows-amd64.exe vault-agent-${tag}-linux-amd64 vault-agent-${tag}-linux-arm64 install-task.ps1 run-vault-agent.ps1 uninstall-task.ps1 vault-agent-report.service vault-agent-report.timer SHA256SUMS"
             if [ "$APK_CONFIGURED" = "true" ]; then
-              want="${want} steamhangar-app-${tag}.apk"
+              want="${want} steamhangar-app-v${APP_VERSION}.apk"
             fi
             for f in $want; do
               if [ ! -f "$f" ]; then
-                echo "::error::api/dist/${f} missing -- vault-api would not serve it for version ${BUILD_VERSION}" >&2
+                echo "::error::api/dist/${f} missing -- vault-api would not serve it (agent ${AGENT_VERSION}, app ${APP_VERSION})" >&2
                 exit 1
               fi
             done
@@ -785,9 +876,23 @@ jobs:
           # them as VAULT_BUILD_VERSION/VAULT_BUILD_COMMIT (see the
           # build-version job). ci.yml's image-build passes the same KEYS
           # with ci-<sha> values; api/tests/test_ci_image_build.py pins that.
+          # WP RELEASE-SPLIT-1b: the bundled clients. Only api/Dockerfile
+          # declares the six VAULT_AGENT_*/VAULT_APP_* ARGs; the other
+          # images ignore them (an unused build arg is a buildx warning,
+          # nothing more). `_VERSION` is the component version (ADR-0031),
+          # `_BUILD` the version stamped on the baked files, `_MINIMUM` the
+          # oldest client the server supports (`minimum_version` in
+          # .github/components.json). All are versions from the secret-free
+          # component-plan job.
           build-args: |
             VAULT_VERSION=${{ needs.build-version.outputs.version }}
             VAULT_COMMIT=${{ needs.build-version.outputs.commit }}
+            VAULT_AGENT_VERSION=${{ needs.component-plan.outputs.agent_version }}
+            VAULT_AGENT_BUILD=${{ needs.component-plan.outputs.agent_artifact_version }}
+            VAULT_AGENT_MINIMUM=${{ needs.component-plan.outputs.agent_minimum }}
+            VAULT_APP_VERSION=${{ needs.component-plan.outputs.app_version }}
+            VAULT_APP_BUILD=${{ needs.component-plan.outputs.app_artifact_version }}
+            VAULT_APP_MINIMUM=${{ needs.component-plan.outputs.app_minimum }}
 
       # Review round 2 (S3): a green build here proves buildx SUCCEEDED,
       # not that what got pushed is what was declared -- exactly the gap
@@ -922,11 +1027,12 @@ jobs:
       - name: Check the baked release downloads inside the pushed image (vault-api only)
         if: matrix.image == 'vault-api' && startsWith(github.ref, 'refs/tags/v')
         env:
-          APK_CONFIGURED: ${{ needs.android-build.outputs.configured }}
+          APK_CONFIGURED: ${{ needs.android-build.outputs.configured || needs.android-reuse.outputs.configured }}
           # WP CI-FIX-DIST: derived, never a job output (android-build's
           # `outputs:` rule). The staging step already proved both non-empty.
-          APK_NAME: steamhangar-app-v${{ needs.build-version.outputs.version }}.apk
-          APK_SHA256: ${{ needs.android-build.outputs.apk_sha256 }}
+          # RELEASE-SPLIT-1b: the app's artifact version (built or reused).
+          APK_NAME: steamhangar-app-v${{ needs.component-plan.outputs.app_artifact_version }}.apk
+          APK_SHA256: ${{ needs.android-build.outputs.apk_sha256 || needs.android-reuse.outputs.apk_sha256 }}
         run: |
           set -eu
           REF="${{ steps.base.outputs.base }}/${{ matrix.image }}@${{ steps.build.outputs.digest }}"
@@ -1020,9 +1126,9 @@ jobs:
     # other way round: `publish` needs this job, so no image is pushed for
     # a release whose APK build failed. WP CI-FIX-DIST: `build-version` is
     # needed for the APK's file name (see "Record APK checksum" below).
-    # WP RELEASE-SPLIT-1a: gated by the component plan. app_build is always
-    # "true" while the app's `reuse` is "none" in .github/components.json
-    # (RELEASE-SPLIT-1b wires attaching the recorded APK instead).
+    # WP RELEASE-SPLIT-1a: gated by the component plan. app_build is
+    # "false" only with `enforce: true` and an unchanged app; then
+    # `android-reuse` hands on the recorded APK instead (RELEASE-SPLIT-1b).
     needs: [build-version, component-plan]
     if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && needs.component-plan.outputs.app_build == 'true'
     # Read-only since WP DIST-1a: attaching to the release (the one step
@@ -1421,19 +1527,111 @@ jobs:
         if: always()
         run: rm -f "$RUNNER_TEMP/vault-android-release.jks"
 
+  # WP RELEASE-SPLIT-1b (ADR-0031): an unchanged app is not rebuilt. With
+  # `enforce: true` the plan sets app_build=false for an app whose paths did
+  # not change; this job then takes the APK of the app's recorded version
+  # from THAT version's GitHub Release and hands it on under the same
+  # workflow artifact name android-build uses (`release-apk`), so `publish`
+  # bakes it and `android-release` attaches it to the new release. In dry
+  # run (`enforce: false`) it never runs.
+  # Verification (.github/scripts/release-assets.py, fail closed): GitHub's
+  # own sha256 asset digest must exist and match, and the release body's
+  # recorded SHA-256 (verify block, since RELEASE-SPLIT-1b) must match when
+  # it is there. The CI-SIGN-PIN-1 certificate pin is NOT re-checked: it
+  # ran when this APK was built; the run summary says so.
+  # No signing secret, no `release` Environment: GITHUB_TOKEN with
+  # `contents: read` is enough to read a release of this repository, so
+  # the outputs below may carry the APK's hash.
+  android-reuse:
+    name: android-reuse / APK of the recorded app version (workflow artifact)
+    runs-on: ubuntu-latest
+    needs: [component-plan]
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && needs.component-plan.outputs.app_build == 'false'
+    permissions:
+      contents: read
+    timeout-minutes: 15
+    outputs:
+      # Same names and meaning as android-build's: "true" (an APK is
+      # handed on) and its SHA-256.
+      configured: ${{ steps.verify.outputs.configured }}
+      apk_sha256: ${{ steps.verify.outputs.apk_sha256 }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Download the recorded APK from its release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          APP_VERSION: ${{ needs.component-plan.outputs.app_version }}
+        run: |
+          set -eu
+          if ! printf '%s' "$APP_VERSION" | grep -Eqx '[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+(\.[0-9A-Za-z]+)*)?'; then
+            echo "::error::recorded app version '${APP_VERSION}' is not a product version" >&2
+            exit 1
+          fi
+          mkdir -p "$RUNNER_TEMP/reuse"
+          gh api "repos/${GITHUB_REPOSITORY}/releases/tags/v${APP_VERSION}" > "$RUNNER_TEMP/release.json"
+          set --
+          for f in $(python3 .github/scripts/release-assets.py names --component app --version "$APP_VERSION"); do
+            set -- "$@" --pattern "$f"
+          done
+          gh release download "v${APP_VERSION}" --repo "$GITHUB_REPOSITORY" --dir "$RUNNER_TEMP/reuse" "$@"
+
+      - name: Verify the APK against the release's recorded digests
+        id: verify
+        env:
+          APP_VERSION: ${{ needs.component-plan.outputs.app_version }}
+        run: |
+          set -eu
+          sums="$(python3 .github/scripts/release-assets.py verify --component app \
+            --version "$APP_VERSION" --dir "$RUNNER_TEMP/reuse" --release-json "$RUNNER_TEMP/release.json")"
+          printf '%s\n' "$sums"
+          sha="$(printf '%s\n' "$sums" | awk -v n="steamhangar-app-v${APP_VERSION}.apk" '$2 == n {print $1}')"
+          if ! printf '%s' "$sha" | grep -Eqx '[0-9a-f]{64}'; then
+            echo "::error::no SHA-256 for steamhangar-app-v${APP_VERSION}.apk" >&2
+            exit 1
+          fi
+          echo "configured=true" >> "$GITHUB_OUTPUT"
+          echo "apk_sha256=${sha}" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Android release APK -- reused, NOT rebuilt"
+            echo ""
+            echo "- app unchanged since \`${APP_VERSION}\`: \`steamhangar-app-v${APP_VERSION}.apk\` from release \`v${APP_VERSION}\`"
+            echo "- SHA-256 \`${sha}\` (matches the release's recorded asset digest)"
+            echo "- signing certificate pin (CI-SIGN-PIN-1) not re-checked: it was checked when this APK was built"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the reused APK (workflow artifact)
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-apk
+          path: ${{ runner.temp }}/reuse/steamhangar-app-v${{ needs.component-plan.outputs.app_version }}.apk
+          if-no-files-found: error
+          retention-days: 3
+
   # WP DIST-1a: the release half of the former android-release job. Runs
   # after `publish`, as before, so the release is written in the same fixed
   # order (APK first, then agent-binaries); the attach steps below are the
   # old ones unchanged except that the APK now comes from android-build's
   # `release-apk` artifact. Skipped when android-build built no APK (no
   # signing secret): the old job's per-step skips, lifted to the job.
+  # WP RELEASE-SPLIT-1b: or the APK comes from `android-reuse` (unchanged
+  # app); `!cancelled()` keeps a builder skipped by the plan from skipping
+  # this job, and `publish` must have succeeded either way.
   android-release:
     name: android-release / signed APK -> GitHub Release
     runs-on: ubuntu-latest
     # WP CI-FIX-DIST: build-version for the APK name (derived, see
-    # android-build's `outputs:` rule).
-    needs: [build-version, android-build, publish]
-    if: needs.android-build.outputs.configured == 'true' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    # android-build's `outputs:` rule). RELEASE-SPLIT-1b: the name carries
+    # the app's artifact version from component-plan.
+    needs: [build-version, component-plan, android-build, android-reuse, publish]
+    if: >-
+      ${{ !cancelled()
+      && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+      && needs.publish.result == 'success'
+      && ((needs.android-build.result == 'success' && needs.android-build.outputs.configured == 'true')
+          || needs.android-reuse.result == 'success') }}
     permissions:
       contents: write
     timeout-minutes: 15
@@ -1454,19 +1652,19 @@ jobs:
       - name: Check the APK is the one android-build verified
         working-directory: release-apk
         env:
-          BUILD_VERSION: ${{ needs.build-version.outputs.version }}
-          APK_SHA256: ${{ needs.android-build.outputs.apk_sha256 }}
+          APP_VERSION: ${{ needs.component-plan.outputs.app_artifact_version }}
+          APK_SHA256: ${{ needs.android-build.outputs.apk_sha256 || needs.android-reuse.outputs.apk_sha256 }}
         run: |
           set -eu
-          if [ -z "$BUILD_VERSION" ]; then
-            echo "::error::build-version's version output is empty -- cannot derive the APK name" >&2
+          if [ -z "$APP_VERSION" ]; then
+            echo "::error::component-plan's app_artifact_version output is empty -- cannot derive the APK name" >&2
             exit 1
           fi
           if ! printf '%s' "$APK_SHA256" | grep -Eqx '[0-9a-f]{64}'; then
-            echo "::error::android-build's apk_sha256 output is '${APK_SHA256}', not a SHA-256 -- was it dropped as secret-like?" >&2
+            echo "::error::the apk_sha256 output (android-build or android-reuse) is '${APK_SHA256}', not a SHA-256 -- was it dropped as secret-like?" >&2
             exit 1
           fi
-          echo "${APK_SHA256}  steamhangar-app-v${BUILD_VERSION}.apk" | sha256sum --check --strict -
+          echo "${APK_SHA256}  steamhangar-app-v${APP_VERSION}.apk" | sha256sum --check --strict -
 
       # Pre-freeze project review, P2: does this tag's release already
       # exist? Read from the GitHub API (not inferred from which job ran
@@ -1536,7 +1734,7 @@ jobs:
           # is what that step closes.
           generate_release_notes: ${{ steps.release_check.outputs.exists != 'true' }}
           fail_on_unmatched_files: true
-          files: release-apk/steamhangar-app-v${{ needs.build-version.outputs.version }}.apk
+          files: release-apk/steamhangar-app-v${{ needs.component-plan.outputs.app_artifact_version }}.apk
 
   # --- Third deliverable: cross-compiled vault-agent binaries ------------------
   # See this file's header ("Third deliverable") for why these files exist.
@@ -1559,9 +1757,9 @@ jobs:
     runs-on: ubuntu-latest
     # build-version (WP VER-1) supplies the -ldflags version and commit.
     # WP RELEASE-SPLIT-1a: gated by the component plan. agent_build is
-    # always "true" while the agent's `reuse` is "none" in
-    # .github/components.json (RELEASE-SPLIT-1b wires attaching the
-    # recorded release files instead).
+    # "false" only with `enforce: true` and an unchanged agent; then
+    # `agent-reuse` hands on the recorded release files instead
+    # (RELEASE-SPLIT-1b).
     needs: [build-version, component-plan]
     if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && needs.component-plan.outputs.agent_build == 'true'
     # Read-only: this job writes nothing outside its own workspace and the
@@ -1784,6 +1982,76 @@ jobs:
           if-no-files-found: error
           retention-days: 3
 
+  # WP RELEASE-SPLIT-1b (ADR-0031): an unchanged agent is not rebuilt.
+  # With `enforce: true` the plan sets agent_build=false for an agent whose
+  # paths did not change; this job then takes the files of the agent's
+  # recorded version (binaries, packaging scripts, systemd units,
+  # SHA256SUMS; `artifacts.files` in .github/components.json) from THAT
+  # version's GitHub Release and hands them on as `release-agent`, the
+  # artifact agent-build would have uploaded: `publish` bakes them into
+  # vault-api, `agent-binaries` attaches them to the new release under
+  # their original (versioned) names. In dry run it never runs.
+  # Verification (.github/scripts/release-assets.py, fail closed): every
+  # file matches GitHub's sha256 asset digest and, when present, the
+  # release body's recorded SHA-256; SHA256SUMS lists exactly the other
+  # files and every hash in it matches.
+  agent-reuse:
+    name: agent-reuse / vault-agent files of the recorded agent version (workflow artifact)
+    runs-on: ubuntu-latest
+    needs: [component-plan]
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && needs.component-plan.outputs.agent_build == 'false'
+    permissions:
+      contents: read
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Download the recorded vault-agent files from their release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          AGENT_VERSION: ${{ needs.component-plan.outputs.agent_version }}
+        run: |
+          set -eu
+          if ! printf '%s' "$AGENT_VERSION" | grep -Eqx '[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+(\.[0-9A-Za-z]+)*)?'; then
+            echo "::error::recorded agent version '${AGENT_VERSION}' is not a product version" >&2
+            exit 1
+          fi
+          mkdir -p "$RUNNER_TEMP/reuse"
+          gh api "repos/${GITHUB_REPOSITORY}/releases/tags/v${AGENT_VERSION}" > "$RUNNER_TEMP/release.json"
+          set --
+          for f in $(python3 .github/scripts/release-assets.py names --component agent --version "$AGENT_VERSION"); do
+            set -- "$@" --pattern "$f"
+          done
+          gh release download "v${AGENT_VERSION}" --repo "$GITHUB_REPOSITORY" --dir "$RUNNER_TEMP/reuse" "$@"
+
+      - name: Verify the files against the release's recorded digests
+        env:
+          AGENT_VERSION: ${{ needs.component-plan.outputs.agent_version }}
+        run: |
+          set -eu
+          python3 .github/scripts/release-assets.py verify --component agent --sha256sums \
+            --version "$AGENT_VERSION" --dir "$RUNNER_TEMP/reuse" --release-json "$RUNNER_TEMP/release.json"
+          (cd "$RUNNER_TEMP/reuse" && sha256sum --check --strict SHA256SUMS)
+          {
+            echo "### vault-agent -- reused, NOT rebuilt"
+            echo ""
+            echo "Agent unchanged since \`${AGENT_VERSION}\`: files from release \`v${AGENT_VERSION}\`, checked against its asset digests and SHA256SUMS."
+            echo ""
+            echo '```'
+            cat "$RUNNER_TEMP/reuse/SHA256SUMS"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the reused vault-agent files (workflow artifact)
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-agent
+          path: ${{ runner.temp }}/reuse/
+          if-no-files-found: error
+          retention-days: 3
+
   agent-binaries:
     name: agent-binaries / cross-compiled vault-agent -> GitHub Release
     runs-on: ubuntu-latest
@@ -1793,12 +2061,17 @@ jobs:
     # first). android-release is SKIPPED when no APK was signed, and a
     # skipped need would skip this job too -- hence the explicit `if:`
     # that accepts success or skipped there and demands success elsewhere.
-    needs: [build-version, publish, android-build, android-release, agent-build]
+    # WP RELEASE-SPLIT-1b: the agent files come from agent-build or, for an
+    # unchanged agent, from agent-reuse; a builder skipped by the plan is
+    # accepted only together with a successful reuse job.
+    needs: [build-version, component-plan, publish, android-build, android-reuse, android-release, agent-build, agent-reuse]
     if: >-
       ${{ !cancelled()
       && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
       && needs.publish.result == 'success'
-      && needs.agent-build.result == 'success'
+      && (needs.agent-build.result == 'success'
+          || (needs.agent-build.result == 'skipped' && needs.component-plan.outputs.agent_build == 'false'
+              && needs.agent-reuse.result == 'success'))
       && (needs.android-release.result == 'success' || needs.android-release.result == 'skipped') }}
     # WIDER than the default `contents: read` at the workflow level, scoped
     # to this job alone -- same shape as `android-release`'s own override,
@@ -1888,7 +2161,9 @@ jobs:
           tag_name: ${{ github.ref_name }}
           prerelease: ${{ contains(github.ref_name, '-') }}
           make_latest: ${{ !contains(github.ref_name, '-') }}
-          generate_release_notes: ${{ needs.android-build.outputs.configured != 'true' && steps.release_check.outputs.exists != 'true' }}
+          # RELEASE-SPLIT-1b: android-release also runs for a reused APK,
+          # so "did android-release create the release" is its result.
+          generate_release_notes: ${{ needs.android-release.result != 'success' && steps.release_check.outputs.exists != 'true' }}
           fail_on_unmatched_files: true
           files: |
             dist/vault-agent-*
@@ -1915,6 +2190,12 @@ jobs:
           PIN_PROXY: ${{ needs.publish.outputs.pin_vault_proxy }}
           APK_CERT: ${{ needs.android-build.outputs.cert_sha256 }}
           APK_CONFIGURED: ${{ needs.android-build.outputs.configured }}
+          # WP RELEASE-SPLIT-1b: a reused APK (android-reuse) and the
+          # SHA-256 lines the reuse jobs of later releases check.
+          APK_REUSED: ${{ needs.android-reuse.result == 'success' }}
+          APK_SHA256: ${{ needs.android-build.outputs.apk_sha256 || needs.android-reuse.outputs.apk_sha256 }}
+          APP_VERSION: ${{ needs.component-plan.outputs.app_artifact_version }}
+          AGENT_VERSION: ${{ needs.component-plan.outputs.agent_artifact_version }}
         run: |
           set -eu
           # WP CI-FIX-DIST: an APK was signed but its certificate output is
@@ -1924,6 +2205,15 @@ jobs:
             echo "::error::android-build's cert_sha256 output is '${APK_CERT}', not a SHA-256 -- was it dropped as secret-like?" >&2
             exit 1
           fi
+          apk_line=""
+          if [ "$APK_CONFIGURED" = "true" ] || [ "$APK_REUSED" = "true" ]; then
+            if ! printf '%s' "$APK_SHA256" | grep -Eqx '[0-9a-f]{64}'; then
+              echo "::error::APK SHA-256 output is '${APK_SHA256}', not a SHA-256" >&2
+              exit 1
+            fi
+            apk_line="${APK_SHA256}  steamhangar-app-v${APP_VERSION}.apk"
+          fi
+          sums_sha="$(sha256sum dist/SHA256SUMS | cut -d' ' -f1)"
           for pin in "$PIN_CORE" "$PIN_API" "$PIN_DNS" "$PIN_PROXY"; do
             case "$pin" in
               */*@sha256:?*) ;;
@@ -1956,13 +2246,24 @@ jobs:
             printf '%s\n' "$PIN_CORE" "$PIN_API" "$PIN_DNS" "$PIN_PROXY"
             echo '```'
             echo ""
-            if [ -n "$APK_CERT" ]; then
+            if [ "$APK_REUSED" = "true" ]; then
+              echo "Android APK reused unchanged from \`v${APP_VERSION}\` (signing certificate as listed in that release)."
+            elif [ -n "$APK_CERT" ]; then
               echo "Android APK signing certificate SHA-256: \`${APK_CERT}\`"
             else
               echo "No signed Android APK in this release."
             fi
             echo ""
-            echo "vault-agent binaries, packaging scripts and systemd units: \`SHA256SUMS\`."
+            echo "vault-agent binaries, packaging scripts and systemd units (version \`${AGENT_VERSION}\`): \`SHA256SUMS\`."
+            echo ""
+            echo "SHA-256 of the release files (a later release that reuses them checks these):"
+            echo ""
+            echo '```'
+            echo "${sums_sha}  SHA256SUMS"
+            if [ -n "$apk_line" ]; then
+              echo "$apk_line"
+            fi
+            echo '```'
             echo "<!-- steamhangar:verify:end -->"
           } >> "$notes"
           gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --notes-file "$notes"

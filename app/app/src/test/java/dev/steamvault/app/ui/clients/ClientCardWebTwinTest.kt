@@ -92,6 +92,14 @@ class ClientCardWebTwinTest {
                 "return hits + misses > 0 ? hits / (hits + misses) : null;",
                 "if (client.live_now) return client.live_now;",
                 "return isReleaseVersion(a) && isReleaseVersion(s) && a !== s;",
+                // RELEASE-SPLIT-1b: the bundled-agent texts and rules
+                // (ClientCard.kt `outdatedAgentText`, `agentVersionIssue`).
+                "`Agent \${info.agent} is older than the minimum \${info.minimum}. Update vault-agent on this PC to match the server.`",
+                "`Agent \${info.agent} · server's agent \${info.bundled}. Update vault-agent on this PC to match the server.`",
+                "if (ref.same.includes(a)) return null;",
+                "if (ref.minimum && compareReleaseVersions(a, ref.minimum) === -1) return \"minimum\";",
+                "return \"bundled\";",
+                "const chunks = (id) => id.match(/[0-9]+|[^0-9]+/g) || [];",
             ),
         )
         assertFragments(

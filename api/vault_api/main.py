@@ -26,6 +26,7 @@ from vault_api.cover_cache import CoverFileFetcher
 from vault_api.depot_preview import DepotPreviewService
 from vault_api.store_details import StoreDetailsService
 from vault_api.db import get_connection, init_db
+from vault_api.client_versions import client_versions
 from vault_api.dist import DistCatalog
 from vault_api.jobs import recover_stale_jobs
 from vault_api.map_attrib import cleanup_foreign_mappings
@@ -514,7 +515,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # routers/dist.py); the index GET /v1/dist is behind the key. Mounted
     # unconditionally: with nothing baked in, the index points at the
     # GitHub Release and every /dist/ name is a 404.
-    app.state.dist_catalog = DistCatalog(settings.dist_dir, build)
+    # WP RELEASE-SPLIT-1b: the bundled clients' versions (baked env), for
+    # the file names and the `clients` object of /v1/dist and /v1/settings.
+    app.state.client_versions = client_versions()
+    app.state.dist_catalog = DistCatalog(settings.dist_dir, build, app.state.client_versions)
     app.include_router(dist_router.files_router)
     app.include_router(dist_router.index_router)
     # WP 4a.1. Registered last, by convention (webui.mount_web_ui's own

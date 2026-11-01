@@ -25,6 +25,22 @@ Subcommands (stdlib only, git on PATH):
   history   per consecutive tag pair, which components changed (the
             source of ADR-0031's history table)
 
+WP RELEASE-SPLIT-1b added:
+
+- the previous tag's manifest is read tolerantly: only
+  `components.<name>.version` is taken from it, whatever its `schema`, so
+  a later manifest schema change cannot fail the next tag run;
+- the stale-manifest guard: the plan replays the previous tag's own plan
+  (its manifest's paths, the versions recorded at the tag before it) and
+  compares it with what that tag recorded. With `enforce: true` a mismatch
+  fails the plan: a dry-run tag whose release commit skipped `write` would
+  otherwise make the first enforcing release reuse an outdated artifact;
+- `minimum_version` (agent, app): the oldest client the server still
+  supports; baked into vault-api with the bundled client versions;
+- `<name>_artifact_version` outputs: the version stamped on the artifacts
+  this run ships (the new version when the component is built, its
+  recorded version when its artifacts are reused).
+
 Path patterns in the manifest: `dir/` matches everything below dir,
 a pattern with `*` is a glob (`*` stays inside one path segment, `**`
 crosses segments), anything else is an exact file path. `exclude`
@@ -59,6 +75,46 @@ class ManifestError(ValueError):
 
 
 # ---------------------------------------------------------------------------
+# Version order
+# ---------------------------------------------------------------------------
+
+_CHUNK_RE = re.compile(r"[0-9]+|[^0-9]+")
+
+
+def _ident_key(ident: str) -> tuple[tuple[int, int | str], ...]:
+    """Natural order inside one pre-release identifier: `rc9` < `rc17`
+    (strict SemVer would compare `rc9` and `rc17` as text)."""
+    return tuple((0, int(c)) if c.isdigit() else (1, c) for c in _CHUNK_RE.findall(ident))
+
+
+def compare_versions(a: str, b: str) -> int:
+    """-1, 0 or 1 for two product versions (VERSION_RE). A release sorts
+    after its pre-releases (`0.1.0-rc21.1` < `0.1.0`); pre-release
+    identifiers compare in natural order, a longer list after its prefix
+    (`0.1.0-rc21` < `0.1.0-rc21.1` < `0.1.0-rc22`). The same rule as
+    `compareReleaseVersions` in web/js/lib/clients-page.js and its Kotlin
+    twin."""
+    for v in (a, b):
+        if not VERSION_RE.match(v):
+            raise ManifestError(f"{v!r} is not a product version")
+
+    def split(v: str) -> tuple[list[int], list[str]]:
+        core, _, pre = v.partition("-")
+        return [int(x) for x in core.split(".")], (pre.split(".") if pre else [])
+
+    (ca, pa), (cb, pb) = split(a), split(b)
+    if ca != cb:
+        return -1 if ca < cb else 1
+    if not pa or not pb:
+        return (len(pb) > 0) - (len(pa) > 0) if (pa or pb) else 0
+    for x, y in zip(pa, pb):
+        kx, ky = _ident_key(x), _ident_key(y)
+        if kx != ky:
+            return -1 if kx < ky else 1
+    return (len(pa) > len(pb)) - (len(pa) < len(pb))
+
+
+# ---------------------------------------------------------------------------
 # Manifest
 # ---------------------------------------------------------------------------
 
@@ -81,13 +137,23 @@ def validate_manifest(data: Any) -> dict[str, Any]:
         where = f"components.{name}"
         if not isinstance(comp, dict):
             raise ManifestError(f"{where} is not an object")
-        allowed = {"description", "version", "reuse", "paths", "exclude", "artifacts"}
+        allowed = {"description", "version", "minimum_version", "reuse", "paths",
+                   "exclude", "artifacts"}
         extra = set(comp) - allowed
         if extra:
             raise ManifestError(f"{where} has unknown keys {sorted(extra)}")
         version = comp.get("version")
         if not isinstance(version, str) or not VERSION_RE.match(version):
             raise ManifestError(f"{where}.version {version!r} is not a product version")
+        if "minimum_version" in comp:
+            minimum = comp["minimum_version"]
+            if name == "server":
+                raise ManifestError(f"{where}.minimum_version: only clients have a minimum")
+            if not isinstance(minimum, str) or not VERSION_RE.match(minimum):
+                raise ManifestError(f"{where}.minimum_version {minimum!r} is not a product version")
+            if compare_versions(minimum, version) > 0:
+                raise ManifestError(f"{where}.minimum_version {minimum} is newer than "
+                                    f"version {version}")
         if comp.get("reuse") not in REUSE_MODES:
             raise ManifestError(f"{where}.reuse must be one of {list(REUSE_MODES)}")
         if comp["reuse"] == "retag" and "images" not in comp.get("artifacts", {}):
@@ -196,12 +262,52 @@ def changed_files(repo: Path, base: str, ref: str) -> list[str]:
     return sorted(p for p in out.split("\0") if p)
 
 
-def manifest_at(repo: Path, ref: str, rel: str) -> dict[str, Any] | None:
+def raw_manifest_at(repo: Path, ref: str, rel: str) -> Any:
+    """The manifest committed at `ref` as parsed JSON, or None when `ref`
+    has no such file. Not validated: an older or newer schema is read by
+    :func:`recorded_versions` only."""
     proc = subprocess.run(["git", "-C", str(repo), "show", f"{ref}:{rel}"],
                           capture_output=True, text=True, check=False)
     if proc.returncode != 0:
         return None
-    return validate_manifest(json.loads(proc.stdout))
+    try:
+        return json.loads(proc.stdout)
+    except json.JSONDecodeError as exc:
+        raise ManifestError(f"{rel} at {ref} is not JSON: {exc}") from exc
+
+
+def recorded_versions(data: Any, where: str) -> dict[str, str]:
+    """Only `components.<name>.version` of a manifest, any schema (WP
+    RELEASE-SPLIT-1b: a schema change must not fail the next tag run). A
+    missing or malformed version is an error: the plan must not guess."""
+    comps = data.get("components") if isinstance(data, dict) else None
+    if not isinstance(comps, dict):
+        raise ManifestError(f"{where}: no components object")
+    out: dict[str, str] = {}
+    for name in COMPONENT_ORDER:
+        comp = comps.get(name)
+        version = comp.get("version") if isinstance(comp, dict) else None
+        if not isinstance(version, str) or not VERSION_RE.match(version):
+            raise ManifestError(f"{where}: components.{name}.version {version!r} is not a "
+                                "product version")
+        out[name] = version
+    return out
+
+
+def manifest_at(repo: Path, ref: str, rel: str) -> dict[str, str] | None:
+    """The versions recorded at `ref` (tolerant, see recorded_versions)."""
+    data = raw_manifest_at(repo, ref, rel)
+    return None if data is None else recorded_versions(data, f"{rel} at {ref}")
+
+
+def tag_before(repo: Path, ref: str) -> str | None:
+    """The release tag before `ref` (the rule of publish.yml's "Find the
+    previous release tag" step), or None when there is none."""
+    proc = subprocess.run(["git", "-C", str(repo), "describe", "--tags", "--abbrev=0",
+                           "--match", "v[0-9]*", f"{ref}^"],
+                          capture_output=True, text=True, check=False)
+    tag = proc.stdout.strip()
+    return tag if proc.returncode == 0 and tag else None
 
 
 # ---------------------------------------------------------------------------
@@ -216,34 +322,42 @@ def make_plan(repo: Path, manifest: dict[str, Any], manifest_rel: str, version: 
     for name in COMPONENT_ORDER:
         if component_files(manifest["components"][name], [manifest_rel]):
             raise ManifestError(f"the manifest {manifest_rel} must not belong to {name}")
-    files = changed_files(repo, previous_tag, ref)
     previous = manifest_at(repo, previous_tag, manifest_rel)
     enforce = manifest["enforce"]
+    planned_versions = plan_versions(repo, manifest["components"], previous, version,
+                                     previous_tag, ref)
     components: dict[str, Any] = {}
     for name in COMPONENT_ORDER:
         comp = manifest["components"][name]
-        hits = component_files(comp, files)
-        changed = bool(hits)
-        if previous is not None:
-            prior_version = previous["components"][name]["version"]
-        else:
-            # Bootstrap: the previous tag has no manifest yet; the committed
-            # one carries the versions recorded from git history.
-            prior_version = comp["version"]
-        planned = version if changed else prior_version
+        changed, prior_version, planned, hits = planned_versions[name]
+        # The switch: in dry run, and while a component's reuse path is
+        # not wired, every component is still built.
+        build = changed or not enforce or comp["reuse"] == "none"
         components[name] = {
             "changed": changed,
             "action": "build" if changed else "reuse",
-            # The switch: in dry run, and while a component's reuse path is
-            # not wired, every component is still built.
-            "build": changed or not enforce or comp["reuse"] == "none",
+            "build": build,
             "reuse": comp["reuse"],
             "recorded_version": comp["version"],
             "previous_version": prior_version,
             "version": planned,
+            # WP RELEASE-SPLIT-1b: the version stamped on what this run
+            # ships. A rebuilt unchanged component (dry run) carries the new
+            # version in its file names and `--version` output while its
+            # component version stays the recorded one.
+            "artifact_version": version if build else planned,
+            "minimum_version": comp.get("minimum_version"),
             "artifacts": render_artifacts(comp, planned),
             "changed_files": hits,
         }
+    check = replay_previous(repo, manifest, manifest_rel, previous_tag)
+    if enforce and check["status"] not in GUARD_OK:
+        raise ManifestError(
+            f"stale-manifest guard: {check['detail']} With enforce on, reuse would "
+            f"trust that record. Fix: rebuild every component once with enforce off "
+            f"(dry run) and tag with a manifest written by `component-versions.py write`; "
+            f"switch enforce on only after a tag whose check printed 'versions match "
+            f"the plan' (ADR-0031).")
     return {
         "schema": SCHEMA,
         "version": version,
@@ -252,8 +366,81 @@ def make_plan(repo: Path, manifest: dict[str, Any], manifest_rel: str, version: 
         "enforce": enforce,
         "mode": "enforce" if enforce else "dry-run",
         "previous_manifest": previous is not None,
+        "previous_check": check,
         "components": components,
     }
+
+
+def plan_versions(repo: Path, comps: dict[str, Any], previous: dict[str, str] | None,
+                  version: str, previous_tag: str, ref: str
+                  ) -> dict[str, tuple[bool, str, str, list[str]]]:
+    """Per component: (changed, prior version, planned version, changed
+    files). `previous` are the versions recorded at `previous_tag`; None
+    is the bootstrap (that tag has no manifest yet): the versions of
+    `comps` stand in, i.e. those recorded from git history."""
+    files = changed_files(repo, previous_tag, ref)
+    out = {}
+    for name in COMPONENT_ORDER:
+        comp = comps[name]
+        hits = component_files(comp, files)
+        prior = previous[name] if previous is not None else comp["version"]
+        out[name] = (bool(hits), prior, version if hits else prior, hits)
+    return out
+
+
+#: Guard results that let `enforce` act. "match": the previous tag's
+#: manifest is what a replayed plan says. "no-manifest": the previous tag
+#: predates the manifest; the committed versions come from the git history
+#: table in ADR-0031. "first-tag": the previous tag has no release tag
+#: before it, there is nothing to replay.
+GUARD_OK = ("match", "no-manifest", "first-tag")
+
+
+def _rules(data: Any, name: str, fallback: dict[str, Any]) -> dict[str, Any]:
+    """`paths`/`exclude` of one component of a tolerantly read manifest;
+    the current manifest's rules when the old ones are not readable."""
+    comp = data.get("components", {}).get(name) if isinstance(data, dict) else None
+    if isinstance(comp, dict):
+        paths, exclude = comp.get("paths"), comp.get("exclude", [])
+        if (isinstance(paths, list) and paths and all(isinstance(p, str) and p for p in paths)
+                and isinstance(exclude, list) and all(isinstance(p, str) and p for p in exclude)):
+            return {"paths": paths, "exclude": exclude, "version": comp.get("version")}
+    return {"paths": fallback["paths"], "exclude": fallback.get("exclude", []),
+            "version": fallback["version"]}
+
+
+def replay_previous(repo: Path, manifest: dict[str, Any], manifest_rel: str,
+                    previous_tag: str) -> dict[str, Any]:
+    """Replay the plan of `previous_tag` and compare it with the versions
+    that tag recorded (the stale-manifest guard, WP RELEASE-SPLIT-1b)."""
+    data = raw_manifest_at(repo, previous_tag, manifest_rel)
+    if data is None:
+        return {"status": "no-manifest", "mismatches": [],
+                "detail": f"{previous_tag} has no {manifest_rel}; the committed versions "
+                          "come from the git history (ADR-0031)."}
+    try:
+        recorded = recorded_versions(data, f"{manifest_rel} at {previous_tag}")
+    except ManifestError as exc:
+        return {"status": "unreadable", "mismatches": [], "detail": f"{exc}."}
+    before = tag_before(repo, previous_tag)
+    if before is None:
+        return {"status": "first-tag", "mismatches": [],
+                "detail": f"{previous_tag} is the first release tag; nothing to replay."}
+    try:
+        older = manifest_at(repo, before, manifest_rel)
+    except ManifestError as exc:
+        return {"status": "unreadable", "mismatches": [], "detail": f"{exc}."}
+    rules = {n: _rules(data, n, manifest["components"][n]) for n in COMPONENT_ORDER}
+    replay = plan_versions(repo, rules, older, previous_tag[len(manifest["tag_prefix"]):],
+                           before, previous_tag)
+    bad = [f"{n}: {previous_tag} records {recorded[n]}, a replayed plan "
+           f"({before} -> {previous_tag}) says {replay[n][2]}"
+           for n in COMPONENT_ORDER if recorded[n] != replay[n][2]]
+    if bad:
+        return {"status": "mismatch", "mismatches": bad,
+                "detail": f"the manifest of {previous_tag} is stale ({'; '.join(bad)})."}
+    return {"status": "match", "mismatches": [],
+            "detail": f"the manifest of {previous_tag} matches a replayed plan from {before}."}
 
 
 def manifest_mismatches(manifest: dict[str, Any], plan: dict[str, Any]) -> list[str]:
@@ -277,6 +464,9 @@ def human_table(plan: dict[str, Any]) -> str:
              f"(mode: {plan['mode']})"]
     for r in rows:
         lines.append("  ".join(cell.ljust(w) for cell, w in zip(r, widths)).rstrip())
+    check = plan.get("previous_check")
+    if check:
+        lines.append(f"previous tag check: {check['status']} -- {check['detail']}")
     return "\n".join(lines) + "\n"
 
 
@@ -299,6 +489,9 @@ def summary_markdown(plan: dict[str, Any]) -> str:
         else:
             built = f"no (reused: {c['reuse']})"
         lines.append(f"| {name} | {action} | `{c['version']}` | {built} |")
+    check = plan.get("previous_check")
+    if check:
+        lines += ["", f"Previous tag check: **{check['status']}** -- {check['detail']}"]
     if not plan["enforce"]:
         lines += ["", "Dry run (`enforce: false` in `.github/components.json`): every "
                   "component is still built; the table shows what an enforcing run "
@@ -315,6 +508,13 @@ def github_outputs(plan: dict[str, Any]) -> str:
         lines.append(f"{name}_build={'true' if c['build'] else 'false'}")
         lines.append(f"{name}_version={c['version']}")
         lines.append(f"{name}_reuse={c['reuse']}")
+        # WP RELEASE-SPLIT-1b: what the vault-api image bakes and the
+        # release jobs attach (file names carry this version).
+        lines.append(f"{name}_artifact_version={c.get('artifact_version', c['version'])}")
+        if name != "server":
+            lines.append(f"{name}_minimum={c.get('minimum_version') or ''}")
+    check = plan.get("previous_check")
+    lines.append(f"previous_check={check['status'] if check else 'none'}")
     return "\n".join(lines) + "\n"
 
 

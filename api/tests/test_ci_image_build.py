@@ -210,6 +210,9 @@ def test_image_build_build_args_carry_the_ci_version_and_commit() -> None:
     assert dict(_build_args(_build_step(job).get("with") or {})) == {
         "VAULT_VERSION": "${{ steps.version.outputs.version }}",
         "VAULT_COMMIT": "${{ steps.version.outputs.commit }}",
+        # WP RELEASE-SPLIT-1b: present for key parity, empty (no bundled client).
+        "VAULT_AGENT_VERSION": "", "VAULT_AGENT_BUILD": "", "VAULT_AGENT_MINIMUM": "",
+        "VAULT_APP_VERSION": "", "VAULT_APP_BUILD": "", "VAULT_APP_MINIMUM": "",
     }
 
 

@@ -314,11 +314,15 @@ def test_github_outputs_and_summary(repo: Repo) -> None:
     assert out == [
         "mode=dry-run",
         "server_changed=true", "server_build=true", "server_version=1.1.0-rc1",
-        "server_reuse=retag",
+        "server_reuse=retag", "server_artifact_version=1.1.0-rc1",
         "agent_changed=false", "agent_build=true", "agent_version=1.0.0",
         "agent_reuse=release-assets",
+        # RELEASE-SPLIT-1b: a rebuilt unchanged component (dry run) ships
+        # artifacts stamped with the new version.
+        "agent_artifact_version=1.1.0-rc1", "agent_minimum=",
         "app_changed=false", "app_build=true", "app_version=1.0.0",
-        "app_reuse=release-assets",
+        "app_reuse=release-assets", "app_artifact_version=1.1.0-rc1", "app_minimum=",
+        "previous_check=first-tag",
     ]
     md = cv.summary_markdown(plan)
     assert "| server | changed | `1.1.0-rc1` | yes |" in md
@@ -407,13 +411,15 @@ def _committed() -> dict[str, Any]:
     return json.loads(MANIFEST.read_text(encoding="utf-8"))
 
 
-def test_committed_manifest_is_valid_and_dry_run() -> None:
+def test_committed_manifest_is_valid_and_enforcing() -> None:
     data = cv.validate_manifest(_committed())
-    assert data["enforce"] is False
+    # Enforced from rc22 on (ENFORCE-RC22 Weg B, ADR-0031).
+    assert data["enforce"] is True
     assert list(data["components"]) == list(cv.COMPONENT_ORDER)
-    # Reuse is wired for the server images only (agent/app: RELEASE-SPLIT-1b).
+    # Reuse: images are retagged, agent files and APK attached from the
+    # recorded release (wired in RELEASE-SPLIT-1b).
     assert {n: c["reuse"] for n, c in data["components"].items()} == {
-        "server": "retag", "agent": "none", "app": "none"}
+        "server": "retag", "agent": "release-assets", "app": "release-assets"}
     assert MANIFEST.read_text(encoding="utf-8") == cv.dump_manifest(data)
 
 
@@ -622,6 +628,9 @@ _GOOD_PLAN_ENV = {
     "SERVER_BUILD": "true", "SERVER_VERSION": "0.1.0-rc22",
     "AGENT_BUILD": "false", "AGENT_VERSION": "0.1.0-rc17",
     "APP_BUILD": "true", "APP_VERSION": "dev-abc1234",
+    # RELEASE-SPLIT-1b outputs (tested in test_release_split_1b.py).
+    "AGENT_ARTIFACT_VERSION": "0.1.0-rc17", "APP_ARTIFACT_VERSION": "dev-abc1234",
+    "AGENT_MINIMUM": "0.1.0-rc17", "APP_MINIMUM": "", "PREVIOUS_CHECK": "match",
 }
 
 

@@ -229,6 +229,14 @@ def test_publish_passes_exactly_the_two_build_args_from_build_version() -> None:
     assert parse_build_args(step["with"]["build-args"]) == [
         ("VAULT_VERSION", "${{ needs.build-version.outputs.version }}"),
         ("VAULT_COMMIT", "${{ needs.build-version.outputs.commit }}"),
+        # RELEASE-SPLIT-1b: the bundled clients, from the secret-free
+        # component plan (api/Dockerfile's VAULT_AGENT_*/VAULT_APP_* ARGs).
+        ("VAULT_AGENT_VERSION", "${{ needs.component-plan.outputs.agent_version }}"),
+        ("VAULT_AGENT_BUILD", "${{ needs.component-plan.outputs.agent_artifact_version }}"),
+        ("VAULT_AGENT_MINIMUM", "${{ needs.component-plan.outputs.agent_minimum }}"),
+        ("VAULT_APP_VERSION", "${{ needs.component-plan.outputs.app_version }}"),
+        ("VAULT_APP_BUILD", "${{ needs.component-plan.outputs.app_artifact_version }}"),
+        ("VAULT_APP_MINIMUM", "${{ needs.component-plan.outputs.app_minimum }}"),
     ]
 
 

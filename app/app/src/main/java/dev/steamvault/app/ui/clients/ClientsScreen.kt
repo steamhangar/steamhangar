@@ -51,6 +51,8 @@ import dev.steamvault.app.repo.ClientsRepository
 import dev.steamvault.app.repo.SettingsRepository
 import dev.steamvault.app.repo.TrafficRepository
 import dev.steamvault.app.ui.clients.logic.AGENTLESS_NOTE
+import dev.steamvault.app.ui.clients.logic.AgentVersionRef
+import dev.steamvault.app.ui.clients.logic.agentVersionRef
 import dev.steamvault.app.ui.clients.logic.COULD_NOT_LOAD_CLIENTS
 import dev.steamvault.app.ui.clients.logic.DEVICES_HEADING
 import dev.steamvault.app.ui.clients.logic.LOADING_CLIENTS_TEXT
@@ -102,7 +104,8 @@ fun clientsOverviewPoll(repository: TrafficRepository, initialRange: String = "7
  * Rename and "Remove agent" in the footer. Remove reuses the PCs sheet's
  * controller and confirm ([RemovePcConfirm]); a removed PC stays hidden
  * for [REMOVED_HIDE_MS] until the overview has caught up. The outdated
- * check reads `server_version` from [settingsRepository] once per visit.
+ * check reads `server_version` and (RELEASE-SPLIT-1b) `clients` from
+ * [settingsRepository] once per visit.
  *
  * **A nav destination, not a sheet (user decision 2026-10-13, D15).** The
  * PCs sheet (`ClientsSheet.kt`, presence/version/bypass per agent) stays,
@@ -149,8 +152,9 @@ fun ClientsScreen(
             if (removedAt.isNotEmpty()) poll.refreshOnce()
         }
     }
-    var serverVersion by remember(settingsRepository) { mutableStateOf<String?>(null) }
-    LaunchedEffect(settingsRepository) { serverVersion = readServerVersion(settingsRepository) }
+    var agentRef by remember(settingsRepository) { mutableStateOf<AgentVersionRef?>(null) }
+    LaunchedEffect(settingsRepository) { agentRef = readAgentVersionRef(settingsRepository) }
+    val serverVersion = agentRef?.server
     val data = poll.data
     // WP D15d review: "Last active 4 min ago" and the stale-feed note are
     // relative to now; a minute tick (and every answer) keeps them current.
@@ -203,6 +207,7 @@ fun ClientsScreen(
                 renameFlow = renameFlow,
                 controller = clientsController,
                 serverVersion = serverVersion,
+                agentRef = agentRef,
             )
         }
     }
@@ -218,12 +223,14 @@ fun ClientsScreen(
     if (clientsController != null && !clientsController.isOpen) RemovePcConfirm(clientsController, scope)
 }
 
-/** `server_version` of `GET /v1/settings`, or `null` (no repository, an
- * error, or a server that does not send it: then nothing warns). */
-private suspend fun readServerVersion(settingsRepository: SettingsRepository?): String? {
+/** `server_version` and `clients` of `GET /v1/settings` as the reference
+ * agents are checked against (RELEASE-SPLIT-1b), or `null` (no repository,
+ * an error: then nothing warns). */
+private suspend fun readAgentVersionRef(settingsRepository: SettingsRepository?): AgentVersionRef? {
     if (settingsRepository == null) return null
     return try {
-        settingsRepository.get().server_version
+        val s = settingsRepository.get()
+        agentVersionRef(s.server_version, s.clients)
     } catch (_: VaultApiError) {
         null
     }
@@ -240,6 +247,7 @@ private fun ClientsBody(
     renameFlow: ClientRenameFlow?,
     controller: ClientsController?,
     serverVersion: String?,
+    agentRef: AgentVersionRef?,
 ) {
     val data = poll.data
     val note = pollNote(
@@ -253,10 +261,10 @@ private fun ClientsBody(
     )
     val removeErrors = controller?.removeErrors.orEmpty()
     val range = data?.range ?: poll.range
-    val cards = remember(merged, range, serverVersion, nowMs, removeErrors) {
-        merged.map { clientCardView(it, range, serverVersion, nowMs, it.agent?.let { a -> removeErrors[a.client_id] }) }
+    val cards = remember(merged, range, agentRef, nowMs, removeErrors) {
+        merged.map { clientCardView(it, range, serverVersion, nowMs, it.agent?.let { a -> removeErrors[a.client_id] }, agentRef) }
     }
-    val tiles = remember(merged, range, serverVersion) { if (merged.isEmpty()) emptyList() else summaryTiles(merged, range, serverVersion) }
+    val tiles = remember(merged, range, agentRef) { if (merged.isEmpty()) emptyList() else summaryTiles(merged, range, serverVersion, agentRef) }
     val rangeLabel = stringResource(R.string.traffic_range_statistics)
 
     LazyColumn(

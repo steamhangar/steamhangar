@@ -593,11 +593,31 @@ their open boxes (items 2, 7 and 11) are in section 12. Item 13 stays here.
         `api/tests/test_release_split_1a.py`. Release step from rc22 on:
         the release commit runs `component-versions.py write --version
         <new> --previous-tag <prev>` (a tag run without it warns in dry run,
-        fails with enforce). Open for
-        1b: vault-api bakes the recorded agent/APK, agent/app reuse
-        (`reuse: release-assets`), APK pin skip for reused APKs, alias
-        list (rc18 to rc21.1, git-corrected), minimum versions, then
-        `enforce: true`; 1c: About and release notes.
+        fails with enforce). Done in RELEASE-SPLIT-1b: agent/app reuse
+        (`reuse: release-assets`, jobs `agent-reuse`/`android-reuse`,
+        `.github/scripts/release-assets.py`), `!cancelled()` gating,
+        vault-api bakes the clients' recorded/built files and versions,
+        APK pin only for a built APK, tolerant previous-manifest read,
+        stale-manifest guard, minimum versions (0.1.0-rc17), alias list
+        (rc18 to rc21.1), `clients` in `GET /v1/dist`/`GET /v1/settings`,
+        Clients hint against the bundled agent (web + Android); tests
+        `api/tests/test_release_split_1b.py`,
+        `web/tests/release-split-1b.test.js`,
+        `ReleaseSplit1bAgentVersionTest.kt`. `enforce: true` from the rc22
+        tag on (operator decision 2026-11-01 ENFORCE-RC22 Weg B; rc22
+        bootstraps from the committed manifest). rc22 rebuilds all three
+        components (operator decision 2026-11-01 AGENT-RC22 Weg A: the
+        agent becomes 0.1.0-rc22 because SAMPLE-IP-1 changed two
+        help/error strings in hosts.go/hostsfile.go; agents rc17-rc21.1
+        show "differs from the server's agent" once). Before the tag two
+        `workflow_dispatch` rehearsals with enforce on must pass: a reuse
+        rehearsal on a throwaway `wp/` branch whose commit restores the
+        manifest's agent and app paths to `v0.1.0-rc21.1` (plan:
+        `agent_build=false`, `app_build=false`, "reused, NOT rebuilt"
+        sections; the operator deletes the branch afterwards) and a plain
+        one from HEAD (all-build path); ghcr packages public (ADR-0031).
+        Open: 1c (About and release notes, ABOUT-VERSION-1 decided
+        2026-11-01: Weg A).
       - [ ] **VERIFY-FAST-1** (deploy/tests + devbox, decided 2026-10-18,
         Weg A) `verify-stack.sh` gets section selection (`VERIFY_SECTIONS`);
         `dev.sh verify` defaults to a lean set (1 config drift, 3 compose
@@ -686,6 +706,19 @@ their open boxes (items 2, 7 and 11) are in section 12. Item 13 stays here.
       - [ ] nit (VERIFY-FAST-1 review): steps of sections 1-3 and 7-11 are
         selectable only as whole sections; non-preset subsets are for
         debugging only (hidden on-disk state between steps).
+      - [ ] nit (RELEASE-SPLIT-1b review): the app `minimum` is exposed by
+        the API (`clients.app.minimum`) but unused in the Android UI.
+      - [ ] nit (RELEASE-SPLIT-1b review): the outdated-agent text for an
+        agent NEWER than the bundled one says "match the server"; it could
+        say "the server's agent".
+      - [ ] nit (RELEASE-SPLIT-1b review): comment in `agent-reuse` /
+        `android-reuse` (publish.yml) that the release metadata read and
+        the download are two separate reads (the digest check fails closed
+        if the release changed in between).
+      - [ ] nit (RELEASE-SPLIT-1b second-pass review):
+        `web/js/lib/dist-downloads.js` `appDownloadPlan` reports
+        `version: index.version` (the server's) for an APK named with the
+        app's own version (inconsistent once the APK is reused).
       - [ ] remaining nits: MAP-DRIFT-1 fail-safe tests, claim-vs-move race
         test, aria-live on queue move (fixed in NITS-WEB-1:
         `downloads-queue-reorder.test.js`), D19WiringTest pin,

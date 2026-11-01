@@ -28,6 +28,14 @@
  *    as "not available" (fail closed), not as a link to wherever the
  *    answer points.
  *
+ * Client versions (WP RELEASE-SPLIT-1b, ADR-0031): the agent files and the
+ * APK carry their own version, which may be older than the server's (an
+ * unchanged client is reused from the release that built it). The index
+ * states it as `clients.<agent|app>.build`; names and release URLs of a
+ * client's files use that version ({@link clientFilesVersion}), and a server
+ * without `clients` (before 1b, a local build) uses its own version as
+ * before.
+ *
  * Pure: no DOM, no storage, no fetch.
  */
 
@@ -77,6 +85,18 @@ export function readDistIndex(response) {
   return r;
 }
 
+/**
+ * The version the files of a bundled client carry (RELEASE-SPLIT-1b):
+ * `clients.<client>.build` when it is a release version, else the server's.
+ * @param {{version: string, clients?: unknown}} index a {@link readDistIndex} result
+ * @param {"agent" | "app"} client
+ */
+export function clientFilesVersion(index, client) {
+  const clients = index.clients && typeof index.clients === "object" ? /** @type {any} */ (index.clients) : null;
+  const c = clients ? clients[client] : null;
+  return c && typeof c === "object" && isReleaseVersion(c.build) ? c.build : index.version;
+}
+
 function findArtifact(index, id) {
   const art = index.artifacts.find((a) => a && typeof a === "object" && a.id === id);
   return art || null;
@@ -90,10 +110,11 @@ function localPath(index, art, path) {
   return path;
 }
 
-/** The release URL of a file, if it is the project's release of this version. */
-function releaseUrl(index, art) {
+/** The release URL of a file, if it is the project's release of `version`
+ * (the file's own client version, RELEASE-SPLIT-1b). */
+function releaseUrl(index, art, version) {
   if (!art || index.release !== true || typeof art.release_url !== "string") return null;
-  return art.release_url === `${releaseDownloadBase(index.version)}/${art.name}` ? art.release_url : null;
+  return art.release_url === `${releaseDownloadBase(version)}/${art.name}` ? art.release_url : null;
 }
 
 /**
@@ -114,7 +135,7 @@ export function appDownloadPlan(response, origin) {
   const size = typeof art.size === "number" ? art.size : null;
   const local = localPath(index, art, index.apk_alias_url) || localPath(index, art, art.local_url);
   if (local) return { kind: "download", source: "local", url: `${origin}${local}`, name: art.name, size, version: index.version };
-  const release = releaseUrl(index, art);
+  const release = releaseUrl(index, art, clientFilesVersion(index, "app"));
   if (release) return { kind: "download", source: "release", url: release, name: art.name, size: null, version: index.version };
   return { kind: "none", version: index.version };
 }
@@ -143,7 +164,10 @@ export function agentDownloadPlan(response, serverUrl, namesFor) {
   // MUTATION TARGET (review B1): the version goes into a pasted command;
   // outside the release grammar there is no command at all.
   if (!isReleaseVersion(index.version)) return { ok: false, version: index.version };
-  const names = namesFor(index.version);
+  // RELEASE-SPLIT-1b: the agent's own version names its files and is the
+  // version the command installs.
+  const version = clientFilesVersion(index, "agent");
+  const names = namesFor(version);
   const arts = Object.entries(names).map(([id, name]) => {
     const art = findArtifact(index, id);
     return art && art.name === name ? art : null;
@@ -151,10 +175,10 @@ export function agentDownloadPlan(response, serverUrl, namesFor) {
   if (arts.some((a) => a === null)) return { ok: false, version: index.version };
   const base = index.local_base.replace(/\/$/, "");
   if (base && arts.every((a) => localPath(index, a, a.local_url) === `${base}/${a.name}`)) {
-    return { ok: true, source: "local", base: `${serverUrl}${base}`, version: index.version };
+    return { ok: true, source: "local", base: `${serverUrl}${base}`, version };
   }
-  if (arts.every((a) => releaseUrl(index, a) !== null)) {
-    return { ok: true, source: "release", base: releaseDownloadBase(index.version), version: index.version };
+  if (arts.every((a) => releaseUrl(index, a, version) !== null)) {
+    return { ok: true, source: "release", base: releaseDownloadBase(version), version };
   }
   return { ok: false, version: index.version };
 }

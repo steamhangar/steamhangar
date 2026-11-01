@@ -268,7 +268,8 @@ function ratePercent(rate) {
  * source shows the dash and says why (never a zero it cannot back).
  * @param {Array<object>} clients
  * @param {string} range
- * @param {unknown} [serverVersion] needed for the outdated count
+ * @param {unknown} [serverVersion] needed for the outdated count: the server
+ *   version string, or the {@link agentVersionRef} (RELEASE-SPLIT-1b)
  * @returns {Array<{key: string, label: string, value: string, unit: string, detail: string,
  *   meter?: number, outdated?: number | null, hi?: boolean}>}
  */
@@ -310,7 +311,7 @@ export function summaryTiles(clients, range, serverVersion) {
   }
   const agents = list.filter((c) => isAgentClient(c));
   const online = agents.filter((c) => c.connected === true).length;
-  const serverKnown = isReleaseVersion(typeof serverVersion === "string" ? serverVersion.trim() : "");
+  const serverKnown = referenceKnown(serverVersion);
   const outdated = serverKnown ? agents.filter((c) => outdatedAgentInfo(c, serverVersion)).length : null;
   let detail;
   if (!agents.length) detail = "No agent paired";
@@ -327,35 +328,157 @@ export function outdatedAgentsPillText(n) {
 }
 
 /**
- * WP CLIENTS-3 (Weg A, frontend only): an agent is outdated when its reported
- * version differs from the server's. "Differs", not "older": a newer agent is
- * flagged too, because that pair is untested. A version that is missing or
- * outside the release grammar (`0.1.0`, `0.1.0-rc19.3`; not `dev`) is unknown
- * and never warns.
- * @param {unknown} agentVersion
- * @param {unknown} serverVersion
- * @returns {boolean}
+ * Order of two release versions (RELEASE-SPLIT-1b): -1, 0 or 1, or null when
+ * either is outside the release grammar. A release sorts after its
+ * pre-releases (`0.1.0-rc21.1` < `0.1.0`); pre-release identifiers compare in
+ * natural order (`rc9` < `rc17`, strict SemVer would not), a longer list after
+ * its prefix (`rc21` < `rc21.1` < `rc22`). Same rule as
+ * `.github/scripts/component-versions.py` `compare_versions` and the Kotlin
+ * twin.
+ * @param {unknown} a
+ * @param {unknown} b
+ * @returns {-1 | 0 | 1 | null}
  */
-export function isAgentOutdated(agentVersion, serverVersion) {
-  const a = typeof agentVersion === "string" ? agentVersion.trim() : "";
-  const s = typeof serverVersion === "string" ? serverVersion.trim() : "";
+export function compareReleaseVersions(a, b) {
+  if (!isReleaseVersion(a) || !isReleaseVersion(b)) return null;
+  const split = (v) => {
+    const i = v.indexOf("-");
+    const core = (i < 0 ? v : v.slice(0, i)).split(".").map(Number);
+    return { core, pre: i < 0 ? [] : v.slice(i + 1).split(".") };
+  };
+  const chunks = (id) => id.match(/[0-9]+|[^0-9]+/g) || [];
+  const cmpIdent = (x, y) => {
+    const cx = chunks(x);
+    const cy = chunks(y);
+    for (let k = 0; k < Math.min(cx.length, cy.length); k++) {
+      const nx = /^[0-9]/.test(cx[k]);
+      const ny = /^[0-9]/.test(cy[k]);
+      if (nx !== ny) return nx ? -1 : 1;
+      if (nx) {
+        const d = Number(cx[k]) - Number(cy[k]);
+        if (d !== 0) return d < 0 ? -1 : 1;
+      } else if (cx[k] !== cy[k]) {
+        return cx[k] < cy[k] ? -1 : 1;
+      }
+    }
+    return Math.sign(cx.length - cy.length);
+  };
+  const x = split(a);
+  const y = split(b);
+  for (let k = 0; k < 3; k++) {
+    if (x.core[k] !== y.core[k]) return x.core[k] < y.core[k] ? -1 : 1;
+  }
+  if (!x.pre.length || !y.pre.length) {
+    return /** @type {-1 | 0 | 1} */ (Math.sign(y.pre.length > 0) - Math.sign(x.pre.length > 0));
+  }
+  for (let k = 0; k < Math.min(x.pre.length, y.pre.length); k++) {
+    const c = cmpIdent(x.pre[k], y.pre[k]);
+    if (c !== 0) return /** @type {-1 | 1} */ (c);
+  }
+  return /** @type {-1 | 0 | 1} */ (Math.sign(x.pre.length - y.pre.length));
+}
+
+/**
+ * WP RELEASE-SPLIT-1b (ADR-0031): what an agent's version is checked against.
+ * `GET /v1/settings` sends `server_version` and `clients.agent`
+ * (`{version, build, minimum, same_build}`, vault_api/client_versions.py).
+ * With a bundled agent the check uses it: `same_build` (component version,
+ * build stamp, the server's alias list for identical builds) is current,
+ * below `minimum` needs an update, anything else differs. Without one (a
+ * server before 1b, a local build) it falls back to the server version.
+ * @param {unknown} serverVersion
+ * @param {unknown} clients
+ * @returns {{server: string | null, bundled: string | null, minimum: string | null, same: string[]}}
+ */
+export function agentVersionRef(serverVersion, clients) {
+  const server = typeof serverVersion === "string" && isReleaseVersion(serverVersion.trim()) ? serverVersion.trim() : null;
+  const agent = clients && typeof clients === "object" ? /** @type {any} */ (clients).agent : null;
+  if (!agent || typeof agent !== "object" || !isReleaseVersion(agent.build)) {
+    return { server, bundled: null, minimum: null, same: [] };
+  }
+  const same = Array.isArray(agent.same_build) ? agent.same_build.filter((v) => isReleaseVersion(v)) : [];
+  if (!same.includes(agent.build)) same.push(agent.build);
+  return { server, bundled: agent.build, minimum: isReleaseVersion(agent.minimum) ? agent.minimum : null, same };
+}
+
+/** The reference as an object: a plain string is the server version (the
+ * CLIENTS-3 rule), anything else must come from {@link agentVersionRef}. */
+function toVersionRef(reference) {
+  if (reference && typeof reference === "object") return reference;
+  return agentVersionRef(reference, null);
+}
+
+/** True when the outdated count can be claimed at all. */
+function referenceKnown(reference) {
+  const ref = toVersionRef(reference);
+  return !!(ref.bundled || ref.server);
+}
+
+/** The CLIENTS-3 rule, kept for servers that state no bundled agent. */
+function differsFromServer(a, s) {
   return isReleaseVersion(a) && isReleaseVersion(s) && a !== s;
 }
 
 /**
- * The version pair of an outdated agent card, else `null`.
+ * Why an agent's version warns, or `null` (RELEASE-SPLIT-1b): "minimum" below
+ * the server's minimum, "bundled" another build than the bundled agent,
+ * "server" differs from the server version (no bundled agent known). A
+ * version that is missing or outside the release grammar (`0.1.0`,
+ * `0.1.0-rc19.3`; not `dev`) is unknown and never warns.
+ * @param {unknown} agentVersion
+ * @param {unknown} reference server version string or {@link agentVersionRef}
+ * @returns {"minimum" | "bundled" | "server" | null}
+ */
+export function agentVersionIssue(agentVersion, reference) {
+  const a = typeof agentVersion === "string" ? agentVersion.trim() : "";
+  if (!isReleaseVersion(a)) return null;
+  const ref = toVersionRef(reference);
+  if (ref.bundled) {
+    if (ref.same.includes(a)) return null;
+    if (ref.minimum && compareReleaseVersions(a, ref.minimum) === -1) return "minimum";
+    return "bundled";
+  }
+  return differsFromServer(a, ref.server || "") ? "server" : null;
+}
+
+/**
+ * WP CLIENTS-3 (Weg A, frontend only): an agent is outdated when its reported
+ * version differs from the server's. "Differs", not "older": a newer agent is
+ * flagged too, because that pair is untested. Since RELEASE-SPLIT-1b the
+ * reference is the bundled agent when the server states one
+ * ({@link agentVersionIssue}).
+ * @param {unknown} agentVersion
+ * @param {unknown} serverVersion server version string or {@link agentVersionRef}
+ * @returns {boolean}
+ */
+export function isAgentOutdated(agentVersion, serverVersion) {
+  return agentVersionIssue(agentVersion, serverVersion) !== null;
+}
+
+/**
+ * The version facts of an outdated agent card, else `null`.
  * @param {object} client a merged card (`agent` = the `GET /v1/clients` row)
- * @param {unknown} serverVersion
- * @returns {{agent: string, server: string} | null}
+ * @param {unknown} serverVersion server version string or {@link agentVersionRef}
+ * @returns {{agent: string, server: string} | {agent: string, server: string | null,
+ *   bundled: string, minimum: string | null, issue: "minimum" | "bundled"} | null}
  */
 export function outdatedAgentInfo(client, serverVersion) {
   const agent = client && client.agent ? client.agent.agent_version : null;
-  if (!isAgentOutdated(agent, serverVersion)) return null;
-  return { agent: agent.trim(), server: serverVersion.trim() };
+  const issue = agentVersionIssue(agent, serverVersion);
+  if (!issue) return null;
+  const ref = toVersionRef(serverVersion);
+  if (issue === "server") return { agent: agent.trim(), server: ref.server };
+  return { agent: agent.trim(), server: ref.server, bundled: ref.bundled, minimum: ref.minimum, issue };
 }
 
 /** Wording of the outdated-agent warning on a card. */
 export function outdatedAgentText(info) {
+  if (info.issue === "minimum") {
+    return `Agent ${info.agent} is older than the minimum ${info.minimum}. Update vault-agent on this PC to match the server.`;
+  }
+  if (info.issue === "bundled") {
+    return `Agent ${info.agent} · server's agent ${info.bundled}. Update vault-agent on this PC to match the server.`;
+  }
   return `Agent ${info.agent} · server ${info.server}. Update vault-agent on this PC to match the server.`;
 }
 

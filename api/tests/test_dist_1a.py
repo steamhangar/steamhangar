@@ -489,7 +489,9 @@ def test_publish_stages_both_artifacts_into_api_dist_before_the_build() -> None:
         assert _step(job, n)["if"].startswith("matrix.image == 'vault-api'")
     assert _step(job, order[1])["with"] == {"name": "release-agent", "path": "api/dist"}
     assert _step(job, order[2])["with"] == {"name": "release-apk", "path": "api/dist"}
-    assert "needs.android-build.outputs.configured == 'true'" in _step(job, order[2])["if"]
+    # RELEASE-SPLIT-1b: the APK comes from android-build or android-reuse.
+    assert ("(needs.android-build.outputs.configured || needs.android-reuse.outputs.configured)"
+            " == 'true'") in _step(job, order[2])["if"]
     stage = _step(job, order[3])["run"]
     assert "sha256sum --check --strict SHA256SUMS" in stage
     assert 'vault-agent-${tag}-windows-amd64.exe' in stage
@@ -520,6 +522,9 @@ def _run_stage(tmp_path: Path, names: list[str], *, apk: str | None = None, **ov
     env = {
         "PATH": os.environ.get("PATH", ""),
         "BUILD_VERSION": VERSION,
+        # RELEASE-SPLIT-1b: per-client artifact versions (component-plan).
+        "AGENT_VERSION": VERSION,
+        "APP_VERSION": VERSION,
         "APK_CONFIGURED": "true",
         "APK_SHA256": hashlib.sha256(_content(apk)).hexdigest(),
         "IS_TAG": "true",
@@ -553,6 +558,12 @@ def test_stage_step_refuses_a_non_release_version_on_a_tag(tmp_path: Path, versi
     bad = _run_stage(tmp_path, ALL_NAMES, BUILD_VERSION=version)
     assert bad.returncode != 0
     assert "is not a release version" in bad.stderr
+    # RELEASE-SPLIT-1b: the clients' artifact versions name files too.
+    for key in ("AGENT_VERSION", "APP_VERSION"):
+        bad = _run_stage(tmp_path, ALL_NAMES, **{key: version})
+        assert bad.returncode != 0, key
+        assert "is not a release version" in bad.stderr, key
+        assert "missing" not in bad.stderr, key
     # It must stop THERE, not later on a missing-file check.
     assert "missing" not in bad.stderr
 
@@ -570,9 +581,10 @@ def test_in_image_check_runs_on_tags_for_vault_api_and_checks_the_sums() -> None
 def test_release_jobs_attach_the_same_asset_names_as_before() -> None:
     jobs = _publish()
     rel = jobs["android-release"]
-    assert set(_needs(rel)) == {"build-version", "android-build", "publish"}
+    assert set(_needs(rel)) == {"build-version", "component-plan", "android-build",
+                                "android-reuse", "publish"}
     attach = _step(rel, "Attach signed APK to the GitHub Release")
-    assert attach["with"]["files"] == f"release-apk/{APK_FROM_BUILD_VERSION}"
+    assert attach["with"]["files"] == f"release-apk/{APK_FROM_PLAN}"
     rename = _step(jobs["android-build"], "Rename APK to its release-asset name")["run"]
     assert 'steamhangar-app-v${BUILD_VERSION}.apk' in rename
     agent = jobs["agent-binaries"]
@@ -604,6 +616,11 @@ def test_signing_secrets_and_write_token_are_in_different_jobs() -> None:
 # digests.
 
 APK_FROM_BUILD_VERSION = "steamhangar-app-v${{ needs.build-version.outputs.version }}.apk"
+# RELEASE-SPLIT-1b: consumers after the build name the APK by the app's
+# artifact version (this run's version when built, the recorded one when
+# reused), from the secret-free component-plan job -- still never from an
+# output of the secret-holding android-build.
+APK_FROM_PLAN = "steamhangar-app-v${{ needs.component-plan.outputs.app_artifact_version }}.apk"
 
 
 def test_no_job_output_or_reference_carries_the_apk_name() -> None:
@@ -635,13 +652,14 @@ def test_every_apk_consumer_derives_the_name_from_build_version() -> None:
     in_image = _step(
         jobs["publish"], "Check the baked release downloads inside the pushed image (vault-api only)"
     )
-    assert in_image["env"]["APK_NAME"] == APK_FROM_BUILD_VERSION
+    assert in_image["env"]["APK_NAME"] == APK_FROM_PLAN
     stage = _step(jobs["publish"], "Stage release downloads into api/dist (vault-api only)")
     assert "APK_NAME" not in stage["env"]
-    assert 'apk="steamhangar-app-v${BUILD_VERSION}.apk"' in stage["run"]
+    assert stage["env"]["APP_VERSION"] == "${{ needs.component-plan.outputs.app_artifact_version }}"
+    assert 'apk="steamhangar-app-v${APP_VERSION}.apk"' in stage["run"]
     check = _step(jobs["android-release"], "Check the APK is the one android-build verified")
-    assert check["env"]["BUILD_VERSION"] == "${{ needs.build-version.outputs.version }}"
-    assert "steamhangar-app-v${BUILD_VERSION}.apk" in check["run"]
+    assert check["env"]["APP_VERSION"] == "${{ needs.component-plan.outputs.app_artifact_version }}"
+    assert "steamhangar-app-v${APP_VERSION}.apk" in check["run"]
 
 
 @pytest.mark.parametrize(
@@ -675,7 +693,8 @@ def test_stage_step_accepts_a_dispatch_rehearsal_apk(tmp_path: Path) -> None:
     # same rule, so the derived name still matches.
     apk = "steamhangar-app-vdev-1a2b3c4.apk"
     names = [apk if n.endswith(".apk") else n for n in ALL_NAMES]
-    ok = _run_stage(tmp_path, names, apk=apk, BUILD_VERSION="dev-1a2b3c4", IS_TAG="false")
+    ok = _run_stage(tmp_path, names, apk=apk, BUILD_VERSION="dev-1a2b3c4", APP_VERSION="dev-1a2b3c4",
+                    AGENT_VERSION="dev-1a2b3c4", IS_TAG="false")
     assert ok.returncode == 0, ok.stderr
 
 

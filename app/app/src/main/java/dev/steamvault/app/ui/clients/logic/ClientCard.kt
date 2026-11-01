@@ -2,6 +2,7 @@ package dev.steamvault.app.ui.clients.logic
 
 import dev.steamvault.app.net.model.ClientActivityOut
 import dev.steamvault.app.net.model.ClientOut
+import dev.steamvault.app.net.model.ClientVersionsOut
 import dev.steamvault.app.net.model.LoadingNowOut
 import dev.steamvault.app.ui.traffic.logic.DASH
 import dev.steamvault.app.ui.traffic.logic.RANGE_PHRASES
@@ -26,7 +27,10 @@ import kotlin.math.floor
  *  - "Loading now" reads [currentLoading]: `live_now` (seconds old) first,
  *    else the swept `loading_now`.
  *  - An agent is outdated when its version DIFFERS from the server's (newer
- *    too), both in the release grammar; anything else never warns.
+ *    too), both in the release grammar; anything else never warns. Since
+ *    RELEASE-SPLIT-1b the reference is the bundled agent when the server
+ *    states one ([AgentVersionRef]): its same-build list never warns, below
+ *    the minimum warns as such, any other build differs.
  *  - A figure the server did not send is the dash, never a zero.
  */
 
@@ -122,16 +126,105 @@ fun isAgentOutdated(agentVersion: String?, serverVersion: String?): Boolean {
     return isReleaseVersion(a) && isReleaseVersion(s) && a != s
 }
 
-data class OutdatedAgent(val agent: String, val server: String)
+// ---- bundled agent (web `compareReleaseVersions`, `agentVersionRef`,
+// ---- `agentVersionIssue`; WP RELEASE-SPLIT-1b, ADR-0031) -----------------
 
-fun outdatedAgentInfo(merged: MergedClient, serverVersion: String?): OutdatedAgent? {
-    val agent = merged.agent?.agent_version
-    if (!isAgentOutdated(agent, serverVersion)) return null
-    return OutdatedAgent(agent!!.trim(), serverVersion!!.trim())
+private val VERSION_CHUNK = Regex("[0-9]+|[^0-9]+")
+
+private fun compareIdent(x: String, y: String): Int {
+    val cx = VERSION_CHUNK.findAll(x).map { it.value }.toList()
+    val cy = VERSION_CHUNK.findAll(y).map { it.value }.toList()
+    for (k in 0 until minOf(cx.size, cy.size)) {
+        val nx = cx[k][0].isDigit()
+        val ny = cy[k][0].isDigit()
+        if (nx != ny) return if (nx) -1 else 1
+        val c = if (nx) cx[k].toBigInteger().compareTo(cy[k].toBigInteger()) else cx[k].compareTo(cy[k])
+        if (c != 0) return if (c < 0) -1 else 1
+    }
+    return cx.size.compareTo(cy.size).coerceIn(-1, 1)
 }
 
-fun outdatedAgentText(info: OutdatedAgent): String =
-    "Agent ${info.agent} · server ${info.server}. Update vault-agent on this PC to match the server."
+/**
+ * Order of two release versions: -1, 0 or 1, or `null` when either is
+ * outside the release grammar. A release sorts after its pre-releases;
+ * pre-release identifiers compare in natural order (`rc9` < `rc17`), a
+ * longer list after its prefix (`rc21` < `rc21.1` < `rc22`). Web's rule.
+ */
+fun compareReleaseVersions(a: String?, b: String?): Int? {
+    if (!isReleaseVersion(a) || !isReleaseVersion(b)) return null
+    fun split(v: String): Pair<List<java.math.BigInteger>, List<String>> {
+        val i = v.indexOf('-')
+        val core = (if (i < 0) v else v.substring(0, i)).split('.').map { it.toBigInteger() }
+        return core to (if (i < 0) emptyList() else v.substring(i + 1).split('.'))
+    }
+    val (ca, pa) = split(a!!)
+    val (cb, pb) = split(b!!)
+    for (k in 0 until 3) {
+        val c = ca[k].compareTo(cb[k])
+        if (c != 0) return if (c < 0) -1 else 1
+    }
+    if (pa.isEmpty() || pb.isEmpty()) return (if (pb.isNotEmpty()) 1 else 0) - (if (pa.isNotEmpty()) 1 else 0)
+    for (k in 0 until minOf(pa.size, pb.size)) {
+        val c = compareIdent(pa[k], pb[k])
+        if (c != 0) return c
+    }
+    return pa.size.compareTo(pb.size).coerceIn(-1, 1)
+}
+
+/** What an agent's version is checked against (web `agentVersionRef`):
+ * the server version and, from `GET /v1/settings` `clients.agent`, the
+ * bundled build, the minimum and the same-build list. */
+data class AgentVersionRef(
+    val server: String?,
+    val bundled: String?,
+    val minimum: String?,
+    val same: List<String>,
+)
+
+fun agentVersionRef(serverVersion: String?, clients: ClientVersionsOut?): AgentVersionRef {
+    val server = serverVersion?.trim()?.takeIf { isReleaseVersion(it) }
+    val agent = clients?.agent
+    if (agent == null || !isReleaseVersion(agent.build)) return AgentVersionRef(server, null, null, emptyList())
+    val same = agent.same_build.filter { isReleaseVersion(it) }.toMutableList()
+    if (agent.build !in same) same.add(agent.build)
+    return AgentVersionRef(server, agent.build, agent.minimum?.takeIf { isReleaseVersion(it) }, same)
+}
+
+/** Why an agent's version warns, or `null`: "minimum", "bundled" or (no
+ * bundled agent known) "server". MUTATION TARGET (web `agentVersionIssue`). */
+fun agentVersionIssue(agentVersion: String?, ref: AgentVersionRef): String? {
+    val a = agentVersion?.trim().orEmpty()
+    if (!isReleaseVersion(a)) return null
+    if (ref.bundled != null) {
+        if (a in ref.same) return null
+        if (ref.minimum != null && compareReleaseVersions(a, ref.minimum) == -1) return "minimum"
+        return "bundled"
+    }
+    return if (isAgentOutdated(a, ref.server)) "server" else null
+}
+
+data class OutdatedAgent(
+    val agent: String,
+    val server: String?,
+    val bundled: String? = null,
+    val minimum: String? = null,
+    val issue: String = "server",
+)
+
+/** [agentRef] wins over [serverVersion] (RELEASE-SPLIT-1b). */
+fun outdatedAgentInfo(merged: MergedClient, serverVersion: String?, agentRef: AgentVersionRef? = null): OutdatedAgent? {
+    val agent = merged.agent?.agent_version
+    val ref = agentRef ?: agentVersionRef(serverVersion, null)
+    val issue = agentVersionIssue(agent, ref) ?: return null
+    if (issue == "server") return OutdatedAgent(agent!!.trim(), ref.server)
+    return OutdatedAgent(agent!!.trim(), ref.server, ref.bundled, ref.minimum, issue)
+}
+
+fun outdatedAgentText(info: OutdatedAgent): String = when (info.issue) {
+    "minimum" -> "Agent ${info.agent} is older than the minimum ${info.minimum}. Update vault-agent on this PC to match the server."
+    "bundled" -> "Agent ${info.agent} · server's agent ${info.bundled}. Update vault-agent on this PC to match the server."
+    else -> "Agent ${info.agent} · server ${info.server}. Update vault-agent on this PC to match the server."
+}
 
 /** Heading of the outdated-agent box ("differs", not "older": CLIENTS-3). */
 const val OUTDATED_BOX_TITLE = "Agent version differs from the server"
@@ -338,10 +431,12 @@ fun clientCardView(
     serverVersion: String?,
     nowMs: Long,
     removeError: String? = null,
+    /** WP RELEASE-SPLIT-1b: the bundled-agent reference; wins over [serverVersion]. */
+    agentRef: AgentVersionRef? = null,
 ): ClientCardView {
     val client = merged.client
     val agent = merged.agent
-    val outdated = outdatedAgentInfo(merged, serverVersion)
+    val outdated = outdatedAgentInfo(merged, serverVersion, agentRef)
     val removeId = agent?.client_id
     val removable = isRemovableClientId(removeId)
     return ClientCardView(
@@ -399,7 +494,13 @@ fun combinedHitRate(clients: List<ClientActivityOut>): Double? {
 fun outdatedAgentsPillText(n: Int): String = "$n outdated"
 
 /** The fixed four tiles: Connected, Loaded, Hit rate, Agents. */
-fun summaryTiles(clients: List<MergedClient>, range: String, serverVersion: String?): List<SummaryTile> {
+fun summaryTiles(
+    clients: List<MergedClient>,
+    range: String,
+    serverVersion: String?,
+    /** WP RELEASE-SPLIT-1b: the bundled-agent reference; wins over [serverVersion]. */
+    agentRef: AgentVersionRef? = null,
+): List<SummaryTile> {
     val list = clients.map { it.client }
     val connected = list.count { it.connected == true }
     val loading = list.count { currentLoading(it)?.loading == true }
@@ -430,8 +531,9 @@ fun summaryTiles(clients: List<MergedClient>, range: String, serverVersion: Stri
     }
     val agents = clients.filter { isAgentClient(it.client) }
     val online = agents.count { it.client.connected == true }
-    val serverKnown = isReleaseVersion(serverVersion?.trim().orEmpty())
-    val outdated = if (serverKnown) agents.count { outdatedAgentInfo(it, serverVersion) != null } else null
+    val ref = agentRef ?: agentVersionRef(serverVersion, null)
+    val serverKnown = ref.bundled != null || ref.server != null
+    val outdated = if (serverKnown) agents.count { outdatedAgentInfo(it, serverVersion, ref) != null } else null
     val detail = when {
         agents.isEmpty() -> "No agent paired"
         outdated == null -> "${agents.size} paired · server version not known"

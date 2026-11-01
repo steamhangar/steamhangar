@@ -110,8 +110,10 @@ from pydantic import BaseModel
 
 from vault_api import core_settings, settings_store
 from vault_api.auth import require_api_key
+from vault_api.client_versions import client_versions_out
 from vault_api.config import Settings
 from vault_api.deps import DbOpener, db_opener
+from vault_api.routers.dist import ClientsOut
 from vault_api.settings_store import (
     ENV_ONLY_KEYS,
     OVERRIDABLE_SPECS,
@@ -193,6 +195,13 @@ class SettingsOut(BaseModel):
     #: (``VAULT_BUILD_VERSION``), ``dev`` for a locally built image, and
     #: ``vault_api.BASE_VERSION`` for a native run without that env.
     server_version: str
+    #: WP RELEASE-SPLIT-1b: the bundled agent and app versions and the
+    #: minimum client versions (``vault_api.client_versions``), the same
+    #: object as ``GET /v1/dist``'s ``clients``. Here as well because the
+    #: Clients page's version hint already reads this route for
+    #: ``server_version`` (both frontends): zero new requests, like 4e.7.
+    #: Read-only like ``server_version``: PATCH rejects it as an unknown name.
+    clients: ClientsOut
     settings: list[SettingInfoOut]
     #: D16c: ``None`` until vault-core has written its status file.
     core_apply: CoreApplyOut | None = None
@@ -215,12 +224,13 @@ def _core_apply(core_status: core_settings.CoreStatus | None, base: Settings) ->
     )
 
 
-def _build_response(conn, base: Settings, server_version: str) -> SettingsOut:
+def _build_response(conn, base: Settings, server_version: str, clients: Any = None) -> SettingsOut:
     core_status = core_settings.read_core_status(core_settings.core_status_path(base.cache_root))
     infos = settings_store.describe_settings(conn, base, core_status)
     return SettingsOut(
         readonly=base.settings_readonly,
         server_version=server_version,
+        clients=ClientsOut.model_validate(client_versions_out(clients or {})),
         settings=[SettingInfoOut(**vars(info)) for info in infos],
         core_apply=_core_apply(core_status, base),
     )
@@ -230,7 +240,10 @@ def _build_response(conn, base: Settings, server_version: str) -> SettingsOut:
 def get_settings(request: Request, open_db: DbOpener = Depends(db_opener)) -> SettingsOut:
     base: Settings = request.app.state.settings
     with open_db() as conn:
-        return _build_response(conn, base, request.app.state.build_info.version)
+        return _build_response(
+            conn, base, request.app.state.build_info.version,
+            getattr(request.app.state, "client_versions", None),
+        )
 
 
 def _coerce_patch_value(key: str, value: Any) -> str:
@@ -387,4 +400,7 @@ def patch_settings(
         if "log_level" in touched:
             _apply_live_log_level(settings_store.effective_settings(conn, base))
         settings_store.write_core_file(conn, base)
-        return _build_response(conn, base, request.app.state.build_info.version)
+        return _build_response(
+            conn, base, request.app.state.build_info.version,
+            getattr(request.app.state, "client_versions", None),
+        )

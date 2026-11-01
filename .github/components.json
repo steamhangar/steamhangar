@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "tag_prefix": "v",
-  "enforce": false,
+  "enforce": true,
   "components": {
     "server": {
       "description": "vault-core, vault-api (incl. web/ and the vault-runner role), vault-dns, vault-proxy images",
@@ -38,7 +38,8 @@
     "agent": {
       "description": "vault-agent binaries (Go), Windows Scheduled Task scripts, systemd units",
       "version": "0.1.0-rc17",
-      "reuse": "none",
+      "minimum_version": "0.1.0-rc17",
+      "reuse": "release-assets",
       "paths": [
         "agent/go/",
         "agent/packaging/windows/install-task.ps1",
@@ -68,7 +69,8 @@
     "app": {
       "description": "signed Android release APK",
       "version": "0.1.0-rc21.1",
-      "reuse": "none",
+      "minimum_version": "0.1.0-rc17",
+      "reuse": "release-assets",
       "paths": [
         "app/build.gradle.kts",
         "app/settings.gradle.kts",

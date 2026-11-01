@@ -23,6 +23,16 @@ symlink). A request can therefore never name a path, and a stray file in
 the directory (the placeholder README of a dev build, a leftover from
 another version) is never served.
 
+**Client versions (WP RELEASE-SPLIT-1b, ADR-0031).** The agent files and
+the APK carry their own versions, which may differ from the server's: an
+unchanged client is reused from the release that last built it. The image
+states the version stamped on its baked files (``vault_api.client_versions``,
+``build``), and the names are computed from THOSE versions (agent files,
+packaging scripts and ``SHA256SUMS`` from the agent's, the APK from the
+app's), as is the GitHub Release fallback URL of each file. Without the
+client env (a local build, a release before 1b) every file takes the
+server's version, as before.
+
 A dev build (``dev.sh build``, ``docker compose build``) bakes nothing: the
 directory holds only its placeholder README. Then every artifact is
 ``local: false`` and, when the server's version is a published release,
@@ -42,6 +52,7 @@ import threading
 from dataclasses import dataclass
 
 from vault_api import UNKNOWN_COMMIT, BuildInfo
+from vault_api.client_versions import ClientVersion
 
 #: Public URL prefix the files are served under (``routers/dist.py``).
 DIST_URL_PREFIX = "/dist/"
@@ -72,6 +83,9 @@ class ArtifactSpec:
     media_type: str
     #: True for names that carry the version (immutable per name).
     versioned: bool
+    #: The release the file belongs to (WP RELEASE-SPLIT-1b): the agent's
+    #: build version for the agent files, the app's for the APK.
+    version: str = ""
 
 
 @dataclass(frozen=True)
@@ -95,23 +109,29 @@ def is_release_version(build: BuildInfo) -> bool:
     )
 
 
-def artifact_specs(version: str) -> tuple[ArtifactSpec, ...]:
-    """The release file set for ``version`` (without its ``v``), in a fixed
-    order. Names match publish.yml's ``android-build``/``agent-build`` jobs."""
-    tag = f"v{version}"
+def artifact_specs(
+    version: str, *, agent_version: str | None = None, app_version: str | None = None
+) -> tuple[ArtifactSpec, ...]:
+    """The release file set, in a fixed order. ``version`` (without its
+    ``v``) is the server's; ``agent_version`` / ``app_version`` are the
+    versions stamped on the bundled agent files and APK (RELEASE-SPLIT-1b)
+    and default to it. Names match publish.yml's ``android-build`` /
+    ``agent-build`` jobs (and the reuse jobs, which keep the names)."""
+    agent = agent_version or version
+    app = app_version or version
     octet = "application/octet-stream"
     text = "text/plain; charset=utf-8"
     return (
-        ArtifactSpec("app-android", f"steamhangar-app-{tag}.apk", "application/vnd.android.package-archive", True),
-        ArtifactSpec("agent-windows-amd64", f"vault-agent-{tag}-windows-amd64.exe", octet, True),
-        ArtifactSpec("agent-linux-amd64", f"vault-agent-{tag}-linux-amd64", octet, True),
-        ArtifactSpec("agent-linux-arm64", f"vault-agent-{tag}-linux-arm64", octet, True),
-        ArtifactSpec("install-task", "install-task.ps1", text, False),
-        ArtifactSpec("run-vault-agent", "run-vault-agent.ps1", text, False),
-        ArtifactSpec("uninstall-task", "uninstall-task.ps1", text, False),
-        ArtifactSpec("systemd-service", "vault-agent-report.service", text, False),
-        ArtifactSpec("systemd-timer", "vault-agent-report.timer", text, False),
-        ArtifactSpec("sha256sums", "SHA256SUMS", text, False),
+        ArtifactSpec("app-android", f"steamhangar-app-v{app}.apk", "application/vnd.android.package-archive", True, app),
+        ArtifactSpec("agent-windows-amd64", f"vault-agent-v{agent}-windows-amd64.exe", octet, True, agent),
+        ArtifactSpec("agent-linux-amd64", f"vault-agent-v{agent}-linux-amd64", octet, True, agent),
+        ArtifactSpec("agent-linux-arm64", f"vault-agent-v{agent}-linux-arm64", octet, True, agent),
+        ArtifactSpec("install-task", "install-task.ps1", text, False, agent),
+        ArtifactSpec("run-vault-agent", "run-vault-agent.ps1", text, False, agent),
+        ArtifactSpec("uninstall-task", "uninstall-task.ps1", text, False, agent),
+        ArtifactSpec("systemd-service", "vault-agent-report.service", text, False, agent),
+        ArtifactSpec("systemd-timer", "vault-agent-report.timer", text, False, agent),
+        ArtifactSpec("sha256sums", "SHA256SUMS", text, False, agent),
     )
 
 
@@ -121,6 +141,15 @@ def release_base_url(build: BuildInfo) -> str | None:
     if not is_release_version(build):
         return None
     return f"{RELEASE_DOWNLOAD_BASE}/v{build.version}/"
+
+
+def release_url(build: BuildInfo, spec: ArtifactSpec) -> str | None:
+    """The GitHub Release asset of ``spec``: the release of the file's own
+    version (RELEASE-SPLIT-1b), or None when this build is not a published
+    release or the file's version is not a release version."""
+    if not is_release_version(build) or _RELEASE_VERSION.fullmatch(spec.version) is None:
+        return None
+    return f"{RELEASE_DOWNLOAD_BASE}/v{spec.version}/{spec.name}"
 
 
 def _regular_file(path: str) -> os.stat_result | None:
@@ -141,10 +170,22 @@ class DistCatalog:
     in the image and an APK is ~9 MB.
     """
 
-    def __init__(self, dist_dir: str, build: BuildInfo) -> None:
+    def __init__(
+        self,
+        dist_dir: str,
+        build: BuildInfo,
+        clients: dict[str, ClientVersion | None] | None = None,
+    ) -> None:
         self.dist_dir = dist_dir
         self.build = build
-        self.specs = artifact_specs(build.version)
+        self.clients: dict[str, ClientVersion | None] = dict(clients or {})
+        agent = self.clients.get("agent")
+        app = self.clients.get("app")
+        self.specs = artifact_specs(
+            build.version,
+            agent_version=agent.build if agent else None,
+            app_version=app.build if app else None,
+        )
         self._by_name = {s.name: s for s in self.specs}
         self.serves_local = is_release_version(build)
         self._lock = threading.Lock()
@@ -171,6 +212,10 @@ class DistCatalog:
         in a release image.
         """
         if not self.serves_local or not self.dist_dir:
+            return None
+        # A file of a non-release client build (a dev rehearsal) is never
+        # served, whatever the server's version.
+        if _RELEASE_VERSION.fullmatch(spec.version) is None:
             return None
         path = os.path.join(self.dist_dir, spec.name)
         st = _regular_file(path)
