@@ -1769,6 +1769,9 @@ function buildMaintenancePanel(gameLike, group) {
  * fetch settles, and whenever a games/jobs poll tick's structural key
  * changed (see the round-7 comparison in the store subscriptions below). */
 function render() {
+  // NITS-WEB-1 (LIBRARY-DETAIL-1 nit): a structural re-render rebuilds the
+  // tab strip; a keyboard user on a tab gets the focus back on the new one.
+  const tabHadFocus = isDetailTab(document.activeElement);
   contentEl.replaceChildren();
   compactEl.replaceChildren();
   footEl.replaceChildren();
@@ -1891,6 +1894,10 @@ function render() {
   body.className = "gd-body";
   body.append(overview, depotsPanel, maintenance);
   contentEl.append(tabs.tablist, body);
+  if (tabHadFocus) {
+    const tab = tabs.tablist.querySelector(`[data-role="tab-${tabs.selectedId()}"]`);
+    if (tab) tab.focus();
+  }
   // WP MOBILE-1b: the strip scrolls sideways when it overflows (200 % text).
   watchScrollCue(tabs.tablist);
   paintCompact();
@@ -1898,6 +1905,11 @@ function render() {
   renderGcSection();
 
   lastStructuralKey = computeStructuralKey();
+}
+
+/** True for one of this sheet's tab buttons (ids from createTabs' prefix). */
+function isDetailTab(node) {
+  return Boolean(node && typeof node.id === "string" && node.id.startsWith("detail-tab-") && contentEl.contains(node));
 }
 
 /** WP MOBILE-1b: the compact header's content (40px cover, title, pill),

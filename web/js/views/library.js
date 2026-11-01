@@ -1,16 +1,17 @@
 /**
  * Library view (WP 4a.3).
  *
- * Grid 2/3/list, search + filter chips (ANDed), the capsule pill
- * (icon + size, actionable), multi-select with bulk download split
- * semantics and bulk delete with the set-aware multiPlan arithmetic, and
- * in-place progress patching per the round-7 mockup rule. Ports
- * docs/design/vault-app-mockup.html's Library screen; see the module
- * headers in js/lib/game-status.js, js/lib/bulk-plan.js and
- * js/lib/multiplan.js for the specific, documented divergences from the
- * mockup's fake data model (no "stale" status yet, no live progress
- * percentage, multiPlan assembled from real per-call data instead of one
- * in-memory array).
+ * Grid 2/3/list, search + filter chips (ANDed), the card's status line
+ * with its quick action (WP LIBRARY-2 replaced the round-7 capsule pill;
+ * card anatomy in components/game-card.js), multi-select with bulk download
+ * split semantics and bulk delete with the set-aware multiPlan arithmetic,
+ * and in-place progress patching per the round-7 mockup rule. First ported
+ * from docs/design/vault-app-mockup.html's Library screen, restyled on the
+ * UI kit since rc20 (docs/design/rc20/library.html); see the module headers
+ * in js/lib/game-status.js, js/lib/bulk-plan.js and js/lib/multiplan.js for
+ * the documented divergences from the mockup's fake data model (multiPlan
+ * is assembled from real per-call data instead of one in-memory array).
+ * The sections below are dated per WP; a later WP's section wins.
  *
  * Data flows exclusively through the WP 4a.2 store (store-singleton.js) —
  * no parallel poll loop is created here. Detail-sheet / single-game delete
@@ -527,7 +528,7 @@ function onOpen(appid) {
 }
 
 // ---------------------------------------------------------------------
-// Per-card actions (capsule pill / list-row icon)
+// Per-card actions (the status line's quick-action icon)
 // ---------------------------------------------------------------------
 
 async function onAction(appid, actionType) {

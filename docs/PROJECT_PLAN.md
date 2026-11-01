@@ -500,7 +500,12 @@ their open boxes (items 2, 7 and 11) are in section 12. Item 13 stays here.
       - [ ] **NITS-WEB-1** (web) from NITS-AUDIT-1 and the remaining nits:
         client-side request timeout in `api.js`, group-sheet "Update now"
         test, origin check in `isVaultReturnTo`, aria-live on queue move,
-        CARD-CORNERS-1 candidate fix.
+        CARD-CORNERS-1 candidate fix. Done in NITS-WEB-1: request timeout
+        (`web/js/api.js`, `web/tests/api-timeout.test.js`), group "Update now"
+        (`web/tests/game-detail-sheet-update-group.test.js`), aria-live on
+        queue move (`views/downloads.js`, `downloads-queue-reorder.test.js`),
+        CARD-CORNERS-1 candidate CSS. Not web: `isVaultReturnTo` lives only in
+        the Android app (`SteamOpenIdLoginUrl.kt`), moved to NITS-APP-1.
       - [ ] **NITS-APP-1** (android) dead `packagesAriaText`, trivial last
         assertion in `DownloadsStatsLiveTest`, D19WiringTest pin, open
         Android review nits of rc20-rc21.1.
@@ -589,7 +594,10 @@ their open boxes (items 2, 7 and 11) are in section 12. Item 13 stays here.
         Library game card reportedly lacks rounded top corners with real
         covers; demo render (`dev.sh test-web-shots`) is fine. Candidate
         fix: `border-radius: inherit` on `img.cover` plus `isolation:isolate`
-        on `.cap` (`web/css/kit.css:817`).
+        on `.cap` (`web/css/kit.css:817`). Candidate applied in NITS-WEB-1
+        (`web/css/kit.css`, `.kit .card .cap` / `.kit .cap img.cover`); the
+        box stays open until the operator's screenshot with real covers
+        confirms it.
       - [ ] nit (DOC-DIET-1 review): the "Open boxes" column of the
         section 7 table is hard-coded and goes stale when section 12 items
         are ticked (drop it or derive it in the line-check test); label
@@ -640,8 +648,14 @@ their open boxes (items 2, 7 and 11) are in section 12. Item 13 stays here.
         the step's own error line duplicates the script's `::error::`;
         actionlint not run on the devbox, the first rc22 tag run is the
         real proof of the pin step.
+      - [ ] nit (NITS-WEB-1 review): api.js `untimed` wrapper exists only to
+        keep CacheRepairWebTwinTest's byte pin (pin route + NO_TIMEOUT intent
+        in the twin test and drop the indirection); split LIBRARY-DETAIL-1
+        and FIX-POP-HIDDEN-1 into one box per part when picked up. Checked:
+        steam_relay/oracle server timeout 10 s < 20 s client deadline.
       - [ ] remaining nits: MAP-DRIFT-1 fail-safe tests, claim-vs-move race
-        test, aria-live on queue move, D19WiringTest pin,
+        test, aria-live on queue move (fixed in NITS-WEB-1:
+        `downloads-queue-reorder.test.js`), D19WiringTest pin,
         regrow-without-idle-gap test
         (D19WiringTest pin fixed in NITS-APP-1: the loaded-body pins use the enclosing-composable generation and a
         bounded `LoadedDetailBody` body instead of a contains-scan to the end
@@ -1140,7 +1154,8 @@ is done, tick it HERE, not in the archive.
   LIVE-DELAY-1 lands before DOWNLOADS-1. The three non-web packages
   below (user decisions 2026-10-16) ride in the same rc.
   - [ ] nit (LIBRARY-DETAIL-1): tab keyboard focus is lost on a structural
-    re-render of the detail sheet; `.detail-box-danger` hard-codes an rgba
+    re-render of the detail sheet (fixed in NITS-WEB-1:
+    `game-detail-sheet-update-group.test.js`); `.detail-box-danger` hard-codes an rgba
     (no `--danger-soft` token yet); optional `tabindex=0` on tabpanels;
     move `add-device-sheet.js` onto `components/tabs.js`
   - [ ] nit: Exit animation for the nine confirm-dialog call sites
@@ -1149,8 +1164,10 @@ is done, tick it HERE, not in the archive.
     numbered steps, unlike the mockup (`docs/design/rc20/`)
   - [ ] nit (DOWNLOADS-1): the generic failure text could add "If it fails
     again, check the log"
-  - [ ] nit (LIBRARY-1): hard-coded CSS fallbacks (`--tool-h` is not in
-    theme.css) and a stale header comment in `library.js`
+  - [x] nit (LIBRARY-1): hard-coded CSS fallbacks (`--tool-h` is not in
+    theme.css) and a stale header comment in `library.js` (fixed in
+    NITS-WEB-1: `web/js/views/library.js` header; the `--tool-h` fallbacks
+    were already gone with LIBRARY-2)
   - [ ] **Rework after the operator's visual check (2026-10-17).** The
     packages above shipped the structure of the mockups (columns, tabs,
     nav, split button, drag queue) but not their anatomy: the page
@@ -1251,7 +1268,8 @@ is done, tick it HERE, not in the archive.
     downloads-owned-preloaded).
   - [ ] nit (FIX-POP-HIDDEN-1): `.pop` has no box-shadow and
     `.pop.menu` min-width is 100% where the Library mockup shows 260px
-    plus shadow; dead `.cl-list > p` rule; the Clients empty state repeats
+    plus shadow; dead `.cl-list > p` rule (already gone, checked in
+    NITS-WEB-1); the Clients empty state repeats
     the "Add a device" accessible name.
   - [ ] nit (UNMAPPED-FLAG-1, VERSION-HEALTH-1): ~~`get_game` scans all of
     `depot_manifests` for one appid (add `AND appid = ?`)~~ (fixed in
@@ -1261,8 +1279,11 @@ is done, tick it HERE, not in the archive.
     the note (Android parity package); VERSION-HEALTH-1 chose the startup
     log line, `/v1/health` stays a fixed body (fingerprinting decision)
   - [ ] nit (rc20 reviews): CLIENTS-3 `tab:null` wiring check is a regex
-    over source (use a spy); `getSettings` call on Clients has no guard
-    against a detached view; tile wording "Version differs from the
+    over source (use a spy) (fixed in NITS-WEB-1:
+    `clients-view-wiring.test.js` clicks the button and reads the tabs);
+    `getSettings` call on Clients has no guard against a detached view
+    (checked in NITS-WEB-1: its callbacks only call `paint()`, which returns
+    while `els` is null, so no change); tile wording "Version differs from the
     server" could read "differs from the server version"
   - [ ] nit (rc20 reviews): SETTINGS-1 nav label "Other settings" is
     vague; stale comment about the `api.schedule()` refetch after save

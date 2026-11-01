@@ -85,32 +85,106 @@ function buildUrl(path, params) {
 }
 
 /**
+ * Client-side request timeouts (NITS-WEB-1, from NITS-AUDIT-1). Before this,
+ * no request had a deadline: a request the server or the network never
+ * answered kept its caller (and a poll loop waiting on it) stuck forever.
+ *
+ * - `REQUEST_TIMEOUT_MS` (20 s) is the default for every call.
+ * - `LONG_REQUEST_TIMEOUT_MS` (5 min) is for reads that may wait for the
+ *   server's depot size walk (`SizeCache.get()` blocks on the first walk
+ *   after a start or an invalidation, and a cold walk during a download can
+ *   take minutes, UI-COLD-CACHED-1). The walk is single-flight, so a retry
+ *   after a timeout joins the same walk.
+ * - `NO_TIMEOUT` keeps the old behaviour for writes whose server work runs
+ *   to the end even when the client gives up (cache delete, repair, "check
+ *   all cached"): a timeout there would report a failure for work that
+ *   still happens.
+ *
+ * A timeout is a `network` kind {@link ApiError}, like any other request
+ * that got no answer, so every caller's existing network handling applies.
+ */
+export const REQUEST_TIMEOUT_MS = 20_000;
+export const LONG_REQUEST_TIMEOUT_MS = 300_000;
+export const NO_TIMEOUT = 0;
+
+/**
+ * `fetch` with a deadline. Resolves the response, rejects with the fetch
+ * error, rejects with a `TimeoutError`-named Error when `timeoutMs` passed
+ * first, and rethrows the caller's own `AbortError` unchanged.
+ * @param {string|URL} url
+ * @param {RequestInit} init
+ * @param {number} timeoutMs `NO_TIMEOUT` (0) for none.
+ */
+function fetchWithTimeout(url, init, timeoutMs) {
+  if (!(timeoutMs > 0)) return fetch(url, init);
+  const controller = new AbortController();
+  const outer = init.signal;
+  let timedOut = false;
+  const onOuterAbort = () => controller.abort(outer.reason);
+  if (outer) {
+    if (outer.aborted) controller.abort(outer.reason);
+    else outer.addEventListener("abort", onOuterAbort, { once: true });
+  }
+  const timer = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, timeoutMs);
+  const cleanup = () => {
+    clearTimeout(timer);
+    if (outer) outer.removeEventListener("abort", onOuterAbort);
+  };
+  return fetch(url, { ...init, signal: controller.signal }).then(
+    (response) => {
+      cleanup();
+      return response;
+    },
+    (err) => {
+      cleanup();
+      if (timedOut) {
+        const timeout = new Error(`timed out after ${Math.round(timeoutMs / 1000)} s`, { cause: err });
+        timeout.name = "TimeoutError";
+        throw timeout;
+      }
+      throw err;
+    },
+  );
+}
+
+/**
  * Low-level request. Returns the parsed JSON body (or `null` for a `204`),
  * or throws {@link ApiError}. Demo mode short-circuits before any network
  * call is made.
  *
  * @param {string} method
  * @param {string} path Must start with `/v1/...`.
- * @param {{body?: unknown, params?: Record<string, unknown>, signal?: AbortSignal}} [opts]
+ * @param {{body?: unknown, params?: Record<string, unknown>, signal?: AbortSignal, timeoutMs?: number}} [opts]
+ *   `timeoutMs` defaults to {@link REQUEST_TIMEOUT_MS}; see the timeout block above.
  */
-export async function request(method, path, { body, params, signal } = {}) {
+export async function request(method, path, { body, params, signal, timeoutMs = REQUEST_TIMEOUT_MS } = {}) {
   if (isDemoMode()) {
     return demoRequest(method, path, { body, params });
   }
 
   let response;
   try {
-    response = await fetch(buildUrl(path, params), {
-      method,
-      headers: {
-        "X-Api-Key": getStoredApiKey(),
-        ...(body !== undefined ? { "Content-Type": "application/json" } : {}),
+    response = await fetchWithTimeout(
+      buildUrl(path, params),
+      {
+        method,
+        headers: {
+          "X-Api-Key": getStoredApiKey(),
+          ...(body !== undefined ? { "Content-Type": "application/json" } : {}),
+        },
+        body: body !== undefined ? JSON.stringify(body) : undefined,
+        signal,
       },
-      body: body !== undefined ? JSON.stringify(body) : undefined,
-      signal,
-    });
+      timeoutMs,
+    );
   } catch (err) {
     if (err && err.name === "AbortError") throw err; // caller-initiated cancellation, not a taxonomy error
+    if (err && err.name === "TimeoutError") {
+      throw new ApiError(ERROR_KINDS.NETWORK, `Network request ${err.message}: ${method} ${path}`, { cause: err });
+    }
     throw new ApiError(ERROR_KINDS.NETWORK, `Network request failed: ${method} ${path}`, {
       cause: err,
     });
@@ -139,6 +213,13 @@ export async function request(method, path, { body, params, signal } = {}) {
 
   return data;
 }
+
+/** {@link request} without a client deadline (`NO_TIMEOUT`), for the writes
+ * named in the timeout block above. A separate name keeps those call lines
+ * byte-identical to before (the Android twin pins the repair line). */
+const untimed = {
+  request: (method, path, opts = {}) => request(method, path, { ...opts, timeoutMs: NO_TIMEOUT }),
+};
 
 /**
  * Typed convenience wrappers over the endpoints the polling store and the
@@ -172,13 +253,10 @@ export async function request(method, path, { body, params, signal } = {}) {
  * passes one) — api/README.md is explicit that the route ignores any body
  * anyway, so sending `{appids: [...]}` here by mistake would silently queue
  * every cached app instead of the ids in that list; not passing one at all
- * is the only way to avoid inviting that mistake later. No dedicated
- * timeout: this repo has no `AbortController`-based timeout wired up for
- * ANY request today (`GET /v1/cache/summary` included), so "give this call
- * the same client timeout as GET /v1/cache/summary" (the WP brief) is
- * satisfied by construction — both go through the same bare `fetch()` with
- * no caller-supplied deadline — rather than by inventing a new mechanism
- * for this one route alone.
+ * is the only way to avoid inviting that mistake later. Timeout: none
+ * (`NO_TIMEOUT`, NITS-WEB-1): the route walks the depot tree to select the
+ * cached games and queues their jobs whether or not the client still waits,
+ * so a client deadline would report a failure for jobs that get queued.
  *
  * `getSettings`/`patchSettings` and the `steam*` methods (WP 4a.6) back the
  * Settings view and the onboarding flow — see api/README.md's "Persisted
@@ -201,8 +279,8 @@ export async function request(method, path, { body, params, signal } = {}) {
  */
 export const api = {
   health: () => request("GET", "/v1/health"),
-  games: () => request("GET", "/v1/games"),
-  game: (appid) => request("GET", `/v1/games/${appid}`),
+  games: () => request("GET", "/v1/games", { timeoutMs: LONG_REQUEST_TIMEOUT_MS }),
+  game: (appid) => request("GET", `/v1/games/${appid}`, { timeoutMs: LONG_REQUEST_TIMEOUT_MS }),
   mapping: () => request("GET", "/v1/mapping"),
   /** WP D19-1b: expected depots of a never-cached game (state "off" unless the
    * oracle and the depot-preview switches are both on). */
@@ -214,7 +292,7 @@ export const api = {
   jobs: (limit = 20, { range, since } = {}) => request("GET", "/v1/jobs", { params: { limit, range, since } }),
   job: (id) => request("GET", `/v1/jobs/${id}`),
   prefill: (appids) => request("POST", "/v1/prefill", { body: { appids } }),
-  prefillCached: () => request("POST", "/v1/prefill/cached"),
+  prefillCached: () => untimed.request("POST", "/v1/prefill/cached"),
   // WP CACHE-COMPLETE-1c (api/README.md "Verify and complete"): "Verify",
   // "Complete now" and "Complete all" queue a forced prefill per app id.
   prefillVerify: (appids) => request("POST", "/v1/prefill/verify", { body: { appids } }),
@@ -224,21 +302,22 @@ export const api = {
   // WP D20 (api/README.md "Queue order"): `position` is 0-based among the
   // QUEUED jobs, 0 = runs next. 409 when the job is no longer queued.
   moveJob: (id, position) => request("POST", `/v1/jobs/${id}/move`, { body: { position } }),
-  deleteCache: (appid) => request("DELETE", `/v1/cache/${appid}`),
+  deleteCache: (appid) => untimed.request("DELETE", `/v1/cache/${appid}`),
   // WP TOOL-APPS-2c (api/README.md "Grouped delete"): the preview of a
   // delete together with the game's content packages, and the delete
   // itself with the confirmed member list (409 when the server's set
   // changed since the preview).
-  deletePlan: (appid) => request("GET", `/v1/cache/${appid}/delete-plan`, { params: { with_packages: "true" } }),
+  deletePlan: (appid) =>
+    request("GET", `/v1/cache/${appid}/delete-plan`, { params: { with_packages: "true" }, timeoutMs: LONG_REQUEST_TIMEOUT_MS }),
   deleteCacheWithPackages: (appid, members) =>
-    request("DELETE", `/v1/cache/${appid}`, { params: { with_packages: "true", members: members.join(",") } }),
+    untimed.request("DELETE", `/v1/cache/${appid}`, { params: { with_packages: "true", members: members.join(",") } }),
   gc: (appid, execute = false) => request("POST", `/v1/cache/${appid}/gc`, { body: { execute } }),
   // WP CACHE-REPAIR-UI-1 (api/README.md, WP CACHE-REPAIR-1): no body is the
   // server's dry run; only an explicit `execute: true` sends the literal
   // boolean that deletes.
   repairCache: (appid, execute = false) =>
-    request("POST", `/v1/cache/${appid}/repair`, execute === true ? { body: { execute: true } } : {}),
-  cacheSummary: () => request("GET", "/v1/cache/summary"),
+    untimed.request("POST", `/v1/cache/${appid}/repair`, execute === true ? { body: { execute: true } } : {}),
+  cacheSummary: () => request("GET", "/v1/cache/summary", { timeoutMs: LONG_REQUEST_TIMEOUT_MS }),
   clients: () => request("GET", "/v1/clients"),
   // WP D15c: the Clients page and the Downloads header (WP D15b endpoints).
   // `range` is 24h|7d|30d|all. A server older than D15b answers 404 (kind
@@ -306,7 +385,7 @@ export const api = {
 export async function checkVaultApiKey(key) {
   let healthResponse;
   try {
-    healthResponse = await fetch(new URL("/v1/health", window.location.origin));
+    healthResponse = await fetchWithTimeout(new URL("/v1/health", window.location.origin), {}, REQUEST_TIMEOUT_MS);
   } catch (err) {
     throw new ApiError(ERROR_KINDS.NETWORK, "Could not reach the server.", { cause: err });
   }
@@ -321,9 +400,11 @@ export async function checkVaultApiKey(key) {
 
   let settingsResponse;
   try {
-    settingsResponse = await fetch(new URL("/v1/settings", window.location.origin), {
-      headers: { "X-Api-Key": key },
-    });
+    settingsResponse = await fetchWithTimeout(
+      new URL("/v1/settings", window.location.origin),
+      { headers: { "X-Api-Key": key } },
+      REQUEST_TIMEOUT_MS,
+    );
   } catch (err) {
     throw new ApiError(ERROR_KINDS.NETWORK, "Could not reach the server.", { cause: err });
   }

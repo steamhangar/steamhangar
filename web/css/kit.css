@@ -860,8 +860,12 @@
 .kit .grid > .empty, .kit .grid > .noresult{ grid-column:1 / -1; }
 .kit .card{ position:relative; display:grid; gap:8px; align-content:start; min-width:0; text-align:left; cursor:pointer; border-radius:var(--r-m); }
 .kit .card:focus-visible{ outline:2px solid var(--accent); outline-offset:3px; }
+/* CARD-CORNERS-1 (candidate, NITS-WEB-1): `isolation` gives the cap its own
+   stacking context and the cover inherits the cap's radius, so a real
+   cover (composited image layer) cannot paint square corners past the
+   cap's rounded clip. Same pixels for the demo covers. */
 .kit .card .cap{
-  position:relative; aspect-ratio:2 / 3; border-radius:var(--r-m); overflow:hidden;
+  position:relative; aspect-ratio:2 / 3; border-radius:var(--r-m); overflow:hidden; isolation:isolate;
   background:
     radial-gradient(120% 70% at 22% -6%, hsl(var(--h1) 62% 42%), transparent 62%),
     linear-gradient(158deg, hsl(var(--h1) 46% 26%), hsl(var(--h2) 66% 8%));
@@ -878,7 +882,7 @@
 .kit .cap.p3 .art{ background:radial-gradient(90% 70% at 8% 6%, hsl(var(--h1) 95% 60% / .48), transparent 58%); }
 .kit .cap.p4 .art{ background:repeating-linear-gradient(96deg, hsl(var(--h2) 80% 55% / .16) 0 3px, transparent 3px 13px); }
 .kit .cap.p5 .art{ background:radial-gradient(circle at 50% 38%, transparent 24%, hsl(var(--h1) 88% 58% / .30) 25%, transparent 27%), radial-gradient(circle at 50% 38%, transparent 40%, hsl(var(--h2) 88% 60% / .26) 41%, transparent 43%); }
-.kit .cap img.cover{ width:100%; height:100%; object-fit:cover; }
+.kit .cap img.cover{ width:100%; height:100%; object-fit:cover; border-radius:inherit; }
 .kit .cap .scrim{ background:linear-gradient(transparent 55%, color-mix(in srgb, var(--bg) 85%, transparent)); }
 .kit .cap .name{
   position:absolute; left:10px; right:10px; bottom:10px; z-index:1;
