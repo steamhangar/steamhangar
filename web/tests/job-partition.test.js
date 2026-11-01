@@ -148,6 +148,21 @@ test("jobStatusWord: GC jobs get GC-specific wording, never the download vocabul
   assert.equal(jobStatusWord(gc(1, "cancelled")), "Garbage collection cancelled");
 });
 
+test("WP PAUSE-ALL-GC-1: a paused GC job reads as GC, not as a paused download", () => {
+  assert.equal(jobStatusWord(job(1, "paused", { type: "gc" })), "Garbage collection paused");
+  assert.equal(jobStatusWord(job(1, "paused")), "Paused", "prefill wording unchanged");
+});
+
+test("WP PAUSE-ALL-GC-1: a finished dry-run GC job does not claim it collected anything", () => {
+  assert.equal(jobStatusWord(job(1, "done", { type: "gc", gc_execute: false })), "GC dry run (nothing deleted)");
+  assert.equal(jobStatusWord(job(1, "done", { type: "gc", gc_execute: true })), "Garbage collected");
+  assert.equal(jobStatusWord(job(1, "done", { type: "gc", gc_execute: null })), "Garbage collected", "unknown mode keeps the old word");
+  assert.equal(jobStatusWord(job(1, "done", { type: "gc" })), "Garbage collected", "older server without the field");
+  // Only "done" changes: the other outcomes of a dry run keep their words.
+  assert.equal(jobStatusWord(job(1, "error", { type: "gc", gc_execute: false })), "Garbage collection failed");
+  assert.equal(jobStatusWord(job(1, "running", { type: "gc", gc_execute: false })), "Collecting garbage");
+});
+
 // ---------------------------------------------------------------------
 // WP 4a.8 backport of the WP 4b.5 divergence (job-partition.js's module
 // header): an unrecognized status must land in history with a NEUTRAL

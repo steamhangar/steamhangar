@@ -657,7 +657,7 @@ route, see "Auth").
 | GET    | `/v1/jobs`                         | Recent jobs, newest first. `?limit=` 1–200, default 20 (`422` outside that range). WP D15b history filter: `?range=24h|7d|30d|all` or `?since=<UTC YYYY-MM-DDTHH:MM:SSZ>` keeps finished jobs whose finish (else start, else creation) is within it; queued/running/paused jobs are always kept; both parameters together or a malformed `since` is `422`. Without either, unchanged. Omits `log_excerpt` on purpose — this is the polling list. Includes `updated`, `up_to_date`, `summary_parse_ok` (schema v4, WP 3.3 — see "Job outcome honesty" below; `null` until the job finishes or if the summary couldn't be parsed), `gc_execute` (schema v7, WP 3.8 — `null` for a prefill job, `false`/`true` for a GC job's mode), plus `paused_at` and `stop_request` (schema v8, WP 3.12 — see "Job control" below) |
 | GET    | `/v1/jobs/{id}`                    | One job incl. `log_excerpt` plus the same `updated`/`up_to_date`/`summary_parse_ok`/`gc_execute` fields; `404` for an unknown id |
 | DELETE | `/v1/jobs/{id}`                    | **Cancel** a job (WP 3.12). `200` with `{job_id, status, outcome, detail}` — `outcome` is `"immediate"` (a queued/paused job, finalized here) or `"requested"` (a running job; the worker stops it, keep polling). `404` unknown id; `409` if the job already finished. See "Job control" below |
-| POST   | `/v1/jobs/{id}/pause`              | **Pause** a queued or running **prefill** job. Same response shape; `outcome` is `"immediate"` for a queued job (parked at `paused` in the request, WP WEB-FEAT-5) and `"requested"` for a running one. `404` unknown id; `409` for a GC job or a job that is already `paused` or finished |
+| POST   | `/v1/jobs/{id}/pause`              | **Pause** a queued job (prefill or GC) or a running **prefill** job. Same response shape; `outcome` is `"immediate"` for a queued job (parked at `paused` in the request, WP WEB-FEAT-5; GC jobs since WP PAUSE-ALL-GC-1) and `"requested"` for a running one. `404` unknown id; `409` for a running GC job or a job that is already `paused` or finished |
 | POST   | `/v1/jobs/{id}/resume`             | **Resume** a paused job — back to `queued`, keeping its original job id, so it runs *before* anything enqueued while it was paused. `outcome: "resumed"`. `404` unknown id; `409` if the job is not `paused` |
 | POST   | `/v1/jobs/{id}/move`               | **Reorder the queue** (WP D20) — body `{"position": n}`, n counts queued jobs only, `0` = runs next, past the end = last. Completes in the request (`outcome: "immediate"`, `queue_position` in the reply). `404` unknown id; `409` if the job is not `queued` (the running job cannot be moved); `422` for a negative position. Until a job is moved the queue is FIFO by job id (`jobs.order_key` NULL, schema v31); `GET /v1/jobs[/{id}]` carries `queue_position` (`null` unless queued) |
 | DELETE | `/v1/cache/{appid}`                | Delete this game's depot directories. `200` with `{appid, deleted_depots[], skipped_shared[], failed[], total_bytes_freed}`; `404` unknown appid or no mappings; `409` while a prefill **or GC** job for the app is queued/running/**paused** (WP 3.12); `422` for `appid < 1`; `500` if the cache-root guards refuse. **`?with_packages=true&members=<csv>`** (WP TOOL-APPS-2b) also deletes the app's content packages; `members` must be exactly the list the confirmation showed. See "Per-game deletion" and "Grouped delete" below |
@@ -1877,7 +1877,7 @@ about (see "The worker slot" below).
 | Endpoint | On a `queued` job | On a `running` job | On a `paused` job | On a finished job |
 |---|---|---|---|---|
 | `DELETE /v1/jobs/{id}` | cancelled immediately, never runs | `stop_request='cancel'`; the worker stops it | cancelled immediately | `409` |
-| `POST /v1/jobs/{id}/pause` | prefill: paused immediately, never claimed until resumed (WP WEB-FEAT-5); GC: `409` | prefill: `stop_request='pause'`; GC: `409` | `409` (already paused) | `409` |
+| `POST /v1/jobs/{id}/pause` | paused immediately, never claimed until resumed (prefill WP WEB-FEAT-5, GC WP PAUSE-ALL-GC-1) | prefill: `stop_request='pause'`; GC: `409` | `409` (already paused) | `409` |
 | `POST /v1/jobs/{id}/resume` | `409` | `409` | back to `queued`, same job id | `409` |
 
 `404` for an unknown job id everywhere. All three answer `200` with
@@ -1902,6 +1902,27 @@ original id. Clients that pause everything pause the queued jobs **first** and
 the running one last, so the worker finds nothing left to claim. A sweep can
 still queue NEW jobs for other apps afterwards — pausing is not a scheduler
 switch.
+
+**Queued GC jobs pause too (WP PAUSE-ALL-GC-1).** With `VAULT_AUTO_GC=execute`
+every prefill that updated something queues a deleting GC job, and before this
+package `pause` answered `409` for any GC job — so "pause all" paused the
+prefills and the queued GC jobs ran at once. A **queued** GC job is now parked
+exactly like a queued prefill (`outcome: "immediate"`, never claimed until
+resumed). It has built no plan and deleted nothing, so nothing is lost; its
+`gc_execute` mode is kept, so `resume` runs it in the mode it was queued with,
+and while paused it dedupes a later GC request for the same app and mode (and
+a new prefill's auto-GC follow-up absorbs into it). A **running** GC job still
+answers `409`: the run is short and rebuilds its plan every time, so cancel it
+(`DELETE /v1/jobs/{id}`, cooperative between depots) instead. Cancelling a
+paused GC job stores its own message ("paused before it started, ... nothing
+was deleted"), and `DELETE /v1/cache/{appid}` explains a paused GC job as
+pending work rather than as partial download progress. When auto-GC dedupes
+into a paused GC job, the prefill's log says "GC job N is paused (resume it to
+run)". Like any active job, a paused GC job also makes the miss-triggered
+prefill sweep skip that app (guard 2, `skipped_active`) until it is resumed or
+cancelled. The mode is fixed when the job is queued: a paused execute GC job
+resumed after `VAULT_AUTO_GC` was switched to `dry-run` still executes (cancel
+it instead if that is not wanted).
 
 ### The status model, and the audit behind it
 

@@ -169,12 +169,14 @@ test("a poll result landing outside any polling state is ignored", () => {
 });
 
 test("an unrecognized job status keeps polling rather than guessing", () => {
+  // "paused" used to be the example here; since WP PAUSE-ALL-GC-1 it is a
+  // known status with its own flag (see the PAUSE-ALL-GC-1 tests below).
   assert.deepEqual(
-    reduceGcFlow({ kind: GC_STATE.POLLING_DRY_RUN, jobId: 1 }, { type: GC_EVENT.POLL_RESULT, job: job(1, "paused") }),
+    reduceGcFlow({ kind: GC_STATE.POLLING_DRY_RUN, jobId: 1 }, { type: GC_EVENT.POLL_RESULT, job: job(1, "quarantined") }),
     { kind: GC_STATE.POLLING_DRY_RUN, jobId: 1 },
   );
   assert.deepEqual(
-    reduceGcFlow({ kind: GC_STATE.POLLING_EXECUTE, jobId: 1 }, { type: GC_EVENT.POLL_RESULT, job: job(1, "paused") }),
+    reduceGcFlow({ kind: GC_STATE.POLLING_EXECUTE, jobId: 1 }, { type: GC_EVENT.POLL_RESULT, job: job(1, "quarantined") }),
     { kind: GC_STATE.POLLING_EXECUTE, jobId: 1 },
   );
 });
@@ -216,4 +218,27 @@ test("start_dry_run is accepted from idle, execute_done and error too", () => {
     reduceGcFlow({ kind: GC_STATE.ERROR, message: "x", executeAttempted: false }, { type: GC_EVENT.START_DRY_RUN }),
     { kind: GC_STATE.REQUESTING_DRY_RUN },
   );
+});
+
+// ---- WP PAUSE-ALL-GC-1: a paused GC job is reachable ----------------------
+
+test("WP PAUSE-ALL-GC-1: a paused poll result keeps polling, flagged paused, and a resume carries on", () => {
+  let state = reduceGcFlow({ kind: GC_STATE.POLLING_DRY_RUN, jobId: 7 }, { type: GC_EVENT.POLL_RESULT, job: job(7, "paused") });
+  assert.deepEqual(state, { kind: GC_STATE.POLLING_DRY_RUN, jobId: 7, paused: true });
+  state = reduceGcFlow(state, { type: GC_EVENT.POLL_RESULT, job: job(7, "queued") });
+  assert.deepEqual(state, { kind: GC_STATE.POLLING_DRY_RUN, jobId: 7 }, "resumed: the flag is gone");
+  state = reduceGcFlow(state, { type: GC_EVENT.POLL_RESULT, job: job(7, "done", "[vault-api] GC totals (DRY RUN): would_delete=0 (0 bytes)") });
+  assert.equal(state.kind, GC_STATE.DRY_RUN_PLAN);
+
+  const exec = reduceGcFlow({ kind: GC_STATE.POLLING_EXECUTE, jobId: 8 }, { type: GC_EVENT.POLL_RESULT, job: job(8, "paused") });
+  assert.deepEqual(exec, { kind: GC_STATE.POLLING_EXECUTE, jobId: 8, paused: true });
+});
+
+test("WP PAUSE-ALL-GC-1: the paused text, and the sheet shows it in both polling states", async () => {
+  const { GC_PAUSED_TEXT } = await import("../js/lib/gc-flow.js");
+  assert.equal(GC_PAUSED_TEXT, "GC paused — resume it on the Downloads page.");
+  const { readFileSync } = await import("node:fs");
+  const sheet = readFileSync(new URL("../js/components/game-detail-sheet.js", import.meta.url), "utf8");
+  assert.ok(sheet.includes('gs.paused ? GC_PAUSED_TEXT : "Checking for orphaned chunks…"'));
+  assert.ok(sheet.includes('gs.paused ? GC_PAUSED_TEXT : "Deleting orphaned chunks…"'));
 });

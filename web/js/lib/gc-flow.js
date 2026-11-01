@@ -163,17 +163,27 @@ function reducePoll(state, job) {
   return state;
 }
 
+/** Shown while the polled GC job is `paused` (WP PAUSE-ALL-GC-1). Since
+ * then "Pause all" parks a QUEUED GC job, and the sheet's own request
+ * dedupes into a paused job of the same mode, so `paused` is reachable
+ * here. The flow keeps polling (a resume carries on to the plan/result)
+ * but says why nothing moves instead of a bare "Checking…". */
+export const GC_PAUSED_TEXT = "GC paused — resume it on the Downloads page.";
+
 function pollOutcome(job, executeAttempted, onDone) {
   if (job.status === "done") return onDone();
   if (job.status === "error") {
     return { kind: GC_STATE.ERROR, message: `GC job ${job.id} failed`, executeAttempted };
   }
   if (job.status === "cancelled") return { kind: GC_STATE.CANCELLED, jobId: job.id };
-  // "queued"/"running"/anything else (incl. an unrecognized future status):
-  // keep polling rather than guessing — mirrors lib/job-partition.js's
-  // "never fabricate a plausible-looking word" posture for the same class
-  // of unknown.
-  return executeAttempted
+  // "queued"/"running"/"paused"/anything else (incl. an unrecognized future
+  // status): keep polling rather than guessing — mirrors
+  // lib/job-partition.js's "never fabricate a plausible-looking word"
+  // posture for the same class of unknown. `paused` additionally carries
+  // `paused: true` so the sheet can say so (GC_PAUSED_TEXT); the key is
+  // absent otherwise, so the plain polling state stays `{kind, jobId}`.
+  const polling = executeAttempted
     ? { kind: GC_STATE.POLLING_EXECUTE, jobId: job.id }
     : { kind: GC_STATE.POLLING_DRY_RUN, jobId: job.id };
+  return job.status === "paused" ? { ...polling, paused: true } : polling;
 }

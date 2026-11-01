@@ -57,7 +57,9 @@ Job control adds two states, and the shape below is the result of auditing
    exists to preserve. Cancel the job first, then delete.
 4. ``claim_next_job`` — claims ``queued`` only, unchanged. ``paused`` is not
    claimable (that is what makes resume an explicit act) and ``cancelled`` is
-   terminal.
+   terminal. Since WP PAUSE-ALL-GC-1 a QUEUED GC job can be paused too (a
+   running one cannot), so this is also what holds auto-GC jobs during
+   "Pause all".
 5. ``recover_stale_jobs`` — recovers ``running`` only, unchanged, and that is
    load-bearing: a ``paused`` row MUST survive a restart and stay resumable.
    Widening it to include ``paused`` would silently eat every paused job on
@@ -789,12 +791,40 @@ CANCELLED_PAUSED_MESSAGE = (
 )
 
 
+#: Cancel of a GC job that was paused while queued (WP PAUSE-ALL-GC-1). A GC
+#: job is only ever paused before it starts, so no plan was built and nothing
+#: was deleted; the SteamPrefill/HIT wording of ``CANCELLED_PAUSED_MESSAGE``
+#: would be false for it.
+CANCELLED_PAUSED_GC_MESSAGE = (
+    "[vault-api] Cancelled while paused: this GC job was paused before it "
+    "started, so no plan was built and nothing was deleted."
+)
+
+
 #: ``detail`` of a queued prefill paused before it started (WP WEB-FEAT-5).
 PAUSED_QUEUED_MESSAGE = (
     "Paused while queued: this job had not started, so nothing was running "
     "and nothing was stopped. The worker skips it until it is resumed with "
     "POST /v1/jobs/{id}/resume, which puts it back in the queue with its "
     "original job id."
+)
+
+#: ``detail`` of a queued GC job paused before it started (WP PAUSE-ALL-GC-1).
+PAUSED_QUEUED_GC_MESSAGE = (
+    "Paused while queued: this GC job had not started, so no plan was built "
+    "and nothing was deleted. The worker skips it until it is resumed with "
+    "POST /v1/jobs/{id}/resume, which puts it back in the queue with its "
+    "original job id and its dry-run/execute mode."
+)
+
+#: 409 detail for a RUNNING GC job (WP 3.8/3.12, narrowed by PAUSE-ALL-GC-1).
+RUNNING_GC_PAUSE_REFUSED = (
+    "Job {job_id} is a running 'gc' job and cannot be paused. Only a queued "
+    "GC job can be paused (it is parked before it starts); a running GC run "
+    "is short and rebuilds its plan from scratch every time, so there is no "
+    "partial progress a pause could preserve. Cancel it with "
+    "DELETE /v1/jobs/{{id}} (it stops after the depot it is working on) and "
+    "queue a new one when you want it."
 )
 
 
@@ -903,7 +933,9 @@ def cancel_job(conn: sqlite3.Connection, job_id: int) -> ControlResult:
       ever claims ``queued`` rows, and this transaction moves it out of that
       state under the write lock.
     * **paused** — same, and equally immediate: pause already terminated the
-      subprocess, so there is nothing left to stop.
+      subprocess, so there is nothing left to stop. A paused GC job (only
+      ever paused while queued, WP PAUSE-ALL-GC-1) gets its own message:
+      nothing was built or deleted.
     * **running** — ``stop_request`` is recorded and the WORKER finalizes the
       job (it owns the subprocess, and it is the only place that can honestly
       say what the run had achieved). Asynchronous by nature; the caller polls.
@@ -934,11 +966,12 @@ def cancel_job(conn: sqlite3.Connection, job_id: int) -> ControlResult:
             )
 
         if job_status in (STATUS_QUEUED, STATUS_PAUSED):
-            message = (
-                CANCELLED_QUEUED_MESSAGE
-                if job_status == STATUS_QUEUED
-                else CANCELLED_PAUSED_MESSAGE
-            )
+            if job_status == STATUS_QUEUED:
+                message = CANCELLED_QUEUED_MESSAGE
+            elif str(row["type"]) == JOB_TYPE_GC:
+                message = CANCELLED_PAUSED_GC_MESSAGE
+            else:
+                message = CANCELLED_PAUSED_MESSAGE
             conn.execute(
                 """
                 UPDATE jobs
@@ -991,15 +1024,23 @@ def cancel_job(conn: sqlite3.Connection, job_id: int) -> ControlResult:
 
 
 def request_pause(conn: sqlite3.Connection, job_id: int) -> ControlResult:
-    """``POST /v1/jobs/{id}/pause``: suspend a QUEUED or RUNNING PREFILL job.
+    """``POST /v1/jobs/{id}/pause``: suspend a QUEUED job or a RUNNING PREFILL.
 
-    Restricted to prefills that have not finished, and every part of that is
+    Restricted to jobs that have not finished, and every part of that is
     deliberate:
 
-    * **Prefill only.** A GC job is refused (409). GC runs are short — the plan
-      is rebuilt from scratch on every run anyway, so "pause" would mean
-      "throw away the current plan and rebuild it later", which is what
-      cancelling and re-queueing already does, spelled honestly.
+    * **A running GC job is refused (409).** GC runs are short — the plan is
+      rebuilt from scratch on every run anyway, so "pause" would mean "throw
+      away the current plan and rebuild it later", which is what cancelling
+      and re-queueing already does, spelled honestly.
+    * **A queued GC job is parked like a queued prefill (WP PAUSE-ALL-GC-1).**
+      With ``VAULT_AUTO_GC=execute`` every prefill that updated something
+      queues a deleting GC job; before this, "Pause all" paused the prefills
+      and those GC jobs (409) ran at once — the opposite of holding the
+      queue. A queued GC job has built no plan and deleted nothing, so
+      parking it loses nothing; ``gc_execute`` is kept, so a resumed job runs
+      in the mode it was queued with, and it still dedupes (paused is
+      active) any later GC request for the same app and mode.
     * **Queued → paused immediately (WP WEB-FEAT-5, ADR-0016 addendum).** No
       subprocess exists, so there is nothing for the worker to do: the row
       moves to ``paused`` inside this transaction (``CONTROL_IMMEDIATE``). The
@@ -1035,17 +1076,21 @@ def request_pause(conn: sqlite3.Connection, job_id: int) -> ControlResult:
         job_status = str(row["status"])
         job_type = str(row["type"])
 
-        if job_type != JOB_TYPE_PREFILL:
+        if job_type not in (JOB_TYPE_PREFILL, JOB_TYPE_GC):
             return ControlResult(
                 CONTROL_CONFLICT,
                 _row_to_dict(row),
                 detail=(
                     f"Job {job_id} is a '{job_type}' job and cannot be paused. "
-                    "Only prefill jobs can — a GC run is short and rebuilds its "
-                    "plan from scratch every time, so there is no partial "
-                    "progress a pause could preserve. Cancel it with "
-                    "DELETE /v1/jobs/{id} and queue a new one when you want it."
+                    "Only prefill and queued GC jobs can."
                 ),
+            )
+
+        if job_type == JOB_TYPE_GC and job_status == STATUS_RUNNING:
+            return ControlResult(
+                CONTROL_CONFLICT,
+                _row_to_dict(row),
+                detail=RUNNING_GC_PAUSE_REFUSED.format(job_id=job_id),
             )
 
         if job_status == STATUS_QUEUED:
@@ -1062,7 +1107,11 @@ def request_pause(conn: sqlite3.Connection, job_id: int) -> ControlResult:
             return ControlResult(
                 CONTROL_IMMEDIATE,
                 _row_to_dict(after),
-                detail=PAUSED_QUEUED_MESSAGE,
+                detail=(
+                    PAUSED_QUEUED_GC_MESSAGE
+                    if job_type == JOB_TYPE_GC
+                    else PAUSED_QUEUED_MESSAGE
+                ),
             )
 
         if job_status != STATUS_RUNNING:
@@ -1245,14 +1294,23 @@ def resume_job(conn: sqlite3.Connection, job_id: int) -> ControlResult:
         after = conn.execute(
             f"SELECT {_JOB_COLUMNS} FROM jobs WHERE id = ?", (job_id,)
         ).fetchone()
+        if str(row["type"]) == JOB_TYPE_GC:
+            # WP PAUSE-ALL-GC-1: a GC job is only ever paused while queued.
+            tail = (
+                "The GC run builds its plan when it starts, in the mode it was "
+                "queued with."
+            )
+        else:
+            tail = (
+                "SteamPrefill re-runs from the start; every chunk the earlier "
+                "attempt already cached is served from disk as a local HIT."
+            )
         return ControlResult(
             CONTROL_RESUMED,
             _row_to_dict(after),
             detail=(
                 f"Job {job_id} is queued again and, keeping its original job "
-                "id, runs before anything enqueued while it was paused. "
-                "SteamPrefill re-runs from the start; every chunk the earlier "
-                "attempt already cached is served from disk as a local HIT."
+                "id, runs before anything enqueued while it was paused. " + tail
             ),
         )
 

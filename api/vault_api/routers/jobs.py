@@ -667,9 +667,10 @@ def pause_job(
     job_id: int,
     open_db: DbOpener = Depends(db_opener),
 ) -> JobControlOut:
-    """Pause a queued or running **prefill** job. ``404`` / ``409`` otherwise.
+    """Pause a queued job or a running **prefill** job. ``404`` / ``409`` otherwise.
 
-    **Queued (WP WEB-FEAT-5):** parked at ``paused`` inside this request,
+    **Queued (WP WEB-FEAT-5; GC jobs too since WP PAUSE-ALL-GC-1):** parked
+    at ``paused`` inside this request,
     ``outcome: "immediate"`` — it has not started, so there is nothing to stop,
     and the worker never claims it until it is resumed. This is what makes
     "pause all" possible: pause the queued jobs first, then the running one,
@@ -685,8 +686,11 @@ def pause_job(
     ``successfullyDownloadedDepots.json`` additionally keeps the depots it
     fully finished, so a non-forced resume skips those outright.
 
-    ``409`` for a GC job (GC runs are short and rebuild their plan every time —
-    cancel it instead) and for a job that is already ``paused`` or finished.
+    ``409`` for a RUNNING GC job (GC runs are short and rebuild their plan
+    every time — cancel it instead) and for a job that is already ``paused``
+    or finished. A queued GC job is parked like a queued prefill, keeping its
+    dry-run/execute mode, so "pause all" also holds the GC jobs auto-GC
+    queued after each prefill.
 
     A running job answers ``200`` immediately with ``outcome: "requested"``:
     the worker owns the subprocess, so it performs the actual suspension. Poll

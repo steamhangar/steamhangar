@@ -13,9 +13,15 @@
  * running one(s): by the time the running job lets go of the slot there is
  * nothing left for the worker to claim.
  *
- * - Prefill jobs only. GC jobs are refused by the API (`409`, queued or
- *   running) and are left alone; the confirm dialog says so when one is
- *   active.
+ * - Queued jobs of both types, running jobs of type prefill only (WP
+ *   PAUSE-ALL-GC-1). Since then the API parks a QUEUED GC job like a queued
+ *   prefill; before, every GC job answered `409`, so with auto-GC on
+ *   execute the GC jobs each prefill had queued ran at once right after
+ *   "Pause all" (prod 2026-11-01). A RUNNING GC job still answers `409`
+ *   (short, rebuilds its plan; cancel is the tool): it is not sent, and the
+ *   confirm dialog says it finishes. The dialog also says how many queued
+ *   GC runs are held, because the count in the title ("downloads")
+ *   includes them.
  * - A running job that already has a `stop_request` (pausing or cancelling)
  *   is not sent again.
  * - Resume all resumes every `paused` job. Resume keeps each job's id, and
@@ -53,7 +59,19 @@ export const WORDING = Object.freeze({
   confirmTitleMany: "Pause {n} downloads?",
   confirmBody:
     "Queued downloads are paused first, then the running one, so nothing new starts in between. Bytes already fetched stay on the cache. Resume all puts them back in the queue in their original order.",
+  // Not shown by the web since WP PAUSE-ALL-GC-1 (a queued GC run can be
+  // paused now; see confirmGcRunning / confirmGcHeld*). Kept verbatim because
+  // the Android twin still shows it and BulkJobsWebTwinTest pins it here —
+  // retire it together with the Android follow-up.
   confirmGcNote: "Garbage-collection runs keep going: they cannot be paused.",
+  confirmGcRunning: "The garbage-collection run that already started finishes: a running one cannot be paused (cancel it instead).",
+  confirmGcHeldOne: "This includes 1 queued garbage-collection run: it is held too and deletes nothing until you resume it.",
+  confirmGcHeldMany: "This includes {n} queued garbage-collection runs: they are held too and delete nothing until you resume them.",
+  // WP PAUSE-ALL-GC-1 (review N7): appended to the toast head when GC jobs
+  // were among the successfully paused/resumed ones, so "downloads" does
+  // not silently count them. The pinned head literals stay untouched.
+  gcPartOne: "incl. 1 garbage-collection run",
+  gcPartMany: "incl. {n} garbage-collection runs",
   confirmYes: "Pause all",
   confirmNo: "Keep downloading",
   pausedAllOne: "Paused 1 download",
@@ -79,20 +97,25 @@ function countWord(n, one, many) {
 }
 
 const isPrefill = (j) => j && j.type === "prefill";
+const isGc = (j) => j && j.type === "gc";
 
 /**
- * Jobs Pause all acts on, split into the two phases.
+ * Jobs Pause all acts on, split into the two phases. `queued` holds queued
+ * prefill AND queued GC jobs (WP PAUSE-ALL-GC-1); `running` holds prefill
+ * jobs only (a running GC job answers `409`). `gcQueued` counts the GC
+ * jobs inside `queued`, for the confirm dialog.
  * @param {object[]} jobs `GET /v1/jobs` rows
- * @returns {{queued: object[], running: object[], count: number}}
+ * @returns {{queued: object[], running: object[], count: number, gcQueued: number}}
  */
 export function bulkPauseTargets(jobs) {
   const list = Array.isArray(jobs) ? jobs : [];
   const byId = (a, b) => a.id - b.id;
-  const queued = list.filter((j) => isPrefill(j) && j.status === "queued").sort(byId);
+  const queued = list.filter((j) => (isPrefill(j) || isGc(j)) && j.status === "queued").sort(byId);
   const running = list
     .filter((j) => isPrefill(j) && j.status === "running" && !j.stop_request)
     .sort(byId);
-  return { queued, running, count: queued.length + running.length };
+  const gcQueued = queued.filter(isGc).length;
+  return { queued, running, count: queued.length + running.length, gcQueued };
 }
 
 /** Jobs Resume all acts on: every paused job, oldest id first. */
@@ -102,23 +125,40 @@ export function bulkResumeTargets(jobs) {
 }
 
 /**
- * What the bulk bar shows.
+ * What the bulk bar shows. `gcRunning`: a GC job is running and will not
+ * be paused; `gcQueued`: queued GC jobs Pause all holds (WP
+ * PAUSE-ALL-GC-1, replaces the old `gcActive`).
  * @returns {{pauseVisible: boolean, pauseCount: number, resumeVisible: boolean,
- *   resumeCount: number, gcActive: boolean, visible: boolean}}
+ *   resumeCount: number, gcRunning: boolean, gcQueued: number, visible: boolean}}
  */
 export function bulkBarState(jobs) {
   const list = Array.isArray(jobs) ? jobs : [];
-  const pauseCount = bulkPauseTargets(list).count;
+  const targets = bulkPauseTargets(list);
+  const pauseCount = targets.count;
   const resumeCount = bulkResumeTargets(list).length;
-  const gcActive = list.some((j) => j && j.type === "gc" && (j.status === "queued" || j.status === "running"));
+  const gcRunning = list.some((j) => isGc(j) && j.status === "running");
   return {
     pauseVisible: pauseCount > 0,
     pauseCount,
     resumeVisible: resumeCount > 0,
     resumeCount,
-    gcActive,
+    gcRunning,
+    gcQueued: targets.gcQueued,
     visible: pauseCount > 0 || resumeCount > 0,
   };
+}
+
+/**
+ * The confirm dialog's GC lines (WP PAUSE-ALL-GC-1), in display order;
+ * empty when no GC job is queued or running.
+ * @param {{gcRunning: boolean, gcQueued: number}} bar from {@link bulkBarState}
+ * @returns {string[]}
+ */
+export function confirmGcLines(bar) {
+  const lines = [];
+  if (bar && bar.gcQueued > 0) lines.push(countWord(bar.gcQueued, WORDING.confirmGcHeldOne, WORDING.confirmGcHeldMany));
+  if (bar && bar.gcRunning) lines.push(WORDING.confirmGcRunning);
+  return lines;
 }
 
 export const pauseAriaLabel = (n) => countWord(n, WORDING.pauseAriaOne, WORDING.pauseAriaMany);
@@ -189,10 +229,12 @@ export function bulkSummary(kind, results) {
   const skipped = results.filter((r) => r.outcome === "skipped").length;
   const pause = kind === "pause";
 
-  const head =
+  const baseHead =
     ok === total
       ? countWord(total, pause ? WORDING.pausedAllOne : WORDING.resumedAllOne, pause ? WORDING.pausedAllMany : WORDING.resumedAllMany)
       : fill(pause ? WORDING.pausedPartial : WORDING.resumedPartial, { ok, total });
+  const gcOk = results.filter((r) => r.outcome === "ok" && isGc(r.job)).length;
+  const head = gcOk ? `${baseHead} (${countWord(gcOk, WORDING.gcPartOne, WORDING.gcPartMany)})` : baseHead;
 
   const parts = [];
   if (failed.length) {

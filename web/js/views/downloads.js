@@ -47,7 +47,8 @@
  * replace it.
  *
  * **Pause all / Resume all (WP WEB-FEAT-5).** A bar under the heading
- * pauses every queued prefill job and then the running one, or resumes
+ * pauses every queued job (prefill and, since WP PAUSE-ALL-GC-1, GC) and
+ * then the running prefill, or resumes
  * every paused job (decisions and wording: `lib/bulk-jobs.js`). Same
  * non-optimistic posture as the per-job buttons: the calls go out (at most
  * `BULK_CONCURRENCY` at once), one aggregate toast reports what the server
@@ -250,6 +251,7 @@ import {
   pauseAriaLabel,
   resumeAriaLabel,
   confirmTitle,
+  confirmGcLines,
 } from "../lib/bulk-jobs.js";
 import { GRIP_SVG } from "../lib/icons.js";
 
@@ -500,8 +502,10 @@ const bulkTitle = document.createElement("h3");
 bulkTitle.id = "bulk-pause-title";
 bulkDialog.setAttribute("aria-labelledby", "bulk-pause-title");
 const bulkText = document.createElement("p");
+// WP PAUSE-ALL-GC-1: filled per opening from confirmGcLines (queued GC
+// runs held, a running one finishes).
 const bulkGcNote = document.createElement("p");
-bulkGcNote.textContent = BULK.confirmGcNote;
+bulkGcNote.dataset.role = "bulk-pause-gc-note";
 const bulkRow = document.createElement("div");
 bulkRow.className = "row";
 const bulkNo = document.createElement("button");
@@ -527,7 +531,9 @@ function openPauseConfirm() {
   if (!bar.pauseVisible || bulkBusy) return;
   bulkTitle.textContent = confirmTitle(bar.pauseCount);
   bulkText.textContent = BULK.confirmBody;
-  bulkGcNote.hidden = !bar.gcActive;
+  const gcLines = confirmGcLines(bar);
+  bulkGcNote.textContent = gcLines.join(" ");
+  bulkGcNote.hidden = gcLines.length === 0;
   bulkYes.disabled = isConnectionLost();
   bulkInvokerEl = document.activeElement;
   bulkConfirmOpen = true;
@@ -1014,6 +1020,12 @@ function paintIncomplete() {
 const HOLD_NOTE =
   "Paused — this does not hold the worker slot. vault-api released it immediately, so another queued job may already be running. Resume puts this job back at the front of the queue.";
 
+/** The paused card's note for a GC job (WP PAUSE-ALL-GC-1). The API only
+ * pauses a GC job while it is queued, so it never started: no plan, no
+ * deletion, and no slot to release. */
+const GC_HOLD_NOTE =
+  "Paused before it started — nothing was deleted. This garbage-collection run waits until you resume it; Resume puts it back at the front of the queue.";
+
 /** Rebuild ONLY the card's action row and stop note from `job`'s current
  * control fields — never touches the name or the status pill's icon, so
  * this is safe to call from the patch path (downloads-render-plan.js's
@@ -1069,7 +1081,7 @@ function buildJobCard(job, gamesByAppid) {
     kind: activeJobKind(job, game),
     word: activeJobWord(job, game),
     held,
-    holdNote: held ? HOLD_NOTE : "",
+    holdNote: held ? (job.type === "gc" ? GC_HOLD_NOTE : HOLD_NOTE) : "",
   });
   paintJobActions(card, job);
   return card;

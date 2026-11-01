@@ -2845,7 +2845,12 @@ export async function demoRequest(method, path, { body, params } = {}) {
     const id = Number(m[1]);
     const job = findJob(id);
     if (!job) throw notFound(`Unknown job id ${id}`);
-    if (job.type !== "prefill" || (job.status !== "running" && job.status !== "queued")) {
+    // WP PAUSE-ALL-GC-1: a queued job of either type can be paused; a
+    // running one only if it is a prefill (a running GC job is 409).
+    const pausable =
+      (job.status === "queued" && (job.type === "prefill" || job.type === "gc")) ||
+      (job.status === "running" && job.type === "prefill");
+    if (!pausable) {
       throw conflict(`Job ${id} cannot be paused from status ${job.status}`);
     }
     if (job.status === "queued") {
