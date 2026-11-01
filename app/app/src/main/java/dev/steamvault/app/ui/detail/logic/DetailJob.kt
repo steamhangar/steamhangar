@@ -18,9 +18,11 @@ import dev.steamvault.app.net.model.JobSummary
  * differently-scoped helper is therefore correct here, not a duplicate of
  * the grid's.
  *
- * GC jobs are excluded from [findTrackedJob] -- pause/resume are meaningless
- * on a GC job (api/README.md job control table: pause on a GC job is
- * `409`), and this sheet's OWN GC action already owns any GC job IT starts,
+ * GC jobs are excluded from [findTrackedJob] -- this section's pause/resume
+ * is a prefill concept (a running GC job answers `409` to pause; a queued
+ * one can be parked by "Pause all" since WP ANDROID-PAUSE-GC-1 and is
+ * resumed from the Downloads screen), and this sheet's OWN GC action
+ * already owns any GC job IT starts,
  * via `GcFlowState` (`GcFlow.kt`), independent of this job-control section.
  *
  * Pure -- no Compose, no network. Covered by `DetailJobTest`.

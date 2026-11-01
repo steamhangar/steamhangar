@@ -38,15 +38,23 @@ import dev.steamvault.app.net.model.JobDetail
  * wrong; an operator action ended the job, same "cancelled is not a
  * failure" posture `ui/downloads/logic/JobPartition.kt` documents for the
  * prefill case).
+ *
+ * **Paused (WP ANDROID-PAUSE-GC-1, web `gc-flow.js` `paused` flag).** Since
+ * web PAUSE-ALL-GC-1 "Pause all" parks a QUEUED GC job, and this sheet's
+ * own request dedupes into a paused job of the same mode, so a polled GC
+ * job can be `paused`. The flow keeps polling (a resume carries on to the
+ * plan/result) but [GcFlowState.PollingDryRun.paused] /
+ * [GcFlowState.PollingExecute.paused] tell the sheet to say why nothing
+ * moves (`detail_gc_paused`) instead of a bare spinner.
  */
 sealed class GcFlowState {
     data object Idle : GcFlowState()
     data object RequestingDryRun : GcFlowState()
-    data class PollingDryRun(val jobId: Int) : GcFlowState()
+    data class PollingDryRun(val jobId: Int, val paused: Boolean = false) : GcFlowState()
     data class DryRunPlan(val jobId: Int, val job: JobDetail, val summary: GcLogSummary?) : GcFlowState()
     data class ConfirmExecute(val jobId: Int, val job: JobDetail, val summary: GcLogSummary?) : GcFlowState()
     data object RequestingExecute : GcFlowState()
-    data class PollingExecute(val jobId: Int) : GcFlowState()
+    data class PollingExecute(val jobId: Int, val paused: Boolean = false) : GcFlowState()
     data class ExecuteDone(val jobId: Int, val job: JobDetail, val summary: GcLogSummary?) : GcFlowState()
     data class Cancelled(val jobId: Int) : GcFlowState()
     data class Error(val message: String, val executeAttempted: Boolean) : GcFlowState()
@@ -159,9 +167,13 @@ private inline fun pollOutcome(job: JobDetail, executeAttempted: Boolean, onDone
         "done" -> onDone()
         "error" -> GcFlowState.Error("GC job ${job.id} failed", executeAttempted)
         "cancelled" -> GcFlowState.Cancelled(job.id)
-        // "queued"/"running"/anything else (incl. an unrecognized future
-        // status): keep polling rather than guessing -- mirrors
+        // "queued"/"running"/"paused"/anything else (incl. an unrecognized
+        // future status): keep polling rather than guessing -- mirrors
         // `ui/downloads/logic/JobPartition.kt`'s "never fabricate a
         // plausible-looking word" posture for the same class of unknown.
-        else -> if (executeAttempted) GcFlowState.PollingExecute(job.id) else GcFlowState.PollingDryRun(job.id)
+        // `paused` additionally sets the flag so the sheet can say so.
+        else -> {
+            val paused = job.status == "paused"
+            if (executeAttempted) GcFlowState.PollingExecute(job.id, paused) else GcFlowState.PollingDryRun(job.id, paused)
+        }
     }

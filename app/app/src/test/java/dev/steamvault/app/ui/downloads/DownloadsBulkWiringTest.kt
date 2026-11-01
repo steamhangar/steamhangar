@@ -37,7 +37,7 @@ class DownloadsBulkWiringTest {
         assertHas(bar, "controller.confirmPauseAll(scope)", "dialog confirm")
         assertHas(bar, "controller.dismissPauseAll()", "dialog dismiss")
         assertHas(bar, "BulkWording.SCHEDULER_NOTE", "scheduler note")
-        assertHas(bar, "bar.gcActive", "gc note")
+        assertHas(bar, "confirmGcLines(bar)", "gc note")
     }
 
     @Test

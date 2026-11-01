@@ -132,11 +132,20 @@ private val PREFILL_WORD = mapOf(
 private val GC_WORD = mapOf(
     "queued" to "Garbage collection queued",
     "running" to "Collecting garbage",
-    "paused" to "Paused", // unreachable in practice (pause 409s on a GC job) — defensive only
+    // WP ANDROID-PAUSE-GC-1 (web PAUSE-ALL-GC-1): reachable — "Pause all"
+    // parks queued GC jobs.
+    "paused" to "Garbage collection paused",
     "done" to "Garbage collected",
     "error" to "Garbage collection failed",
     "cancelled" to "Garbage collection cancelled",
 )
+
+/** A finished DRY-RUN GC job (`gc_execute == false`) deleted nothing, so
+ * "Garbage collected" would claim the opposite (web `GC_DRY_RUN_DONE_WORD`,
+ * prod 2026-11-01). Only an explicit `false` gets it: an execute job
+ * (`true`) and a row without the field (older server) keep "Garbage
+ * collected". */
+const val GC_DRY_RUN_DONE_WORD = "GC dry run (nothing deleted)"
 
 /**
  * The word a job's badge/history-row shows, single source of truth for
@@ -146,6 +155,7 @@ private val GC_WORD = mapOf(
  * unknown-status handling takes).
  */
 fun jobStatusWord(job: JobSummary): String {
+    if (job.type == "gc" && job.status == "done" && job.gc_execute == false) return GC_DRY_RUN_DONE_WORD
     val table = if (job.type == "gc") GC_WORD else PREFILL_WORD
     return table[job.status] ?: job.status
 }

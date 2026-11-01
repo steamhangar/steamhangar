@@ -179,6 +179,19 @@ class JobPartitionTest {
         assertEquals("Garbage collected", jobStatusWord(job(1, "done", type = "gc")))
         assertEquals("Garbage collection failed", jobStatusWord(job(1, "error", type = "gc")))
         assertEquals("Garbage collection cancelled", jobStatusWord(job(1, "cancelled", type = "gc")))
+        // WP ANDROID-PAUSE-GC-1: reachable since "Pause all" parks queued GC jobs.
+        assertEquals("Garbage collection paused", jobStatusWord(job(1, "paused", type = "gc")))
+    }
+
+    @Test
+    fun `jobStatusWord a finished dry-run gc job says nothing was deleted, execute and older servers keep the old word`() {
+        val done = job(1, "done", type = "gc")
+        assertEquals("GC dry run (nothing deleted)", jobStatusWord(done.copy(gc_execute = false)))
+        assertEquals("Garbage collected", jobStatusWord(done.copy(gc_execute = true)))
+        assertEquals("Garbage collected", jobStatusWord(done)) // older server: no gc_execute field
+        // Only a finished gc job: a running dry run and a prefill job keep their words.
+        assertEquals("Collecting garbage", jobStatusWord(job(1, "running", type = "gc").copy(gc_execute = false)))
+        assertEquals("Done", jobStatusWord(job(1, "done").copy(gc_execute = false)))
     }
 
     @Test

@@ -59,11 +59,6 @@ export const WORDING = Object.freeze({
   confirmTitleMany: "Pause {n} downloads?",
   confirmBody:
     "Queued downloads are paused first, then the running one, so nothing new starts in between. Bytes already fetched stay on the cache. Resume all puts them back in the queue in their original order.",
-  // Not shown by the web since WP PAUSE-ALL-GC-1 (a queued GC run can be
-  // paused now; see confirmGcRunning / confirmGcHeld*). Kept verbatim because
-  // the Android twin still shows it and BulkJobsWebTwinTest pins it here —
-  // retire it together with the Android follow-up.
-  confirmGcNote: "Garbage-collection runs keep going: they cannot be paused.",
   confirmGcRunning: "The garbage-collection run that already started finishes: a running one cannot be paused (cancel it instead).",
   confirmGcHeldOne: "This includes 1 queued garbage-collection run: it is held too and deletes nothing until you resume it.",
   confirmGcHeldMany: "This includes {n} queued garbage-collection runs: they are held too and delete nothing until you resume them.",

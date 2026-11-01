@@ -105,8 +105,8 @@ test("WP PAUSE-ALL-GC-1 (N7): the toast names GC runs among the ok results, only
   );
 });
 
-test("the old confirmGcNote literal stays in WORDING for the Android twin pin", () => {
-  assert.equal(WORDING.confirmGcNote, "Garbage-collection runs keep going: they cannot be paused.");
+test("the retired confirmGcNote literal is gone (WP ANDROID-PAUSE-GC-1)", () => {
+  assert.equal("confirmGcNote" in WORDING, false);
 });
 
 test("a running job that is already pausing or cancelling is not sent again", () => {

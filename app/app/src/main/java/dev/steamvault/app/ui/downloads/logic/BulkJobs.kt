@@ -23,9 +23,18 @@ import kotlinx.coroutines.sync.withPermit
  * running job releases the worker slot, so the worker claims the next
  * queued job at once. Since WP WEB-FEAT-5 the API also parks a QUEUED
  * prefill job immediately. Pause all therefore pauses every queued prefill
- * job first and only then the running one(s). GC jobs are never paused
- * (the API answers 409). A running job that already has a `stop_request`
- * is not sent again. Resume all resumes every paused job.
+ * job first and only then the running one(s).
+ *
+ * Queued jobs of both types, running jobs of type prefill only (WP
+ * ANDROID-PAUSE-GC-1, twin of web PAUSE-ALL-GC-1). The API parks a QUEUED
+ * GC job like a queued prefill; before, every GC job answered 409, so with
+ * auto-GC on execute the GC jobs each prefill had queued ran at once right
+ * after "Pause all" (prod 2026-11-01). A RUNNING GC job still answers 409
+ * (short, rebuilds its plan; cancel is the tool): it is not sent, and the
+ * confirm dialog says it finishes. The dialog also says how many queued GC
+ * runs are held, because the count in the title ("downloads") includes
+ * them. A running job that already has a `stop_request` is not sent again.
+ * Resume all resumes every paused job.
  *
  * **Results.** 404 (gone) and 409 (finished or changed state meanwhile)
  * count as SKIPPED, not failed.
@@ -55,7 +64,17 @@ object BulkWording {
     const val CONFIRM_BODY =
         "Queued downloads are paused first, then the running one, so nothing new starts in between. " +
             "Bytes already fetched stay on the cache. Resume all puts them back in the queue in their original order."
-    const val CONFIRM_GC_NOTE = "Garbage-collection runs keep going: they cannot be paused."
+    const val CONFIRM_GC_RUNNING =
+        "The garbage-collection run that already started finishes: a running one cannot be paused (cancel it instead)."
+    const val CONFIRM_GC_HELD_ONE =
+        "This includes 1 queued garbage-collection run: it is held too and deletes nothing until you resume it."
+    const val CONFIRM_GC_HELD_MANY =
+        "This includes {n} queued garbage-collection runs: they are held too and delete nothing until you resume them."
+
+    /** Appended to the toast head when GC jobs were among the successfully
+     * paused/resumed ones, so "downloads" does not silently count them. */
+    const val GC_PART_ONE = "incl. 1 garbage-collection run"
+    const val GC_PART_MANY = "incl. {n} garbage-collection runs"
     const val CONFIRM_YES = "Pause all"
     const val CONFIRM_NO = "Keep downloading"
     const val PAUSED_ALL_ONE = "Paused 1 download"
@@ -81,18 +100,18 @@ fun pauseAllLabel(n: Int): String = countWord(n, BulkWording.PAUSE_ARIA_ONE, Bul
 fun resumeAllLabel(n: Int): String = countWord(n, BulkWording.RESUME_ARIA_ONE, BulkWording.RESUME_ARIA_MANY)
 fun pauseConfirmTitle(n: Int): String = countWord(n, BulkWording.CONFIRM_TITLE_ONE, BulkWording.CONFIRM_TITLE_MANY)
 
+/** `queued` holds queued prefill AND queued GC jobs; `running` holds
+ * prefill jobs only. [gcQueued] counts the GC jobs inside `queued`. */
 data class BulkPauseTargets(val queued: List<JobSummary>, val running: List<JobSummary>) {
     val count: Int get() = queued.size + running.size
+    val gcQueued: Int get() = queued.count { it.type == "gc" }
 }
 
 /** Pause all's two phases, oldest id first in each (web `bulkPauseTargets`). */
-fun bulkPauseTargets(jobs: List<JobSummary>): BulkPauseTargets {
-    val prefill = jobs.filter { it.type == "prefill" }
-    return BulkPauseTargets(
-        queued = prefill.filter { it.status == "queued" }.sortedBy { it.id },
-        running = prefill.filter { it.status == "running" && it.stop_request == null }.sortedBy { it.id },
-    )
-}
+fun bulkPauseTargets(jobs: List<JobSummary>): BulkPauseTargets = BulkPauseTargets(
+    queued = jobs.filter { (it.type == "prefill" || it.type == "gc") && it.status == "queued" }.sortedBy { it.id },
+    running = jobs.filter { it.type == "prefill" && it.status == "running" && it.stop_request == null }.sortedBy { it.id },
+)
 
 /** Every paused job, oldest id first (web `bulkResumeTargets`). */
 fun bulkResumeTargets(jobs: List<JobSummary>): List<JobSummary> =
@@ -103,27 +122,46 @@ data class BulkBarState(
     val pauseCount: Int,
     val resumeVisible: Boolean,
     val resumeCount: Int,
-    val gcActive: Boolean,
+    /** A GC job is running and will not be paused. */
+    val gcRunning: Boolean,
+    /** Queued GC jobs Pause all holds. */
+    val gcQueued: Int,
 ) {
     val visible: Boolean get() = pauseVisible || resumeVisible
 }
 
 /** What the bulk bar shows (web `bulkBarState`). */
 fun bulkBarState(jobs: List<JobSummary>): BulkBarState {
-    val pauseCount = bulkPauseTargets(jobs).count
+    val targets = bulkPauseTargets(jobs)
+    val pauseCount = targets.count
     val resumeCount = bulkResumeTargets(jobs).size
     return BulkBarState(
         pauseVisible = pauseCount > 0,
         pauseCount = pauseCount,
         resumeVisible = resumeCount > 0,
         resumeCount = resumeCount,
-        gcActive = jobs.any { it.type == "gc" && (it.status == "queued" || it.status == "running") },
+        gcRunning = jobs.any { it.type == "gc" && it.status == "running" },
+        gcQueued = targets.gcQueued,
     )
+}
+
+/** The confirm dialog's GC lines, in display order (web `confirmGcLines`);
+ * empty when no GC job is queued or running. */
+fun confirmGcLines(bar: BulkBarState): List<String> = buildList {
+    if (bar.gcQueued > 0) add(countWord(bar.gcQueued, BulkWording.CONFIRM_GC_HELD_ONE, BulkWording.CONFIRM_GC_HELD_MANY))
+    if (bar.gcRunning) add(BulkWording.CONFIRM_GC_RUNNING)
 }
 
 enum class BulkOutcome { OK, SKIPPED, FAILED }
 
-data class BulkResult(val jobId: Int, val outcome: BulkOutcome, val reason: String? = null)
+/** [gc]: the job was a GC job (set by [runBulkPause] / [runBulkResume], which
+ * know the job types), so the toast can name the GC runs. */
+data class BulkResult(val jobId: Int, val outcome: BulkOutcome, val reason: String? = null, val gc: Boolean = false)
+
+private fun List<BulkResult>.markGc(jobs: List<JobSummary>): List<BulkResult> {
+    val gcIds = jobs.filter { it.type == "gc" }.map { it.id }.toSet()
+    return map { if (it.jobId in gcIds) it.copy(gc = true) else it }
+}
 
 /** 404 / 409: the job is gone or no longer in a state the action applies to. */
 fun isSkip(error: VaultApiError): Boolean = error.status == 404 || error.status == 409
@@ -161,7 +199,7 @@ suspend fun runBulkPause(
 ): List<BulkResult> {
     val first = runWithLimit(targets.queued.map { it.id }, limit, pause)
     val second = runWithLimit(targets.running.map { it.id }, limit, pause)
-    return first + second
+    return (first + second).markGc(targets.queued + targets.running)
 }
 
 /** Resume all. */
@@ -169,7 +207,7 @@ suspend fun runBulkResume(
     targets: List<JobSummary>,
     resume: suspend (Int) -> Unit,
     limit: Int = BULK_CONCURRENCY,
-): List<BulkResult> = runWithLimit(targets.map { it.id }, limit, resume)
+): List<BulkResult> = runWithLimit(targets.map { it.id }, limit, resume).markGc(targets)
 
 enum class BulkKind { PAUSE, RESUME }
 
@@ -183,7 +221,7 @@ fun bulkSummary(kind: BulkKind, results: List<BulkResult>): BulkSummary {
     val skipped = results.count { it.outcome == BulkOutcome.SKIPPED }
     val pause = kind == BulkKind.PAUSE
 
-    val head = if (ok == total) {
+    val baseHead = if (ok == total) {
         if (pause) {
             countWord(total, BulkWording.PAUSED_ALL_ONE, BulkWording.PAUSED_ALL_MANY)
         } else {
@@ -195,6 +233,8 @@ fun bulkSummary(kind: BulkKind, results: List<BulkResult>): BulkSummary {
             mapOf("ok" to ok, "total" to total),
         )
     }
+    val gcOk = results.count { it.outcome == BulkOutcome.OK && it.gc }
+    val head = if (gcOk > 0) "$baseHead (${countWord(gcOk, BulkWording.GC_PART_ONE, BulkWording.GC_PART_MANY)})" else baseHead
     val parts = buildList {
         if (failed.isNotEmpty()) {
             add(
