@@ -507,7 +507,7 @@ their open boxes (items 2, 7 and 11) are in section 12. Item 13 stays here.
       - [ ] **NITS-API-1** (api + agent) MAP-DRIFT-1 fail-safe tests,
         claim-vs-move race test, regrow-without-idle-gap test, open api
         review nits of rc20-rc21.1.
-      - [ ] **ADD-DEVICE-QR-1** (web; operator report 2026-11-01, wave 2)
+      - [x] **ADD-DEVICE-QR-1** (web; operator report 2026-11-01, wave 2)
         Add a device shows the app-download QR (step 1) and, once revealed,
         the pairing QR (step 2) close together, so the camera can catch the
         wrong one. Only one code is ever sharp: the download QR gets a small
@@ -608,6 +608,14 @@ their open boxes (items 2, 7 and 11) are in section 12. Item 13 stays here.
         `Date.now()` (not `$.clock.now()`); read-back and SMALL_RANGE checks
         match loosely (fail open); kept files are never pruned (max-age or
         max-count prune later); no context assertion on the error branch.
+      - [ ] nit (ADD-DEVICE-QR-1 review): no wide golden of the Add-a-device
+        sheet (add e.g. clients-pair-1400 with the pairing QR shown, so the
+        blurred download QR and its eye are pinned); the eye carries both
+        aria-pressed and a flipping label (APG: keep one); comment that
+        `appQr.eye` is moved between paints, not cloned. Chosen behaviour:
+        hiding the pairing QR leaves the download QR blurred until the eye
+        or a reopen. Local `test-web-shots` fails clients-pair-shown-400 on
+        main too (1508 px, QR payload differs locally; see AUTO-VERIFY-1).
       - [ ] remaining nits: MAP-DRIFT-1 fail-safe tests, claim-vs-move race
         test, aria-live on queue move, D19WiringTest pin,
         regrow-without-idle-gap test

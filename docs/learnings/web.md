@@ -235,3 +235,15 @@ at the end, under a dated heading, one entry each with the WP that proved it.
   merged answer object**: the live range re-merges the same cached jobs
   every 3 s, so keying on the answer stepped the smoother ~10x per real
   sample (WEB-ETA-EMA-1; Android had it right from the start).
+
+### 2026-11-01 ADD-DEVICE-QR-1
+
+- `css-mobile-1b.test.js` reads only the FIRST `@media (pointer:coarse)`
+  block of kit.css and finds the narrow-touch `@container addev` block by
+  position: new touch rules go inside the existing coarse block; a second
+  coarse block breaks two existing tests.
+- `fake-dom.js` has no `prepend`, and a button's `type` is a plain
+  property: build children in order with append, assert `el.type`.
+- Never overlay a control on a QR code: the corners hold the finder
+  patterns and the quiet zone is only ~16-20 px at 164 px. Put the control
+  beside the code.

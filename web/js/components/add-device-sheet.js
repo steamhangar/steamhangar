@@ -15,7 +15,10 @@
  *    (lib/pair-link.js `buildAppPairUri`, the contract with the app),
  *    generated on this page by lib/qr-encode.js — no third party sees it —
  *    plus the same URI as an "Open on this phone" link for a phone that
- *    already has the app, and a copy button.
+ *    already has the app, and a copy button. Only one of the two codes is
+ *    sharp at a time (WP ADD-DEVICE-QR-1): an eye toggle blurs the download
+ *    code, showing the pairing code blurs it, unblurring it hides the
+ *    pairing code again.
  *  - Another browser: `<origin>/#pair=<key>`, consumed by
  *    lib/pair-intake.js on the receiving page.
  *  - Windows PC (vault-agent): a PowerShell install command
@@ -265,6 +268,10 @@ function showOption(option) {
   option.reveal.hidden = false;
   option.toggle.textContent = "Hide";
   option.toggle.setAttribute("aria-expanded", "true");
+  // MUTATION TARGET (ADD-DEVICE-QR-1): a sharp pairing code blurs the
+  // download code beside it (every Show path of the phone runs through here;
+  // a key the app refuses shows a note, no code, and blurs nothing).
+  if (option.id === "phone" && option.reveal.querySelector('[data-role="pair-qr"]')) setAppQrBlurred(true);
 }
 
 function hideOption(option) {
@@ -350,6 +357,7 @@ function paintAppDownload() {
   const where = plan.source === "local" ? "from this vault" : "from the project's GitHub release (this vault has no copy)";
   const size = formatDownloadSize(plan.size);
   const side = el("div", "ad-qrside");
+  side.append(appQr.eye); // ADD-DEVICE-QR-1: the eye heads the column
   if (isDemoMode()) {
     // Review N3: the demo's index is fake, so no link that leads nowhere.
     const note = el("p", "hint", `Demo mode: on a connected vault a "Download app" button here downloads ${plan.name} ${where}.`);
@@ -376,8 +384,52 @@ function paintAppDownload() {
   caption.dataset.role = "app-download-caption";
   if (!isDemoMode()) caption.title = `${plan.url}\nAndroid asks once to allow installs from the browser. ${plan.name} ${where}.`;
   const box = el("div", "ad-qrbox");
-  box.append(buildQrSvg(plan.url, { label: "QR code to download the SteamHangar app", role: "app-download-qr" }), side);
+  const qr = buildQrSvg(plan.url, { label: "QR code to download the SteamHangar app", role: "app-download-qr" });
+  const hint = el("p", "ad-qrhint", "Download code hidden");
+  hint.dataset.role = "app-download-qr-hint";
+  box.append(qr, hint, side);
+  appQr.box = box;
+  appQr.qr = qr;
+  appQr.hint = hint;
+  applyAppQrBlur();
   appDownload.replaceChildren(caption, box);
+}
+
+// ---- One sharp code at a time (WP ADD-DEVICE-QR-1) ---------------------------
+//
+// Operator report 2026-11-01: the app-download QR (step 1) and the revealed
+// pairing QR (step 2) sit close together, so a phone camera can catch the
+// wrong one. The download QR gets an eye toggle that blurs it (the same
+// blur as the pairing stand-in); showing the pairing QR blurs it, and
+// unblurring it hides the pairing QR again (the Hide path). The download
+// code is not a secret, so it stays in the DOM, only blurred and
+// aria-hidden, with a short visible hint.
+
+const appQr = { blurred: false, box: null, qr: null, hint: null, eye: el("button", "ad-qreye") };
+appQr.eye.type = "button";
+appQr.eye.dataset.role = "app-download-qr-eye";
+appQr.eye.append(icon("eye"));
+appQr.eye.addEventListener("click", () => setAppQrBlurred(!appQr.blurred));
+
+/** Paint the blur state onto the eye and the current download QR (if any:
+ * the QR is rebuilt by every paint of the download index). */
+function applyAppQrBlur() {
+  const blurred = appQr.blurred;
+  appQr.eye.setAttribute("aria-pressed", String(blurred));
+  appQr.eye.setAttribute("aria-label", blurred ? "Show download code" : "Hide download code");
+  appQr.eye.title = blurred ? "Show download code" : "Hide download code";
+  if (!appQr.box) return;
+  appQr.box.classList.toggle("ad-qrblur", blurred);
+  if (blurred) appQr.qr.setAttribute("aria-hidden", "true");
+  else appQr.qr.removeAttribute("aria-hidden");
+  appQr.hint.hidden = !blurred;
+}
+
+function setAppQrBlurred(blurred) {
+  appQr.blurred = blurred;
+  applyAppQrBlur();
+  // MUTATION TARGET: a sharp download code means a hidden pairing code.
+  if (!blurred && phoneOption.shown) hideOption(phoneOption);
 }
 
 // ---- Phone: pairing ----------------------------------------------------------
@@ -777,6 +829,9 @@ function selectTab(id) {
  * "browser", "windows" or "linux"; `null` opens with no tab selected. */
 export function openAddDeviceSheet({ tab = "phone" } = {}) {
   hideAll();
+  // Every open starts with the (non-secret) download code sharp and the
+  // pairing code hidden.
+  setAppQrBlurred(false);
   selectTab(options.some((o) => o.id === tab) ? tab : null);
   const demo = isDemoMode();
   const hasKey = isUsableKey(getStoredApiKey());

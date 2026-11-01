@@ -28,6 +28,8 @@ const ICONS = {
   windows: { width: "1.8", shapes: [["rect", { x: "3", y: "4", width: "18", height: "12", rx: "2" }], ["path", { d: "M8 20h8M12 16v4" }]] },
   linux: { width: "1.8", shapes: [["path", { d: "M4 6l5 5-5 5M12 18h8" }]] },
   warn: { width: "2", shapes: [["path", { d: "M12 3l10 18H2zM12 10v5M12 18h.01" }]] },
+  // The onboarding key field's eye (onboarding.js EYE_SVG), on the 24px grid.
+  eye: { width: "1.8", shapes: [["path", { d: "M2 12s3.7-6.5 10-6.5S22 12 22 12s-3.7 6.5-10 6.5S2 12 2 12z" }], ["circle", { cx: "12", cy: "12", r: "3" }]] },
 };
 
 /** A decorative icon: no text, hidden from assistive technology (the
