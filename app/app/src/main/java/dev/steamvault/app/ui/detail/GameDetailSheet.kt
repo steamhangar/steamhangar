@@ -64,6 +64,7 @@ import dev.steamvault.app.ui.detail.logic.DepotPresentation
 import dev.steamvault.app.ui.detail.logic.DepotShareTag
 import dev.steamvault.app.ui.detail.logic.DetailJobAction
 import dev.steamvault.app.ui.detail.logic.confirmedCurrentWording
+import dev.steamvault.app.ui.downloads.logic.formatTimestamp
 import dev.steamvault.app.ui.detail.logic.GcFlowState
 import dev.steamvault.app.ui.detail.logic.GcLogSummary
 import dev.steamvault.app.ui.detail.logic.buildDepotPresentation
@@ -591,7 +592,7 @@ private fun LoadedDetailBody(
             // ---- facts (web LIBRARY-2 `.gd-facts`) -------------------------------
             DetailBox {
                 Text(
-                    text = detail.last_prefill_at?.let { stringResource(R.string.detail_last_download, it) }
+                    text = detail.last_prefill_at?.let { stringResource(R.string.detail_last_download, formatTimestamp(it)) }
                         ?: stringResource(R.string.detail_never_downloaded),
                     style = MaterialTheme.typography.bodySmall,
                 )
@@ -599,9 +600,9 @@ private fun LoadedDetailBody(
                     text = when (confirmedCurrentWording(detail.last_prefill_at, detail.last_manifest_check)) {
                         ConfirmedCurrentWording.NEVER_CONFIRMED -> stringResource(R.string.detail_not_confirmed_current)
                         ConfirmedCurrentWording.CONFIRMED ->
-                            stringResource(R.string.detail_confirmed_current, detail.last_manifest_check!!)
+                            stringResource(R.string.detail_confirmed_current, formatTimestamp(detail.last_manifest_check))
                         ConfirmedCurrentWording.CONFIRMED_BEFORE_CACHE_CLEARED ->
-                            stringResource(R.string.detail_confirmed_current_before_cleared, detail.last_manifest_check!!)
+                            stringResource(R.string.detail_confirmed_current_before_cleared, formatTimestamp(detail.last_manifest_check))
                     },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,

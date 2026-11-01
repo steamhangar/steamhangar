@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -473,17 +474,22 @@ private fun LibraryToolbar(
                 } else {
                     stringResource(R.string.library_filters_collapsed)
                 }
+                // WP ANDROID-POLISH-1: funnel + count instead of the word,
+                // and no 58 dp button minimum (a set min width skips it), so
+                // sort, layout, Filters and Select share one row at 411 dp
+                // (font 1.0); the spoken label is unchanged.
                 OutlinedButton(
                     onClick = filters.onToggle,
-                    contentPadding = PaddingValues(horizontal = 14.dp),
+                    contentPadding = PaddingValues(horizontal = 10.dp),
                     modifier = Modifier
                         .align(Alignment.CenterVertically)
+                        .widthIn(min = FILTERS_MIN_WIDTH)
                         .semantics {
                             contentDescription = spoken
                             stateDescription = filterState
                         },
                 ) {
-                    Text(stringResource(R.string.library_filters_button), maxLines = 1)
+                    FiltersGlyph()
                     Text(
                         " ${filters.activeCount}",
                         maxLines = 1,
@@ -516,6 +522,9 @@ private fun LibraryToolbar(
 /** Three 44 dp icon segments: with the sort pair and Select the control row
  * fits one line at 360 dp and font scale 1.0 (WP ANDROID-REDESIGN-1b). */
 private val LAYOUT_TOGGLE_WIDTH = 132.dp
+
+/** The Filters button's touch width; below Material's 58 dp button minimum on purpose (WP ANDROID-POLISH-1). */
+private val FILTERS_MIN_WIDTH = 48.dp
 
 /** The Filters button's state (WP ANDROID-REDESIGN-1b), `null` without metadata. */
 private data class FiltersButtonState(val open: Boolean, val activeCount: Int, val onToggle: () -> Unit)

@@ -32,6 +32,8 @@ import dev.steamvault.app.ui.settings.logic.CoreApplyLine
 import dev.steamvault.app.ui.settings.logic.RiskyItem
 import dev.steamvault.app.ui.settings.logic.SettingsLayout
 import dev.steamvault.app.ui.settings.logic.SettingDraft
+import dev.steamvault.app.ui.settings.logic.SettingsDirtyDots
+import dev.steamvault.app.ui.settings.logic.settingsDirtyDots
 import dev.steamvault.app.ui.settings.logic.SteamLibraryStatus
 import dev.steamvault.app.ui.settings.logic.buildSettingsPatchDraft
 import dev.steamvault.app.ui.settings.logic.settingsDirty
@@ -103,7 +105,7 @@ class SettingsController(
     private val steamRelayRepository: SteamRelayRepository,
     /** WP APP-FEAT-2: `GET /v1/about` for the About section. */
     private val aboutRepository: AboutRepository,
-    /** WP D16: remembered open sections and the expert switch (per device). */
+    /** WP D16: the expert switch, stored per device (the section panel is per visit). */
     private val viewPrefs: SettingsViewPreferences = InMemorySettingsViewPreferences(),
 ) {
     var loading by mutableStateOf(true)
@@ -209,6 +211,19 @@ class SettingsController(
      * and hides like the web's. */
     val isDirty: Boolean get() = settingsDirty(settingsResponse?.settings, drafts)
     val isReadonly: Boolean get() = settingsResponse?.readonly ?: false
+
+    /**
+     * WP ANDROID-POLISH-1 (twin of web settings.js `paintDirtyDots`): the
+     * strip tabs and the expert switch row that show an unsaved-changes dot,
+     * from the keys of the PATCH body the drafts would send. None on a
+     * read-only vault (web `pendingBody` is empty there).
+     */
+    val dirtyDots: SettingsDirtyDots get() {
+        val response = settingsResponse ?: return SettingsDirtyDots.NONE
+        if (response.readonly) return SettingsDirtyDots.NONE
+        val keys = buildSettingsPatchDraft(response.settings, drafts).keys
+        return settingsDirtyDots(SettingsLayout.placeEntries(response.settings), keys)
+    }
 
     suspend fun load() {
         loading = true

@@ -326,6 +326,9 @@
     <string name="settings_discard_changes">Discard changes</string>
     <!-- WP WEB-FIX-8: the save bar's status line (web settings.js UNSAVED_TEXT). -->
     <string name="settings_unsaved_changes">Unsaved changes</string>
+    <!-- WP ANDROID-POLISH-1: spoken text of the unsaved dots (web settings.js sr-only). -->
+    <string name="settings_section_unsaved">(unsaved changes)</string>
+    <string name="settings_expert_unsaved">(unsaved expert changes)</string>
     <string name="settings_saving">Saving…</string>
     <string name="settings_toast_saved">Settings saved.</string>
     <string name="settings_toast_save_failed_fallback">Could not save settings</string>

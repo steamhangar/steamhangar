@@ -163,7 +163,14 @@ class LibraryScreenshotTest {
     // WP ANDROID-REDESIGN-1c (REDESIGN-1b review): games with store metadata,
     // so the toolbar shows the Filters button (it stays above the chips).
     @Test
-    fun library_411dp_font100_meta() = shoot("library_411dp_font100_meta", PIXEL_411, withMeta = true)
+    fun library_411dp_font100_meta() =
+        shoot("library_411dp_font100_meta", PIXEL_411, withMeta = true, expectOneControlRow = true)
+
+    // WP ANDROID-POLISH-1: the worst case with Filters; the controls may
+    // wrap here, the chips stay the last row (assertLayout).
+    @Test
+    fun library_360dp_font130_meta() =
+        shoot("library_360dp_font130_meta", SMALL_360, fontScale = 1.3f, withMeta = true)
 
     private fun shoot(
         name: String,
@@ -173,6 +180,7 @@ class LibraryScreenshotTest {
         layout: LibraryLayout = LibraryLayout.GRID_2,
         expectedBadgeText: String? = null,
         withMeta: Boolean = false,
+        expectOneControlRow: Boolean = false,
     ) {
         // The rule already launched the host activity with the @Config
         // defaults; apply this profile and recreate it so the new
@@ -201,6 +209,28 @@ class LibraryScreenshotTest {
         // The Filters button shows only with metadata (spoken "Filters" while none is set).
         val filters = composeRule.onAllNodes(hasContentDescription(FILTERS_DESCRIPTION)).fetchSemanticsNodes().size
         assertEquals("Filters buttons (metadata ${if (withMeta) "present" else "absent"})", if (withMeta) 1 else 0, filters)
+        if (expectOneControlRow) assertOneControlRow()
+    }
+
+    /**
+     * WP ANDROID-POLISH-1 (REDESIGN-1c review): with metadata the Select
+     * button wrapped alone onto a second row at 411 dp. Sort, layout,
+     * Filters and Select must share one row: the same vertical centre.
+     */
+    private fun assertOneControlRow() {
+        val density = composeRule.activity.resources.displayMetrics.density
+        fun centreDp(description: String): Float {
+            val b = composeRule.onNode(hasContentDescription(description)).fetchSemanticsNode().boundsInRoot
+            return (b.top + b.bottom) / 2f / density
+        }
+        val select = centreDp(SELECT_DESCRIPTION)
+        val filters = centreDp(FILTERS_DESCRIPTION)
+        val layout = centreDp(LAYOUT_GRID2_DESCRIPTION)
+        assertTrue(
+            "Filters (${filters}dp), Select (${select}dp) and the layout toggle (${layout}dp) are not on one row",
+            kotlin.math.abs(select - filters) <= LAYOUT_TOLERANCE_DP &&
+                kotlin.math.abs(select - layout) <= LAYOUT_TOLERANCE_DP,
+        )
     }
 
     /**
@@ -607,6 +637,9 @@ class LibraryScreenshotTest {
 
         /** `R.string.library_filters_button`, the button's spoken label with no filter set. */
         const val FILTERS_DESCRIPTION = "Filters"
+
+        /** `R.string.library_select_mode`, the Select button's spoken label. */
+        const val SELECT_DESCRIPTION = "Select games"
 
         /** `R.string.library_layout_grid2`. */
         const val LAYOUT_GRID2_DESCRIPTION = "2-column grid"

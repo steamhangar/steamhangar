@@ -55,7 +55,7 @@ class SettingsD16WiringTest {
 
     @Test
     fun `MUTATION PIN -- each Settings row piece is called from the composable that owns it`() {
-        assertCalledFrom("ExpertSwitchRow(controller.expertOn)", "SettingsScreen")
+        assertCalledFrom("ExpertSwitchRow(controller.expertOn,", "SettingsScreen")
         assertCalledFrom("SettingsSectionStrip(sections = sections", "SettingsScreen")
         assertCalledFrom("SettingsForm(controller, current)", "SettingsScreen")
         assertCalledFrom("PinnedSettingRow(entry)", "SettingsForm")
@@ -80,13 +80,31 @@ class SettingsD16WiringTest {
         assertTrue("no Open Clients pointer (rc20 visual check)", !text.contains("ClientsSection(") && !text.contains("settings_clients_open_button"))
     }
 
+    /** WP ANDROID-POLISH-1: the unsaved dots (web `paintDirtyDots`) come from the controller. */
+    @Test
+    fun `MUTATION PIN -- the strip tabs and the expert switch row show the controller's dirty dots`() {
+        val text = code(screen)
+        assertCalledFrom("val dirty = controller.dirtyDots", "SettingsScreen")
+        assertCalledFrom("dirty = dirty.sections, onSelect", "SettingsScreen")
+        assertCalledFrom("ExpertSwitchRow(controller.expertOn, dirty = dirty.expertSwitch)", "SettingsScreen")
+        assertCalledFrom("if (id in dirty) UnsavedDot(stringResource(R.string.settings_section_unsaved))", "SettingsSectionStrip")
+        assertCalledFrom("if (dirty) UnsavedDot(stringResource(R.string.settings_expert_unsaved))", "ExpertSwitchRow")
+        val start = text.indexOf("private fun UnsavedDot(")
+        val end = text.indexOf("private fun PanelHeading(", start)
+        check(start >= 0 && end > start) { "expected UnsavedDot before PanelHeading" }
+        assertTrue("the dot is spoken", text.substring(start, end).contains("contentDescription = spoken"))
+        val strings = File("src/main/res/values/strings.xml").readText(Charsets.UTF_8)
+        assertTrue(strings.contains("<string name=\"settings_section_unsaved\">(unsaved changes)</string>"))
+        assertTrue(strings.contains("<string name=\"settings_expert_unsaved\">(unsaved expert changes)</string>"))
+    }
+
     @Test
     fun `MUTATION PIN -- the expert switch is the last item of the About panel`() {
         val text = code(screen)
         val start = text.indexOf("\"about\" -> {")
         check(start >= 0) { "expected an About branch in SettingsScreen" }
         val about = text.indexOf("AboutSection(controller, scope)", start)
-        val switch = text.indexOf("ExpertSwitchRow(controller.expertOn)", start)
+        val switch = text.indexOf("ExpertSwitchRow(controller.expertOn,", start)
         val next = text.indexOf("else -> {", start)
         assertTrue("About first, then the switch, both inside the About branch", about in (start + 1) until switch && switch < next)
         assertEquals("one switch only", 1, Regex("ExpertSwitchRow\\(controller").findAll(text).count())
