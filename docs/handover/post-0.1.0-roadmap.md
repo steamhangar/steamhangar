@@ -2138,6 +2138,11 @@ and VERIFY-COLD-1 is prose in the Sunday-test box of the rc19.3 block.
 - **APP-EXPERT-SWITCH-1 placement decided (operator, 2026-11-21): Weg A**,
   the switch stays on the About tab (before the disclaimer), like the web's
   narrow layout.
+  **APP-EXPERT-SWITCH-1 done 2026-11-21** (review PASS + re-check PASS):
+  shared switch off edge `--line-strong` (3.83:1 on bg), Android row before
+  the disclaimer as one switch node with 48 dp minimum height, web
+  disclaimer is the About panel's last line and the label text toggles too.
+  Stale `settings-1400` golden: re-record in the wave-2 goldens round.
 - **RC23-AUTONOMOUS (operator, 2026-11-21 evening):** while the operator is
   away the orchestrator (1) tags `v0.1.0-rc23` itself once all six 11-01
   packages (incl. APP-DL-STATS-1b, APP-DL-CARD-1) are on `main` and tests,
@@ -2527,6 +2532,9 @@ Follow-up of the rc23 wave 2 reviews (2026-11-21), rc24:
 - DL-STATS-NITS-1 (api) the newest series bucket is averaged over its
   elapsed seconds, but the caption names the bucket's full length; carry
   the covered seconds in the series payload so the period is exact.
+- EXPERT-SWITCH-NITS-1 (app) the 48 dp row-height assert in
+  `SettingsExpertSwitchTest` passes without `heightIn` at Robolectric's
+  default width (the hint wraps); add a `w800dp` case or a source pin.
 
 Follow-up of CI-CLOCK-1 (review 2026-11-21):
 - CLOCK-SEAM-1 (freeze) four api handlers still read the wall clock with
