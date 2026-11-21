@@ -11,6 +11,8 @@
  *   (a) every colour in tokens.json equals theme.css, and theme.css has no
  *       colour custom property the JSON lacks (both directions);
  *   (b) --fs-N, --sp-N, --r-X equal the JSON's fs/sp/r, both directions;
+ *   (b2) the web-only groups: size (--hit, --ctl-h) and shadow (--sh-1,
+ *       --sh-2, DESIGN-NITS-1) equal theme.css, both directions;
  *   (c) status-vocabulary.json equals STATUS_LABEL (kinds, order, words),
  *       KIND_GLYPH, DEFAULT_PILL_TONE, and the animated set equals the
  *       kinds that have a `.sic.k-<kind>` animation rule in theme.css;
@@ -124,6 +126,19 @@ test("tokens.json size (web-only) equals theme.css --hit / --ctl-h, both directi
     assert.equal(px(single(key)), value, `--${key}`);
   }
   assert.ok(px(single("hit")) > px(single("ctl-h")), "the hit area is larger than the visual control");
+});
+
+// DESIGN-NITS-1 (audit D-10): the web-only elevation tokens. Android's
+// DesignTokensContractTest reads only the colour groups (Compose draws
+// elevation with tonal surfaces), so this group needs no Kotlin twin.
+test("tokens.json shadow (web-only) equals theme.css --sh-*, both directions, inked from --bg", () => {
+  assert.deepEqual(Object.keys(tokens.shadow).sort(), ["sh-1", "sh-2"]);
+  for (const [key, value] of Object.entries(tokens.shadow)) {
+    assert.equal(single(key), value, `--${key}`);
+    assert.match(value, /color-mix\(in srgb, var\(--bg\) \d+%, transparent\)$/, `--${key} takes its ink from --bg, not black`);
+  }
+  const cssKeys = [...props.keys()].filter((name) => /^sh-\d+$/.test(name)).sort();
+  assert.deepEqual(cssKeys, Object.keys(tokens.shadow).sort());
 });
 
 test("tokens.json literal scale values (kit.html)", () => {

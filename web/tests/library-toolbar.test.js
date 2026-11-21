@@ -52,9 +52,10 @@ test("head: a kit page head with the title and the split button; the primary hal
   assert.equal(t.checkAndUpdateBtn.className, "menuitem", "the downloading entry is never a primary button");
 });
 
-test("toolbar: search + chips, then sort group, layout switch, Filters, Select — in that order", () => {
+test("MUTATION TARGET -- toolbar DOM (= tab) order follows the visual order: search, tools (sort group, layout switch, Filters, Select), chips (DESIGN-NITS-1, D-15)", () => {
   const t = build();
-  assert.deepEqual(t.bar.children.map((c) => c.className), ["lib-filters", "lib-tools"]);
+  // The chip row also carries the overflow cue classes (scue + its state).
+  assert.deepEqual(t.bar.children.map((c) => c.className.replace(/ scue( fits| at-start| at-end)*$/, "")), ["search lib-search", "lib-tools", "chips lib-chips"]);
   assert.deepEqual(
     t.bar.children[1].children.map((c) => c.className),
     ["sortg", "segi", "lib-filtersbtn", "btn lib-select"],
@@ -114,11 +115,12 @@ test("status line: ONE line holding the update text, the owned notice (the only 
   assert.equal(t.ownedText.hidden === true, false, "the live region itself is never hidden");
 });
 
-test("MUTATION TARGET -- css: one toolbar row at full width (zero-basis filters), a stacked status line in a narrow container", () => {
+test("MUTATION TARGET -- css: search and tools on row 1, the chips in their own row (DESIGN-NITS-1, D-15), a stacked status line in a narrow container", () => {
   const kit = readFileSync(new URL("../css/kit.css", import.meta.url), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
-  assert.match(kit, /\.kit \.lib-filters\{ flex:1 1 0; \}/, "the chips wrap inside the left part, the tools stay on row 1");
+  assert.match(kit, /\.kit \.lib-chips\{[^}]*flex:1 1 100%; \}/, "the chips take their own full-width row after the tools");
+  assert.doesNotMatch(kit, /\.lib-filters\b/, "no wrapper box any more: search, tools and chips are items of the bar");
+  assert.doesNotMatch(kit, /\.kit \.lib-(?:chips|search|tools)\{[^}]*(?:^|[;\s])order:/, "no order reshuffle: visual order = DOM = tab order");
   const narrow = kit.slice(kit.indexOf("@container lib (max-width:560px)"));
-  assert.match(narrow, /\.kit \.lib-filters\{ flex-basis:100%; \}/);
   assert.match(narrow, /\.kit \.lib-stat\{ flex-direction:column;/, "no wrapped line starts with a separator");
   assert.match(narrow, /\.kit \.lib-stat > \*::before,\s*\.kit \.lib-stat > \*:not\(\[hidden\]\):not\(:empty\) ~ \*:not\(\[hidden\]\):not\(:empty\)::before\{ display:none; \}/, "matches the separator rule's specificity");
 });

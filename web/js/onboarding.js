@@ -689,7 +689,8 @@ function buildOverlay() {
 
 function render() {
   els.stepnum.textContent = stepTitle(state.step);
-  els.track.style.width = progressPercent(state.step) + "%";
+  // DESIGN-NITS-1 (audit D-16): scale, not width (app.css ".track i").
+  els.track.style.transform = `scaleX(${progressPercent(state.step) / 100})`;
   for (const sec of els.steps) sec.classList.toggle("on", Number(sec.dataset.step) === state.step);
   els.backBtn.style.display = state.step > FIRST_STEP ? "" : "none";
   els.nextBtn.disabled = !canAdvance(state.step, state);

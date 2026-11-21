@@ -206,7 +206,7 @@ test("base .jobcard/.jobtop keep every pre-WP property value (the Active/Paused 
   const cardBody = ruleBody(appTop, ".jobcard");
   assert.ok(cardBody, ".jobcard rule not found at top level");
   assert.match(cardBody, /border-radius:\s*var\(--r-m\)/);
-  assert.match(cardBody, /padding:\s*12px/);
+  assert.match(cardBody, /padding:\s*var\(--sp-3\)/); // 12px (DESIGN-NITS-1: written as a token)
   const topBody = ruleBody(appTop, ".jobtop");
   assert.ok(topBody, ".jobtop rule not found at top level");
   assert.match(topBody, /display:\s*flex/);

@@ -179,7 +179,7 @@ test("select mode: .view-root's bottom padding becomes the room; the plain .view
 test("no Suggestions panel rules are left (WP WEB-FEAT-SUGGEST-2 removed the panel)", () => {
   assert.equal(/decision-panel|--panel-w/.test(appCss), false);
   // .view-root's own base bottom padding is what ends the flow outside select mode.
-  assert.match(ruleBody(app.topLevel, ".view-root") ?? "", /padding:\s*20px 16px 32px/);
+  assert.match(ruleBody(app.topLevel, ".view-root") ?? "", /padding:\s*var\(--sp-5\) var\(--sp-4\) var\(--sp-7\)/, "20px 16px 32px (DESIGN-NITS-1: written as tokens)");
 });
 
 // ---------------------------------------------------------------------

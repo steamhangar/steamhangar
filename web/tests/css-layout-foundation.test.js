@@ -302,8 +302,8 @@ test("the auto-fill library grid lives in kit.css at every width: repeat(auto-fi
   const grid = ruleBody(kitCss, ".kit.view-library > .grid");
   assert.ok(grid, "Library grid rule missing in kit.css");
   assert.match(grid, /grid-template-columns:repeat\(auto-fill, minmax\(min\(100%, var\(--tile-min\)\), 1fr\)\)/);
-  assert.match(grid, /gap:22px 16px/, "library.html's gaps");
-  assert.match(ruleBody(kitCss, ".kit.view-library > .grid.compact") ?? "", /--tile-min:124px; gap:16px 12px/);
+  assert.match(grid, /gap:22px var\(--sp-4\)/, "library.html's gaps (22px 16px; DESIGN-NITS-1 writes 16px as a token)");
+  assert.match(ruleBody(kitCss, ".kit.view-library > .grid.compact") ?? "", /--tile-min:124px; gap:var\(--sp-4\) var\(--sp-3\)/); // 16px 12px
   assert.match(ruleBody(kitCss, ".kit.view-library > .grid.list") ?? "", /grid-template-columns:minmax\(0, 1fr\)/);
   for (const b of appMedia) assert.equal(/\.grid[.{ ,]/.test(b.body), false, `${b.header} still styles the Library grid`);
 });
@@ -508,8 +508,12 @@ test("--nav-h equals the bottom nav's box sum: border + .nav padding + .nav-btn 
     assert.ok(m, `${what} not found`);
     return Number(m[1]);
   };
-  const nav = ruleBody(appTop, ".nav") ?? "";
-  const btn = ruleBody(appTop, ".nav-btn") ?? "";
+  // DESIGN-NITS-1 writes on-grid spacing as --sp-* tokens: resolve them to
+  // px so the box sum below reads one unit.
+  const SP = { 1: 4, 2: 8, 3: 12, 4: 16, 5: 20, 6: 24, 7: 32, 8: 48 };
+  const sp = (text) => (text ?? "").replace(/var\(--sp-(\d)\)/g, (m, n) => `${SP[n]}px`);
+  const nav = sp(ruleBody(appTop, ".nav"));
+  const btn = sp(ruleBody(appTop, ".nav-btn"));
   const border = px(/border-top:\s*(\d+)px solid/, nav, ".nav border-top");
   const [navTop, navBottom] = /padding:\s*(\d+)px \d+px calc\((\d+)px \+ env\(safe-area-inset-bottom\)\)/.exec(nav)?.slice(1).map(Number) ?? [];
   assert.ok(navTop !== undefined, ".nav padding (top, side, calc(bottom + inset)) not found");
@@ -517,9 +521,9 @@ test("--nav-h equals the bottom nav's box sum: border + .nav padding + .nav-btn 
   const gap = px(/gap:\s*(\d+)px/, btn, ".nav-btn gap");
   const bar = appMedia.find((b) => b.header === "@media (max-width:1023px){");
   assert.ok(bar, "the bottom-bar geometry block @media (max-width:1023px) is missing");
-  const icon = px(/height:\s*(\d+)px/, ruleBody(bar.body, ".nav-ic"), ".nav-ic height");
+  const icon = px(/height:\s*(\d+)px/, sp(ruleBody(bar.body, ".nav-ic")), ".nav-ic height");
   assert.match(ruleBody(bar.body, ".nav-ic svg") ?? "", /display:\s*block/, "the icon svg must be block (else the font's line box sets the height)");
-  const label = px(/line-height:\s*(\d+)px/, ruleBody(bar.body, ".nav-btn .nav-lb"), ".nav-lb line-height");
+  const label = px(/line-height:\s*(\d+)px/, sp(ruleBody(bar.body, ".nav-btn .nav-lb")), ".nav-lb line-height");
   // Every nav icon is drawn at the height the box reserves.
   const indexHtml = readFileSync(path.join(webDir, "index.html"), "utf8");
   const icons = [...indexHtml.matchAll(/<span class="nav-ic"[^>]*>\s*<svg width="(\d+)" height="(\d+)"/g)];
@@ -533,9 +537,9 @@ test("--nav-h equals the bottom nav's box sum: border + .nav padding + .nav-btn 
   const land = appMedia.find((b) => b.header === "@media (orientation:landscape) and (max-height:500px) and (max-width:1023px){");
   assert.ok(land, "landscape block missing");
   const landToken = px(/--nav-h:\s*(\d+)px/, land.body, "landscape --nav-h");
-  const landNavTop = px(/padding-top:\s*(\d+)px/, ruleBody(land.body, ".nav"), "landscape .nav padding-top");
-  const landNavBottom = px(/padding-bottom:\s*calc\((\d+)px \+ env/, ruleBody(land.body, ".nav"), "landscape .nav padding-bottom");
-  const landBtnPad = px(/padding:\s*(\d+)px \d+px/, ruleBody(land.body, ".nav-btn"), "landscape .nav-btn padding");
+  const landNavTop = px(/padding-top:\s*(\d+)px/, sp(ruleBody(land.body, ".nav")), "landscape .nav padding-top");
+  const landNavBottom = px(/padding-bottom:\s*calc\((\d+)px \+ env/, sp(ruleBody(land.body, ".nav")), "landscape .nav padding-bottom");
+  const landBtnPad = px(/padding:\s*(\d+)px \d+px/, sp(ruleBody(land.body, ".nav-btn")), "landscape .nav-btn padding");
   // Icon and label side by side: the row is as tall as the taller of the two.
   assert.equal(border + landNavTop + landNavBottom + 2 * landBtnPad + Math.max(icon, label), landToken, "landscape: the bar's boxes no longer add up to --nav-h");
   assert.equal(landToken, 48);

@@ -269,7 +269,7 @@ test("MUTATION TARGET -- installedBadgeCompactText: CACHED is just the summary, 
   assert.equal(installedBadgeCompactText(INSTALLED_BADGE.CACHED, "client-0"), "client-0");
 });
 
-test("MUTATION TARGET -- installedBadgeCompactText: NOT_CACHED keeps 'not cached', drops the 'Installed but' lead-in", () => {
+test("MUTATION TARGET -- installedBadgeCompactText: NOT_CACHED keeps 'not cached', drops the 'Installed,' lead-in", () => {
   const text = installedBadgeCompactText(INSTALLED_BADGE.NOT_CACHED, "client-0");
   assert.match(text, /not cached/i);
   assert.doesNotMatch(text, /^Installed/, "the compact form must not restate the 'Installed' lead-in the full form uses");
