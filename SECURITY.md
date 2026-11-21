@@ -32,7 +32,11 @@ Do not open a public GitHub issue for a security report — see
 `docs/security/threat-model.md` for the design assumptions and known,
 by-design limitations that are *not* new findings (in particular:
 `vault-core` has no authentication and is not meant to have any; that is a
-documented trust-boundary decision, not a bug to report).
+documented trust-boundary decision, not a bug to report). The same holds
+for a plain-HTTP web page or HTML mail that makes a LAN browser load Steam
+chunk URLs through `vault-core`, filling the cache or forcing refetches
+with `?nocache=1`: that cross-site path is documented in threat model §1
+and left unmitigated by decision.
 
 **Where your Steam credentials go.** ADR-0004
 (`docs/adr/0004-steam-credentials-never-touch-steamvault.md`) promised that
