@@ -877,6 +877,24 @@ def test_readonly_reachable_settings_keys_use_the_no_colon_form(
     )
 
 
+@pytest.mark.parametrize(
+    "env_var", sorted({key for keys in D16B_EDITABLE_FORWARDED.values() for key in keys})
+)
+def test_d16b_editable_forwarded_keys_are_documented_in_env_example(env_var: str) -> None:
+    """Audit 2026-11-20 C-21: every key compose forwards for Settings has a
+    `#?VAR=` line in deploy/.env.example (same anchored check as the S3 keys
+    above). VAULT_EVENT_LOG_ROTATE_BYTES was forwarded since rc18 while
+    core/README.md still called it "not forwarded" and .env.example had no
+    stanza for it."""
+    text = ENV_EXAMPLE_PATH.read_text(encoding="utf-8")
+    pattern = re.compile(rf"^#?{re.escape(env_var)}=", re.MULTILINE)
+    assert pattern.search(text), (
+        f"deploy/.env.example has no {env_var}=... or #{env_var}=... "
+        "assignment line, but deploy/compose.yaml forwards it for Settings "
+        "(D16B_EDITABLE_FORWARDED). Add a commented stanza."
+    )
+
+
 def test_schedule_window_uses_the_no_colon_substitution_form(compose_text: str) -> None:
     """Structural pin for review round 2's blocker R2-B1, measured directly
     against a real `docker compose config` render (see

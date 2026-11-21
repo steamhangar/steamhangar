@@ -848,8 +848,8 @@ Four Phase-3 settings, documented in full in `.env.example`:
 
 | Variable               | Required | Default                                    | Purpose                                                            |
 |-------------------------|----------|---------------------------------------------|---------------------------------------------------------------------|
-| `VAULT_EVENT_LOG`       | no       | `/vault/logs/event.log` (**on** by default as of the 2026-08-17 packaging WP) | vault-core: path to the machine-readable cache-event log (WP 3.10, ADR-0008) — its WRITE side |
-| `VAULT_EVENT_LOG_PATH`  | no       | `/vault/logs/event.log` (**on** by default, same WP) | vault-api: the SAME path — its READ side. WP 3.11's sweeper tails it to drive miss-triggered prefill completion, per-client hit stats and bypass detection (requirement A12). Must equal `VAULT_EVENT_LOG` above |
+| `VAULT_EVENT_LOG`       | no       | empty (off) in `compose.yaml`; the shipped `.env.example` sets `/vault/logs/event.log` (**on** for an install from it, since the 2026-08-17 packaging WP) | vault-core: path to the machine-readable cache-event log (WP 3.10, ADR-0008) — its WRITE side |
+| `VAULT_EVENT_LOG_PATH`  | no       | empty (off) in `compose.yaml`; `.env.example` sets `/vault/logs/event.log` (same WP) | vault-api: the SAME path — its READ side. WP 3.11's sweeper tails it to drive miss-triggered prefill completion, per-client hit stats and bypass detection (requirement A12). Must equal `VAULT_EVENT_LOG` above |
 | `VAULT_GC_GRACE_DAYS`   | no       | `14`         | vault-api: days a freshly stored chunk is protected from garbage collection purely by its own store time (protects beta-branch/demo content GC cannot otherwise see); `0` disables the window. See `api/README.md` "The recently-stored grace window" |
 | `VAULT_AUTO_GC`         | no       | `execute` (**since WP SWEEP-1, 2026-08-22 — was `off` through WP 3.12**) | vault-api: `off` \| `dry-run` \| `execute` — automatically queue a GC job after a prefill that actually updated something. See `api/README.md` "Auto-GC" |
 
