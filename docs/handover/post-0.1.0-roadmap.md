@@ -2331,6 +2331,17 @@ APP-DL-CARD-1, APP-EXPERT-SWITCH-1, CAP-503-FIX-1b (pause reason in the
 Downloads UI, web + app); one goldens round, RC23-RELEASE-NOTES-2, tag. The rc23 release notes get a section for them before the tag.
 ANDROID-TWIN-DETAIL-1 and CORE-LIVE-PARITY-1 stay rc24 candidates.
 
+**Status 2026-11-22 (rc23 wave 2 complete, RC23-HOLD satisfied):**
+APP-DL-STATS-1 + 1b, APP-EXPERT-SWITCH-1, CAP-503-FIX-1b, APP-DL-CARD-1 and
+RC23-RELEASE-NOTES-2 merged in `wp/rc23-wave2` after reviews PASS (each with
+re-check), one goldens round (`wp/rc23-wave2-goldens`, bot commits 3623b88
+app + 58b42ac web; new job card goldens looked at), verifying CI 44962722588
+green (incl. lintDebug + testReleaseUnitTest), local gates test-api (4867
+passed before the goldens; the only failure was the missing new goldens),
+test-web 2330/0, test-go, test-core green, `dev.sh verify lean` 207/0. All
+six packages planned on 2026-11-01 are on `main` with this merge; tag
+`v0.1.0-rc23` and the rollout Antrag follow (RC23-AUTONOMOUS).
+
 **Status 2026-11-21 night (rc23 wave 1 on `main` c7315ef, CI green):**
 CAP-503-FIX-1a, PROXY-VERSION-1 (+ -NITS-1), OUTPUT-TRIM-TAP-1, -2,
 -NITS-1 merged after reviews PASS, gates test-api/-go/-web/-core and
