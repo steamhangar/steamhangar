@@ -1134,7 +1134,7 @@ jobs:
     # continue-on-error here instead -- the point is that a Steam-side
     # hiccup never touches a PR's status at all, not that it touches it
     # softly.)
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/wp/ci-nightly-diag'
     # Builds four images from scratch and exercises a live stack against the
     # real Steam CDN -- deliberately slower than the other jobs above.
     timeout-minutes: 30
@@ -1153,4 +1153,10 @@ jobs:
         # thin out this job silently.
         env:
           VERIFY_SECTIONS: full
-        run: bash deploy/tests/verify-stack.sh
+        run: |
+          set -o pipefail
+          bash deploy/tests/verify-stack.sh 2>&1 | tee /tmp/vs.log && rc=0 || rc=$?
+          grep -n -B3 '^FAIL' /tmp/vs.log | head -n 40 | cut -c1-300 | sed 's/^/::error::/' || true
+          grep -E '^checks (passed|failed)' /tmp/vs.log | sed 's/^/::warning::/' || true
+          [ $rc -eq 0 ] || { tail -n 15 /tmp/vs.log | cut -c1-300 | sed 's/^/::error::tail /'; }
+          exit $rc
