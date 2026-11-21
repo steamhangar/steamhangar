@@ -117,7 +117,7 @@ See "Linux/SteamOS variant (WP 2.5)" below for the full install and
 verification story.
 
 **Building and testing (WSL2 — no Windows Go toolchain in this repo's dev
-environment; Go 1.26 in WSL):**
+environment; Go 1.27 or newer in WSL, the `go` line of `agent/go/go.mod`):**
 
 ```bash
 wsl bash -c "cd /mnt/c/path/to/your/checkout/agent/go && go build ./... && go vet ./... && gofmt -l . && go test ./..."
@@ -732,6 +732,17 @@ TLS uses the OS/system root CA pool; `http_proxy`/`https_proxy`/`no_proxy`
 environment variables are honored by default (`http.ProxyFromEnvironment`)
 — set them in the environment vault-agent runs under if reaching the
 server needs a proxy.
+
+**Troubleshooting an `https://` server URL on Windows** (since the Go 1.27
+line, GO-LINE-1): if `SSL_CERT_FILE` or `SSL_CERT_DIR` is set in the
+environment the Scheduled Task runs under (often left behind machine-wide
+by Git, Python or a corporate tool), vault-agent takes its root
+certificates from that file or directory instead of the Windows
+certificate store (Go's `x509sslcertoverrideplatform=1` default). A
+certificate that the Windows store trusts then fails with
+`x509: certificate signed by unknown authority`. Remove the variable from
+that environment, or add your CA to the file it names. `http://` server
+URLs are not affected.
 
 ## Hosts-file mode (WP 2.3)
 

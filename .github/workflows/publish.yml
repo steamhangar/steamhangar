@@ -1778,12 +1778,13 @@ jobs:
         with:
           persist-credentials: false
 
-      # WP SEC-FIX-2: go.mod's `go 1.25.0` is a MINIMUM, but handed to
+      # WP SEC-FIX-2: go.mod's `go 1.27.0` is a MINIMUM, but handed to
       # setup-go via go-version-file it is an exact version, and
       # check-latest cannot lift an exact pin. Release binaries would ship
-      # 1.25.0's stdlib without the later 1.25.x security fixes. Derive the
+      # 1.27.0's stdlib without the later 1.27.x security fixes. Derive the
       # minor line from go.mod (still the single source) and ask for the
-      # newest patch of it.
+      # newest patch of it. GO-LINE-1: raise that line in go.mod before
+      # Go drops it from security support (two newest minors only).
       - name: Derive Go release line from go.mod
         id: gover
         shell: bash

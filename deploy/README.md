@@ -1079,12 +1079,19 @@ rc18 an empty value no longer rolls back (it means "not set" = the default
 edge; ADR-0021 note 2026-10-15). The boot log says `upstream edge mode ON: ...` or
 `upstream keepalive pool ON (legacy per-name mode)`.
 
-**Keep the upload throttle on.** Recommended (user decision 2026-10-04):
-keep `VAULT_UPSTREAM_RATE=4m` and `VAULT_UPSTREAM_RATE_WINDOW=off` (before rc18: an empty value)
-(throttle round the clock, see "Upstream rate cap") even with edge mode and
-the cap on, until measurements after the rollout show that edge and cap are
-stable. Only then loosen or remove it. Both are production `.env`
-settings; the repo defaults are unchanged.
+**Rate cap during the rollout.** Do not pin `VAULT_UPSTREAM_RATE_WINDOW`:
+it is deprecated since rc18, and the cap already lifts inside the one
+download window (see ["Upstream rate cap"](#upstream-rate-cap)). An upstream
+rate cap (`VAULT_UPSTREAM_RATE` or Settings) may stay on until the checks
+below are clean, but the rate and the cap C multiply: throttled transfers
+hold cap slots longer, so a low rate can turn into a 503 retry loop
+(measured on a DS-Lite line with the default C: thousands of 503s per
+minute). Change the rate only together with a look at the 503 count (the
+cap-hit count below, or `limit_conn=REJECTED` in the access log), before
+and after the change. A Steam client downloading while the prefill runner loads
+shares the cap and can still loop (CAP-503-LOOP-1, see the
+[v0.1.0 release notes](../docs/release-notes/v0.1.0.md)). The repo default
+is unchanged: no rate cap.
 
 **Check after the rollout** (repeat a client update of an app that is not
 cached, and a forced prefill; production line):

@@ -154,3 +154,24 @@ at the end, under a dated heading, one entry each with the WP that proved it.
   1809+, undocumented) is the launcher. Exit-code pass-through to
   LastTaskResult and ExecutionTimeLimit reaching the child chain are not
   verified on a real PC yet (WP AGENT-FIX-3).
+
+## 2026-11-21 — rc23 wave 1 (GO-LINE-1)
+- **Raise the Go line before its EOL.** Go gives security fixes only to
+  the two newest minor lines, so a line ends support the day the
+  next-but-one minor ships (Go 1.25 lost it with 1.27, August 2026). CI
+  and publish.yml build the newest patch of go.mod's `go` line
+  (`<line>.x`, SEC-FIX-2), which keeps patches current but never moves
+  the line: the audit found 15 open stdlib entries for 1.25.13. When a
+  new Go minor ships, raise `agent/go/go.mod` to it (at the latest before
+  the following minor). Raising the `go` line also flips the GODEBUG
+  defaults of every line in between (`$(go env GOROOT)/doc/godebug.md`),
+  so read that section and run `go vet` and `go test` with the new line
+  before the commit. The two user-visible effects of the 1.27 raise
+  (GO-LINE-1 review): `urlstrictcolons=1` refuses an unbracketed IPv6
+  server URL such as `http://fd00::5:8080/` at the config check instead
+  of failing at dial (bracketed IPv6, names and IPv4 unchanged), and
+  `x509sslcertoverrideplatform=1` makes a Windows agent with an
+  `https://` server URL take its roots from `SSL_CERT_FILE` /
+  `SSL_CERT_DIR` instead of the Windows store when either is set in the
+  Scheduled Task's environment (troubleshooting note in
+  `agent/README.md`).

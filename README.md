@@ -338,16 +338,38 @@ reasoning behind leaving both open rather than overstating what's closed.
 **3. The vault's own API key.** Every vault-api route that returns or
 changes data requires an `X-Api-Key` header matching `VAULT_API_KEY` — one
 shared secret, set once in `.env`, never committed and never present in
-`compose.yaml`. The one exception besides the health check is the web UI's
-own static files (its `index.html`, its JavaScript, its CSS): reaching
-those needs no key, because the UI shell itself isn't API data — but every
-API call that JavaScript then goes on to make still needs the key, exactly
-like a call you'd make yourself. If a vault has one operator and should
-stay that way, `VAULT_SETTINGS_READONLY` locks the settings screen
-entirely; that variable went unforwarded by the same work that first
-packaged the web UI into the vault-api image, a gap later found and closed,
-so the compose file you get by default now forwards it rather than needing
-one wired up by hand.
+`compose.yaml`. The exceptions, all named here:
+
+- the health check, `GET /v1/health`, a fixed `{"status": "ok"}` with no
+  data;
+- the web UI's own static files (its `index.html`, its JavaScript, its
+  CSS): the UI shell itself isn't API data, and every API call that
+  JavaScript then goes on to make still needs the key, exactly like a call
+  you'd make yourself;
+- `GET /auth/steam/app-return`, which only hands the Steam sign-in reply
+  (checked for shape only; the app verifies it) on to the Android app's
+  deep link and reads no key, no database and no network;
+- `/dist/<name>`, the release files baked into the vault-api image
+  (signed APK, vault-agent binaries, task scripts, systemd units,
+  `SHA256SUMS`), so that a phone or PC without a key can install from the
+  vault. They are the same files as on the public GitHub release, but
+  anyone on your LAN can read the exact version from their names; their
+  index, `GET /v1/dist`, stays behind the key;
+- cover images, `GET /v1/covers/{appid}/{signature}`, which take the key
+  in derived form instead of a header, because an `<img>` cannot send one:
+  the signature is an HMAC keyed with `VAULT_API_KEY`, handed out only by
+  the authenticated game list. Without the key no cover URL can be built;
+  a URL that leaks shows that one cover until the cover changes or the
+  key is rotated.
+
+`VAULT_SETTINGS_READONLY` is narrower than its name: it makes
+`PATCH /v1/settings` answer `403` and does nothing else. The Steam Web API
+key (`PUT`/`DELETE /v1/steam/key`, its field in the Settings screen stays
+usable), client names, prefill and other jobs, cache deletes and garbage
+collection all stay writable for anyone holding the key. It keeps a
+headless or GitOps setup's settings in `.env`; it is not a second, weaker
+key. The shipped compose file forwards it. Details: threat model
+[§7](docs/security/threat-model.md#7-the-api-key-and-the-read-only--bypass-modes).
 
 ## FAQ
 

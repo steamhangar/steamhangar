@@ -1118,9 +1118,13 @@ is done, tick it HERE, not in the archive.
   all MISSes go through ONE pooled edge (the client's Host only has to
   pass the allowlist), a global cap answers 503 above C concurrent
   upstream connections, three new log fields (`upstream_host`, `host`,
-  `limit_conn`). Keep `VAULT_UPSTREAM_RATE=4m` with an empty
-  `VAULT_UPSTREAM_RATE_WINDOW` (user decision 2026-10-04) until the
-  post-rollout measurements are stable. Post-rollout check (ADR-0021
+  `limit_conn`). Rollout advice (ROLLOUT-DOC-1, replaces the 2026-10-04
+  "4m round the clock" advice): no `VAULT_UPSTREAM_RATE_WINDOW` pin
+  (deprecated since rc18, the rate cap lifts inside the download
+  window); a rate cap may stay on until the post-rollout checks are
+  clean, but the rate and the connection cap multiply into a 503 retry
+  loop, so change the rate only with a look at the 503 count.
+  Post-rollout check (ADR-0021
   "After rollout", deploy/README.md): `113` count 0, connect-time
   dominated by `0.000`, established :80 sockets <= 2C, and the
   Host-for-all-names inference confirmed (uncached app update without
