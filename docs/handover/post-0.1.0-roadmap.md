@@ -2109,6 +2109,27 @@ and VERIFY-COLD-1 is prose in the Sunday-test box of the rc19.3 block.
   hour. Also "highest 19.0 MB/s" above "Limit 16 MB/s" needs an
   explanation (MB vs MiB, sampling). Check web vs app first (twin), then
   the API feeds behind the cards.
+  **Twin check 2026-11-21:** no divergence; web and Android read the same
+  feeds (`/v1/throughput?range=1h` summary + `jobs[]`, merged with
+  `/v1/throughput/live`), same fields, same 1024 base. **Root cause:** the
+  tiles and the job card read the swept tiers (event sweep every 5 min +
+  scheduler tick, plus the live view's 30 s summary cache) while the graph
+  and "Loading now" read the live ring; in a job's first minutes every
+  swept figure is 0, and the card speed stays diluted over a window that
+  started before the job (GRAPH-RECENT-1 kept summary tiles swept on
+  purpose). Prod data for job #266 confirms the bytes arrived later.
+  "highest" vs "Limit": same unit; a graph point averages all served bytes
+  (hits included) over 5/15/60 s, the cap applies to MISS over minutes;
+  the caption now names the point's period and an explanatory note
+  (wp/app-dl-stats-1).
+  **Open decision DL-STATS-ZERO (operator):** Weg A (rec.) the API
+  stitches the live ring since the last sweep into summary and job figures
+  like `/series` `prefer_ring` does (api freeze exception, ADR-0016
+  addendum, reverses the GRAPH-RECENT-1 rule; per-depot bytes kept in the
+  ring); Weg B client only: card speed from the live runner row in
+  `loading_sources`, swept figures labelled "as of the last log read N min
+  ago" or hidden while loading; Weg C shorter prod sweep interval
+  (`VAULT_EVENT_SWEEP_INTERVAL_MINUTES=1`, Antrag), combinable.
 - **OUTPUT-TRIM-TAP-1 (dev tooling, found 2026-11-01):** the DEV-MODS-1
   output-trim mod omitted only 596 of 13,520 lines of `dev.sh test-web`
   (node TAP) and gave no file hint, so the harness still persisted 528 KB.
