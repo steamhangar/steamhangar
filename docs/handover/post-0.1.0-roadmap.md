@@ -2135,6 +2135,16 @@ and VERIFY-COLD-1 is prose in the Sunday-test box of the rc19.3 block.
   addendum, ADR-0025 note that summary tiles and job figures now include
   the unswept ring span). APP-DL-STATS-1 counts as done for RC23-HOLD only
   with 1b on `main`.
+  **APP-DL-STATS-1b built 2026-11-21 (in review):** `traffic_stitch.py`,
+  per bucket the swept row or the ring total stands (larger wins), swept
+  figures read in one SQLite snapshot, ring per-depot store capped at
+  4096 entries (incomplete buckets keep the swept value), no contract
+  change. Decided by orchestrator (RC23-AUTONOMOUS), operator may revise:
+  every range is stitched (7d/30d/all too); bytes only (request counts,
+  hit_rate, active_clients stay swept); job speed is the ring's current
+  window on the counted depots; `miss_bytes_per_second` stays swept;
+  clients unchanged (live view keeps its 30 s summary cache, so tiles may
+  lag "Loading now" by up to 30 s; candidate DL-STATS-CACHE-1 if wanted).
 - **APP-EXPERT-SWITCH-1 placement decided (operator, 2026-11-21): Weg A**,
   the switch stays on the About tab (before the disclaimer), like the web's
   narrow layout.
