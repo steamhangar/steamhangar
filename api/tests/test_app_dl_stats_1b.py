@@ -339,23 +339,145 @@ def test_the_per_depot_store_is_bounded_and_drops_the_oldest_bucket(monkeypatch)
     assert now_epoch in view.depots_incomplete and view.depots == {}
 
 
+BUCKET = 1_760_788_800  # a 5-minute boundary
+
+def _view(depots: dict[int, dict[str, dict[int, int]]], incomplete: frozenset[int] = frozenset()):
+    return live_tier.StitchView(read=True, units={}, depots=depots, depots_incomplete=incomplete)
+
+
+def _since(view, swept_since: int, swept_by_bucket: dict[int, int], start_epoch: int = BUCKET) -> int:
+    return traffic_stitch.stitch_job_since(
+        swept_since, swept_by_bucket, view, [DEPOT], False, lambda _a, _t: True, start_epoch
+    )
+
+
 def test_an_incomplete_bucket_keeps_the_jobs_swept_bytes() -> None:
     """What a dropped bucket shows: its swept value (late, never twice)."""
-    start = 1_760_788_800
-    view = live_tier.StitchView(
-        read=True,
-        units={},
-        fives={start: RingBucket(all=LiveTotals(5, 5000, 0, 5000), runner=LiveTotals(5, 5000, 0, 5000), seconds=300.0)},
-        depots={start: {RUNNER: {DEPOT: 5000}}},
-        depots_incomplete=frozenset(),
+    view = _view({BUCKET: {RUNNER: {DEPOT: 5000}}})
+    assert _since(view, 1000, {BUCKET: 1000}) == 5000
+    dropped = _view({}, frozenset({BUCKET}))
+    assert _since(dropped, 1000, {BUCKET: 1000}) == 1000
+    # Marked incomplete but with leftover bytes: still the swept value.
+    assert _since(_view({BUCKET: {RUNNER: {DEPOT: 5000}}}, frozenset({BUCKET})), 1000, {BUCKET: 1000}) == 1000
+
+
+def test_the_jobs_so_far_never_goes_below_its_swept_value() -> None:
+    """Review should-fix 1: the ring restarted after an idle gap may win a
+    bucket SERVER-WIDE (more bytes of other traffic) yet hold fewer of this
+    job's bytes; the job decides on its own bytes, so the swept value stands
+    (the ring-loses branch), and an equal ring changes nothing."""
+    fewer = _view({BUCKET: {RUNNER: {DEPOT: 300}, PC: {9999: 50_000}}})
+    assert _since(fewer, 4000, {BUCKET: 1000}) == 4000
+    equal = _view({BUCKET: {RUNNER: {DEPOT: 1000}}})
+    assert _since(equal, 4000, {BUCKET: 1000}) == 4000
+    more = _view({BUCKET: {RUNNER: {DEPOT: 1500}}})
+    assert _since(more, 4000, {BUCKET: 1000}) == 4500
+
+
+def test_a_bucket_before_the_jobs_start_bucket_is_not_the_jobs() -> None:
+    """The start guard: unswept ring bytes on the job's depot in the bucket
+    BEFORE its start bucket (an earlier run of the same game) are not counted."""
+    view = _view({BUCKET - 300: {RUNNER: {DEPOT: 7000}}, BUCKET: {RUNNER: {DEPOT: 2000}}})
+    assert _since(view, 0, {}) == 2000
+    assert _since(view, 0, {}, start_epoch=BUCKET - 300) == 9000
+
+
+def _now_view(activity: dict, seconds: float = 17.0) -> live_tier.NowView:
+    current = live_tier.LiveCurrent(
+        bytes_per_second=0.0, runner_bytes_per_second=0.0, window_start="x", window_end="y",
+        window_seconds=int(seconds),
     )
-    servers = {start: traffic.Totals(requests=1, bytes_served=1000)}
-    args = (servers, view, [DEPOT], False, lambda _a, _t: True, start)
-    assert traffic_stitch.stitch_job_since(1000, {start: 1000}, *args) == 5000
-    dropped = live_tier.StitchView(
-        read=True, units={}, fives=view.fives, depots={}, depots_incomplete=frozenset({start})
+    return live_tier.NowView(
+        current=current, activity=activity, overflow_bytes=0, overflow_hit_bytes=0,
+        overflow_miss_bytes=0, seconds=seconds,
     )
-    assert traffic_stitch.stitch_job_since(1000, {start: 1000}, servers, dropped, [DEPOT], False, lambda _a, _t: True, start) == 1000
+
+
+def test_a_first_downloads_preview_remainder_follows_the_stitched_so_far() -> None:
+    from vault_api.routers import traffic as traffic_router
+
+    job = traffic_router.JobThroughputOut(
+        job_id=7, appid=APPID, name=None, started_at="2026-10-18T11:58:00Z",
+        bytes_per_second=0.0, bytes_since_start=1000, exclusive_depots=0, mapped_depots=0,
+        expected=True, expected_depots=1, expected_download_bytes=10_000,
+        remaining_bytes=9_000, remaining_source="preview",
+    )
+    count = traffic_router._JobCount(
+        job_id=7, depots=(DEPOT,), runner_only=True, tier=traffic.TIER_5M,
+        start_bucket=zulu(datetime.fromtimestamp(BUCKET, tz=UTC)),
+    )
+    rows = traffic_router._StitchRows(units={}, job_since={7: 1000}, job_buckets={7: {BUCKET: 1000}})
+    view = _view({BUCKET: {RUNNER: {DEPOT: 3400}, PC: {DEPOT: 9000}}})
+    activity = {(RUNNER, True): live_tier.AddrActivity(bytes_served=1700, depots={DEPOT: 1700})}
+    (out,) = traffic_router._jobs_with_ring(
+        [job], [count], rows, view, _now_view(activity), lambda addr, _t: addr == RUNNER
+    )
+    # The runner's bytes only (expected depots): 1000 swept + (3400 - 1000).
+    assert out.bytes_since_start == 3400
+    assert out.remaining_bytes == 10_000 - 3400
+    assert out.bytes_per_second == pytest.approx(1700 / 17)
+
+
+def test_a_non_running_jobs_preview_eta_uses_its_ring_speed() -> None:
+    """Nit 3: the ring speed is undiluted, so the window check no longer
+    applies to it; without a ring speed the old window rule stands."""
+    from vault_api.routers import traffic as traffic_router
+
+    def job(job_id: int) -> traffic_router.JobThroughputOut:
+        return traffic_router.JobThroughputOut(
+            job_id=job_id, appid=APPID, name=None, started_at="2026-10-18T11:58:00Z",
+            bytes_per_second=500.0, bytes_since_start=0, exclusive_depots=1,
+            remaining_bytes=9_000, remaining_source="preview",
+        )
+
+    live = traffic_router.LiveCurrentOut(
+        bytes_per_second=900.0, runner_bytes_per_second=800.0, window_start="x",
+        window_end="y", window_seconds=17,
+    )
+    first, second = traffic_router._with_eta([job(1), job(2)], live, None, frozenset({1, 2}))
+    assert (first.eta_bytes_per_second, first.eta_speed_source) == (800.0, "live")
+    assert (second.eta_bytes_per_second, second.eta_speed_source) == (500.0, "live")
+    _first, second = traffic_router._with_eta([job(1), job(2)], live, None)
+    assert second.eta_bytes_per_second is None and second.eta_speed_source is None
+
+
+def test_a_reset_clears_the_per_depot_store(tmp_path: Path) -> None:
+    """``_clear_cells`` on a path change and on an idle-gap restart drops the
+    depot store and the incomplete marks with the cells."""
+    tier = LiveTier(clock=lambda: NOW)
+    tier._path = str(tmp_path / "old.log")
+    tier._cursor = 0
+    _fold(tier, NOW, 1)
+    tier._bucket_depots_incomplete.add(BUCKET)
+    tier._tail(str(tmp_path / "new.log"), NOW, NOW.timestamp())  # another path (missing file)
+    assert tier.depot_bucket_entries() == 0 and not tier._bucket_depots_incomplete
+
+    log = tmp_path / "event.log"
+    write_log(log)
+    tier = LiveTier(clock=lambda: NOW)
+    tier.touch(NOW)
+    tier.refresh(str(log), NOW)  # the first tail
+    later = NOW + timedelta(seconds=120)  # past the 60 s watcher window: a gap
+    _fold(tier, later, 2)
+    tier._bucket_depots_incomplete.add(int(later.timestamp()) // 300 * 300)
+    assert tier.depot_bucket_entries() == 1
+    tier.touch(later)
+    tier.refresh(str(log), later)
+    assert tier.depot_bucket_entries() == 0 and not tier._bucket_depots_incomplete
+
+
+def test_an_all_range_with_no_swept_row_yet_still_stitches(served, tmp_path: Path) -> None:
+    """Nit 4: ``range=all`` before any traffic row (``range_start`` null)
+    sets no lower bound for the stitch."""
+    settings, client, _clock, conn = served
+    log = tmp_path / "event.log"
+    write_log(log)
+    sweep(conn, settings, NOW - timedelta(minutes=2))
+    append_log(log, line(NOW - timedelta(seconds=40), 2500, addr=PC, status="HIT"))
+    body = throughput(client, "all")
+    assert body["range_start"] is None
+    assert body["summary"]["bytes_served"] == 2500
+    assert body["summary"]["hit_bytes"] == 2500
 
 
 def test_depot_bytes_of_the_overflow_address_mark_the_bucket_incomplete() -> None:

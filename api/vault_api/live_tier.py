@@ -130,7 +130,7 @@ MAX_DEPOTS_PER_ADDR_CELL = 16
 #: ``client_depot_traffic`` row cover the same lines)...
 DEPOT_BUCKET_SECONDS = 300
 #: ...and holds at most this many (bucket, address, depot) entries in total
-#: (a prefill job touches a handful of depots; ~1 MB worst case).
+#: (a prefill job touches a handful of depots; about 1-1.5 MB worst case).
 MAX_DEPOT_BUCKET_ENTRIES = 4096
 
 #: Runner marker lines kept (WP CAP-503-FIX-1a, ``runner_marks``), one per
@@ -717,21 +717,20 @@ class LiveTier:
         is_runner: Callable[[str, str], bool],
     ) -> "StitchView":
         """WP APP-DL-STATS-1b: what the summary tiles and the job figures
-        stitch in for the span the sweep has not read, from ONE read of the
-        ring: totals per ``unit_seconds`` bucket (the summary's peak unit, 60
-        or 300), totals per 5-minute bucket and served bytes per address and
-        depot per 5-minute bucket (the job figures' tier), plus the 5-minute
-        buckets whose depot bytes are incomplete. ``read`` is False while the
+        stitch in for the span the sweep has not read: totals per
+        ``unit_seconds`` bucket (the summary's peak unit, 60 or 300) and
+        served bytes per address and depot per 5-minute bucket (the job
+        figures' tier), plus the 5-minute buckets whose depot bytes are
+        incomplete. ``read`` is False while the
         tailer has never read the log (no ring to trust: the swept figures
         stand alone).
         """
         epoch = _epoch(now)
+        # Cells first, then the depot store: a tail in between can only add
+        # depot bytes the cells lack, and the job figures decide on their own
+        # bytes (``traffic_stitch.stitch_job_since``), the summary on cells.
+        cells, data_from = self._copy()
         with self._lock:
-            cells = {
-                key: {addr: tuple(c) for addr, c in by_addr.items()}
-                for key, by_addr in self._cells.items()
-            }
-            data_from = self._data_from
             depots = {
                 bucket: {addr: dict(d) for addr, d in by_addr.items()}
                 for bucket, by_addr in self._bucket_depots.items()
@@ -741,9 +740,6 @@ class LiveTier:
         return StitchView(
             read=read,
             units=_ring_buckets(cells, data_from, epoch, self._ring_seconds, unit_seconds, is_runner),
-            fives=_ring_buckets(
-                cells, data_from, epoch, self._ring_seconds, DEPOT_BUCKET_SECONDS, is_runner
-            ),
             depots=depots,
             depots_incomplete=incomplete,
         )
@@ -910,8 +906,6 @@ class StitchView:
     read: bool
     #: Totals per summary unit bucket (60 or 300 s), keyed by bucket start.
     units: dict[int, "RingBucket"]
-    #: Totals per 5-minute bucket.
-    fives: dict[int, "RingBucket"]
     #: 5-minute bucket start -> address -> depot id -> served bytes.
     depots: dict[int, dict[str, dict[int, int]]]
     #: 5-minute buckets whose depot bytes are incomplete (bound or overflow).

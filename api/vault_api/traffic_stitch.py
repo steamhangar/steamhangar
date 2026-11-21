@@ -24,18 +24,25 @@ newest buckets (``live_tier.prefer_ring``, WP GRAPH-RECENT-1):
   (tailing never holds SQLite open). A sweep that commits between the two
   reads can only make the swept side SMALLER than what the ring then holds
   (the ring wins that bucket) or the ring hold lines the snapshot lacks
-  (counted once, by the ring); lines the sweep read and truncated before the
-  tailer reached them are in neither for that one answer (the ring's known
-  limit), so a figure can be short for a poll, never doubled.
+  (counted once, by the ring). Lines the sweep read and truncated before the
+  tailer reached them are in neither (the ring's known limit), and a tailer
+  restarted after an idle gap holds only the newest part of a bucket the
+  sweep has not read yet (the two parts are disjoint, and only the larger
+  stands): a figure can then be short until the next sweep reads that bucket
+  (at most about one sweep interval), never doubled, and the summary is
+  never below the swept-only figure (a bucket is only ever swapped for a
+  LARGER ring part).
 * **Bytes only.** The ring counts requests and served / HIT / MISS bytes,
   not hits, misses, errors or bypasses: byte figures (and the active-bucket
   count and peak derived from them) are stitched, request counts stay swept.
 * **Units.** The summary stitches at its peak unit (1-minute buckets for the
   1 h / 6 h ranges on the 1-minute tier, 5-minute buckets otherwise), so peak
   and "average while loading" keep their meaning. Job figures stitch at
-  5-minute buckets, the tier of ``client_depot_traffic``; a bucket whose
-  per-depot ring bytes are incomplete (``live_tier.MAX_DEPOT_BUCKET_ENTRIES``
-  reached, or depot bytes in the overflow address) keeps its swept value.
+  5-minute buckets, the tier of ``client_depot_traffic``, decided per bucket
+  on the job's OWN bytes (the larger of the swept and the ring part), so
+  "loaded so far" never goes below its swept value; a bucket whose per-depot
+  ring bytes are incomplete (``live_tier.MAX_DEPOT_BUCKET_ENTRIES`` reached,
+  or depot bytes in the overflow address) keeps its swept value.
 """
 
 from __future__ import annotations
@@ -95,12 +102,11 @@ def stitch_summary(
     """The swept range summary (and the runner's share of it) with the
     unit buckets the ring wins swapped in. ``persisted`` and ``ring`` are
     keyed by bucket start (epoch s) at the same unit; buckets before
-    ``start_epoch`` (the range start) are outside the range. Returns the
+    ``start_epoch`` (the range start) are outside the range; ``None`` (an
+    ``all`` range whose tier has no row yet) sets no lower bound. Returns the
     stitched summary, the stitched runner share and how many buckets the
     ring stood for. ``distinct_clients`` stays swept (the ring's addresses
     are not part of this package)."""
-    if start_epoch is None:
-        return summary, runner, 0
     totals = summary.totals
     run = runner
     peak = summary.peak_bucket_bytes
@@ -108,7 +114,7 @@ def stitch_summary(
     replaced = 0
     empty = PersistedBucket(traffic.Totals(), traffic.Totals())
     for start in sorted(ring):
-        if start < start_epoch:
+        if start_epoch is not None and start < start_epoch:
             continue
         bucket = ring[start]
         have = persisted.get(start, empty)
@@ -154,7 +160,6 @@ def ring_depot_bytes(
 def stitch_job_since(
     swept_since: int,
     swept_by_bucket: dict[int, int],
-    servers: dict[int, traffic.Totals],
     view: live_tier.StitchView,
     depots: Iterable[int],
     runner_only: bool,
@@ -162,21 +167,25 @@ def stitch_job_since(
     start_epoch: int,
 ) -> int:
     """A job's "loaded so far": the swept bytes on its depots since its start
-    bucket, with each 5-minute bucket the ring wins (decided server-wide,
-    ``servers`` vs ``view.fives``, like the summary) swapped for the ring's
-    bytes on those depots. A bucket with incomplete per-depot ring bytes keeps
-    its swept value."""
+    bucket, plus, for each 5-minute bucket where the ring holds MORE of the
+    job's bytes than the swept row, the difference (review should-fix 1:
+    decided per figure, on the job's own bytes, not by the server-wide
+    winner). Both are subsets of the job's lines in that bucket, so taking
+    the larger never counts a line twice, and the figure is never below the
+    swept-only one: a ring restarted after an idle gap may win a bucket
+    server-wide yet hold fewer of this job's bytes, and then the swept value
+    stands. A bucket with incomplete per-depot ring bytes (bound, overflow)
+    keeps its swept value; buckets before the job's start bucket are not the
+    job's."""
     wanted = list(depots)
     total = swept_since
-    for start in sorted(view.fives):
+    for start in sorted(view.depots):
         if start < start_epoch or start in view.depots_incomplete:
             continue
-        if not ring_wins(view.fives[start], servers.get(start)):
-            continue
-        ring_bytes = ring_depot_bytes(
-            view.depots.get(start, {}), wanted, runner_only, is_runner, _iso(start)
-        )
-        total += ring_bytes - swept_by_bucket.get(start, 0)
+        ring_bytes = ring_depot_bytes(view.depots[start], wanted, runner_only, is_runner, _iso(start))
+        swept = swept_by_bucket.get(start, 0)
+        if ring_bytes > swept:
+            total += ring_bytes - swept
     return max(0, total)
 
 

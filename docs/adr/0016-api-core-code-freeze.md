@@ -804,7 +804,8 @@ design addendum.
     `server_bucket_rows`, `depots_bytes_by_bucket`; no write path changes.
   - `vault_api/routers/traffic.py`: `GET /v1/throughput` stitches the
     summary and the job figures; `_job_throughput` collects what each job
-    counts. No response model, route or schema change.
+    counts; `_with_eta` lets a non-running job's `preview` ETA divide by its
+    (undiluted) ring speed. No response model, route or schema change.
 - Not frozen, listed for completeness: `api/tests/test_app_dl_stats_1b.py`
   (new), the job-speed assertions of `test_d15b_endpoints.py` and
   `test_job_size_1.py` (now the ring's window), api/README.md

@@ -31,8 +31,10 @@ figures (served, HIT / MISS, internet, the runner's share, peak and active
 buckets, so average) and each job's ``bytes_per_second`` and
 ``bytes_since_start`` include the span the sweep has not read yet, from the
 ring, by the series' rule: per bucket ONE source, the larger
-(``live_tier.prefer_ring``), the swept total and the swept bucket rows from
-one SQLite snapshot (``vault_api/traffic_stitch.py``). A job's speed is the
+(``live_tier.prefer_ring`` for the summary; for a job's "so far" the larger
+of its own swept and ring bytes, so it never goes below the swept value),
+the swept total and the swept bucket rows from one SQLite snapshot
+(``vault_api/traffic_stitch.py``). A job's speed is the
 ring's "current speed" window on its counted depots (the read "Loading now"
 uses), not the swept 5-10 minute window. Request counts (hits, misses,
 errors) and ``active_clients`` stay swept. Without a fresh feed, or before
@@ -845,8 +847,6 @@ class _StitchRows:
 
     #: The summary's unit buckets the ring reaches, by start epoch.
     units: dict[int, traffic_stitch.PersistedBucket]
-    #: Server-wide 5-minute rows the ring reaches (the job figures' decision).
-    fives: dict[int, traffic.Totals]
     #: Per job: swept bytes on its depots since its start bucket...
     job_since: dict[int, int]
     #: ...and per 5-minute bucket the ring reaches.
@@ -893,10 +893,6 @@ def _stitch_rows(
         )
         for when in set(all_rows) | set(runner_rows)
     }
-    if unit_tier == traffic.TIER_5M:
-        fives = {when: bucket.all for when, bucket in units.items()}
-    else:
-        fives = _epoch_keyed(traffic.server_bucket_rows(conn, traffic.TIER_5M, first_five))
     job_since: dict[int, int] = {}
     job_buckets: dict[int, dict[int, int]] = {}
     for count in counts:
@@ -915,7 +911,7 @@ def _stitch_rows(
             if when is not None:
                 by_bucket[when] = size
         job_buckets[count.job_id] = by_bucket
-    return _StitchRows(units=units, fives=fives, job_since=job_since, job_buckets=job_buckets)
+    return _StitchRows(units=units, job_since=job_since, job_buckets=job_buckets)
 
 
 def _jobs_with_ring(
@@ -950,7 +946,6 @@ def _jobs_with_ring(
             since = traffic_stitch.stitch_job_since(
                 rows.job_since[count.job_id],
                 rows.job_buckets.get(count.job_id, {}),
-                rows.fives,
                 view,
                 count.depots,
                 count.runner_only,
@@ -968,13 +963,19 @@ def _with_eta(
     jobs: list[JobThroughputOut],
     live: LiveCurrentOut | None,
     window: traffic.CurrentWindow | None,
+    ring_jobs: frozenset[int] = frozenset(),
 ) -> list[JobThroughputOut]:
     """WP JOB-SIZE-1: the ETA speed of each job with a remainder.
 
     ``live`` (the ring's runner speed) belongs to the running prefill job:
     the runner loads one job at a time, the oldest running one when a crash
-    ever left two (``_running_prefill_job``). Without it, the job's swept
-    figure is used only when its window started at or after the job did.
+    ever left two (``_running_prefill_job``). For any other job:
+    ``ring_jobs`` (WP APP-DL-STATS-1b) are the jobs whose
+    ``bytes_per_second`` came from the ring's "current speed" window, never
+    diluted, so a ``preview`` remainder divides by it (source ``live``);
+    otherwise (and always for a ``completeness`` remainder, whose MISS speed
+    stays swept) the job's swept figure is used only when its window started
+    at or after the job did.
     """
     running_id = min((job.job_id for job in jobs), default=None)
     window_start = parse_utc_iso(window.start) if window is not None else None
@@ -987,6 +988,9 @@ def _with_eta(
             pass
         elif live is not None and job.job_id == running_id:
             rate = live.runner_bytes_per_second if preview else live.runner_miss_bytes_per_second
+            source = "live"
+        elif preview and job.job_id in ring_jobs and job.bytes_per_second is not None:
+            rate = job.bytes_per_second
             source = "live"
         else:
             started = parse_utc_iso(job.started_at) if job.started_at else None
@@ -1056,6 +1060,7 @@ def get_throughput(
         summary: SummaryOut | None = None
         now_out: ThroughputNowOut | None = None
         swept: traffic.ServerSummary | None = None
+        ring_jobs: frozenset[int] = frozenset()
         swept_runner = traffic.Totals()
         stitch_rows: _StitchRows | None = None
         counts: list[_JobCount] = []
@@ -1108,6 +1113,7 @@ def get_throughput(
                 swept, swept_runner, stitch_rows.units, view.units, start_epoch
             )
             jobs = _jobs_with_ring(jobs, counts, stitch_rows, view, now_view, is_runner)
+            ring_jobs = frozenset(count.job_id for count in counts if count.depots)
     if swept is not None:
         summary = _summary(swept, swept_runner, spec.tier)
     return ThroughputOut(
@@ -1121,7 +1127,7 @@ def get_throughput(
         active_clients_now=active_now,
         runner_active_now=runner_now,
         summary=summary,
-        jobs=_with_eta(jobs, now_out.current if now_out is not None else None, window),
+        jobs=_with_eta(jobs, now_out.current if now_out is not None else None, window, ring_jobs),
         now=now_out,
     )
 

@@ -16,7 +16,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from tests.conftest import TEST_API_KEY
-from tests.test_event_sweep import event_line, make_settings, write_log
+from tests.test_event_sweep import append_log, event_line, make_settings, write_log
 from vault_api import agent_reports, event_sweep, jobs as jobs_queue, mapping
 from vault_api.config import Settings
 from vault_api.db import get_connection, init_db
@@ -192,17 +192,24 @@ def test_a_running_job_gets_the_speed_of_its_exclusive_depots(feed) -> None:
     conn.execute("UPDATE jobs SET started_at = ?", (stamp(now - timedelta(minutes=10)),))
     conn.commit()
 
+    # WP APP-DL-STATS-1b: the speed is the ring's "current speed" window
+    # (~15-20 s), so a line a few seconds old, not yet swept, on the
+    # exclusive depot 100 and one on the shared depot 300.
+    append_log(
+        settings.event_log_path,
+        event_line(time=iso(now - timedelta(seconds=3)), addr="10.0.0.5", cache_status="HIT", depot="100", bytes_sent="1700"),
+        event_line(time=iso(now - timedelta(seconds=3)), addr="10.0.0.5", cache_status="HIT", depot="300", bytes_sent="900"),
+    )
+
     body = client_for(settings).get("/v1/throughput", headers=AUTH).json()
     (job,) = body["jobs"]
     assert job["appid"] == 440
     assert job["name"] == "Game Four Forty"
     assert job["exclusive_depots"] == 1  # depot 300 is shared, not counted
     assert job["mapped_depots"] == 2  # exclusive + shared (WP MAP-FROM-MANIFEST-1)
-    # WP APP-DL-STATS-1b: the speed is the ring's "current speed" window
-    # (~15-20 s); the depot's only line is 2 minutes old, so nothing loads now.
-    assert body["now"]["window_seconds"] <= 20
-    assert job["bytes_per_second"] == 0
-    assert job["bytes_since_start"] == 1000
+    # The real clock: the window is 15-20 s, rounded in the answer.
+    assert job["bytes_per_second"] == pytest.approx(1700 / body["now"]["window_seconds"], rel=0.05)
+    assert job["bytes_since_start"] == 1000 + 1700  # swept + the unswept line
 
 
 def test_a_stale_feed_keeps_totals_but_reports_no_current_speed(feed) -> None:

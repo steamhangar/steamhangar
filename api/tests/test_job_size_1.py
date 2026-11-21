@@ -41,6 +41,7 @@ from vault_api import (
     cache_completeness,
     event_sweep,
     jobs as jobs_queue,
+    live_tier,
     mapping,
     oracle,
     runner_identity,
@@ -50,6 +51,7 @@ from vault_api.routers import traffic as traffic_router
 from vault_api.config import MANIFEST_ORACLE_STEAMCMD_API, Settings
 from vault_api.db import get_connection, init_db
 from vault_api.depot_preview import DepotPreviewService
+from vault_api.live_tier import LiveTier
 from vault_api.main import create_app
 
 AUTH = {"X-Api-Key": TEST_API_KEY}
@@ -117,12 +119,26 @@ def seed(
     return conn
 
 
-def client(settings: Settings, fetch: Counter, *, inline: bool = True) -> TestClient:
+def client(
+    settings: Settings, fetch: Counter, *, inline: bool = True, at: datetime | None = None
+) -> TestClient:
+    """``at`` (WP APP-DL-STATS-1b review nit): pin the live ring's clock, so
+    the job speed's window (``live_window_seconds``) is exact instead of
+    depending on how long the test took since ``now``."""
     app = create_app(settings)
     app.state.depot_preview = DepotPreviewService(
         run=(lambda job: job()) if inline else (lambda job: None), fetch=fetch
     )
+    if at is not None:
+        app.state.live_tier = LiveTier(clock=lambda: at)
     return TestClient(app)  # no `with`: no lifespan, no scheduler thread
+
+
+def live_window_seconds(at: datetime) -> float:
+    """The ring's "current speed" window at ``at`` (``LiveTier.now_view``)."""
+    epoch = at.timestamp()
+    start = int(epoch // live_tier.CELL_SECONDS) * live_tier.CELL_SECONDS - live_tier.CURRENT_SECONDS
+    return max(1.0, epoch - start)
 
 
 def job_entry(c: TestClient) -> tuple[dict, dict]:
@@ -162,15 +178,15 @@ def test_a_first_download_counts_the_expected_depots_and_reports_the_expected_si
     conn = seed(tmp_path, settings, now, age=timedelta(seconds=3))
     fetch = Counter()
     try:
-        body, job = job_entry(client(settings, fetch))
+        body, job = job_entry(client(settings, fetch, at=now))
         window = body["current"]["window_seconds"]
-        live = body["now"]["window_seconds"]  # WP APP-DL-STATS-1b: the ring's window
+        live = live_window_seconds(now)  # WP APP-DL-STATS-1b: the ring's window
         assert job["appid"] == APPID
         assert job["expected"] is True
         assert job["expected_depots"] == 2  # 1366541 + 1366544; DLC 1366542 never
         # Only the expected public depots: not the DLC depot (300), not depot 200 (7000).
         assert job["bytes_since_start"] == 1500
-        assert job["bytes_per_second"] == pytest.approx(1500 / live, rel=0.05)
+        assert job["bytes_per_second"] == pytest.approx(1500 / live)
         assert job["expected_size_bytes"] == 4_680_000_000 + 1_000
         assert job["expected_download_bytes"] == 1_820_000_000 + 400
         # The observed fields keep their meaning: the server maps nothing yet.
@@ -296,8 +312,8 @@ def test_a_cache_only_run_has_no_miss_speed(tmp_path: Path, now: datetime) -> No
     spec = (("HIT", 1366541, 1000), ("HIT", 1366544, 500))
     conn = seed(tmp_path, settings, now, spec, age=timedelta(seconds=3))
     try:
-        body, job = job_entry(client(settings, Counter()))
-        assert job["bytes_per_second"] == pytest.approx(1500 / body["now"]["window_seconds"], rel=0.05)
+        body, job = job_entry(client(settings, Counter(), at=now))
+        assert job["bytes_per_second"] == pytest.approx(1500 / live_window_seconds(now))
         assert job["miss_bytes_per_second"] == 0
     finally:
         conn.close()
@@ -325,11 +341,11 @@ def test_a_household_pc_loading_the_same_game_is_not_job_progress(
     spec = DEFAULT_LINES + (("MISS", 1366541, 9000, HOUSEHOLD_PC), ("HIT", 1366544, 4000, HOUSEHOLD_PC))
     conn = seed(tmp_path, settings, now, spec, age=timedelta(seconds=3))
     try:
-        body, job = job_entry(client(settings, Counter()))
+        body, job = job_entry(client(settings, Counter(), at=now))
         window = body["current"]["window_seconds"]
         assert job["bytes_since_start"] == 1500
         # WP APP-DL-STATS-1b: the ring's window, the runner's bytes only.
-        assert job["bytes_per_second"] == pytest.approx(1500 / body["now"]["window_seconds"], rel=0.05)
+        assert job["bytes_per_second"] == pytest.approx(1500 / live_window_seconds(now))
         assert job["miss_bytes_per_second"] == pytest.approx(1500 / window)
         assert job["remaining_bytes"] == 1_820_000_400 - 1500
     finally:
