@@ -4,7 +4,7 @@
  * Static analysis of the shipped stylesheets, comment-stripped:
  *   (a) theme.css defines the 15 scale tokens (--fs-1..7, --sp-1..8) with
  *       exactly the values of docs/design/rc20/kit.html, and --dim-2 is the
- *       lifted #7A91A0.
+ *       lifted #7A91A0, turned to #7C9298 by NEUTRAL-RAMP-1.
  *   (b) kit.css has no raw px font size — neither `font-size:Npx` nor a
  *       px size inside a `font:` shorthand (a px LINE-HEIGHT in the
  *       shorthand is allowed; it is not a font size).
@@ -176,8 +176,8 @@ test("theme.css: --fs-1..7 are 11/12/13/15/18/24/32px and --sp-1..8 are the 4px 
   for (let i = 1; i <= 8; i++) assert.equal((themeCss.match(new RegExp(`--sp-${i}\\s*:`, "g")) || []).length, 1, `--sp-${i} declared more than once`);
 });
 
-test("theme.css: --dim-2 is #7A91A0 (5.0:1 on --surface), the old #63798A is gone", () => {
-  assert.ok(themeCss.includes("--dim-2:#7A91A0"), "--dim-2:#7A91A0 missing");
+test("theme.css: --dim-2 is #7C9298 (5.26:1 on --surface; NEUTRAL-RAMP-1 turned the lifted #7A91A0), the old #63798A is gone", () => {
+  assert.ok(themeCss.includes("--dim-2:#7C9298"), "--dim-2:#7C9298 missing");
   assert.ok(!/63798A/i.test(themeCss), "the old --dim-2 value #63798A is still in theme.css");
 });
 

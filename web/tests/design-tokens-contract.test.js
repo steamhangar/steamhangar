@@ -78,7 +78,7 @@ test("tokens.json: opaque colours are uppercase 6-digit hex", () => {
     assert.match(entry.rgb, /^#[0-9A-F]{6}$/, `color_alpha.${name}.rgb`);
     assert.ok(entry.alpha > 0 && entry.alpha < 1, `color_alpha.${name}.alpha`);
   }
-  assert.equal(tokens.color["dim-2"], "#7A91A0");
+  assert.equal(tokens.color["dim-2"], "#7C9298");
 });
 
 test("tokens.json colours equal theme.css, and theme.css has no colour token the JSON lacks", () => {
