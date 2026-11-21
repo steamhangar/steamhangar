@@ -484,6 +484,116 @@ once decided (the decision then lives in the item it belongs to).
   a heartbeat probe from outside took up to 7.6 s during a cold download.
   With AIO it stayed at or below 0.3 s. Once AIO is live, a retry is
   probably not needed; decide after AIO-DEFAULT-1.
+- **Audit 2026-11-20 decisions** (wave 3 of the audit order, operator
+  2026-11-21; findings in "Audit 2026-11-20: findings" at the end):
+  - **NGINX-DUP-1** (audit C-1, medium, cost not risk): the nginx config
+    exists twice, native `core/nginx/nginx.conf` (937 lines) and
+    `core/docker/nginx.conf.template` (1015), held in step by
+    `core/docker/check-config-drift.sh` (733 lines, in CI); 12 double
+    changes since 2026-10-01. The native file is the declared, CDN-tested
+    "source of truth" (`check-config-drift.sh:3-16`,
+    `core/Dockerfile:51-56`, `deploy/tests/verify-stack.sh:412-415`), but
+    only the manual Windows rigs run it (`core/tests/test-core.ps1:123-124`,
+    `core/tests/mvp/run-mvp.ps1:114-121`,
+    `dns/tests/test-dnsmasq-config.ps1:137`, all need `poc/`), untouched
+    since 2026-10-01. Weg A: keep the contract and document it
+    (`poc/README.md` and `core/README.md` "Running it natively": the rigs
+    need `poc/`; S). Weg B: retire the native file, the drift checker and
+    the rigs, the image template becomes the only source (L, core freeze
+    exception, depends on FREEZE-EXIT-1). No recommendation; the docs
+    part of Weg A helps either way.
+  - **FREEZE-EXIT-1** (audit C-28): ADR-0016 still names `v0.1.0-rc1` as
+    the freeze exit (`docs/adr/0016-api-core-code-freeze.md:28`) while
+    its addenda run to 2026-11-01 and the plan says "until `v0.1.0`"
+    (`docs/PROJECT_PLAN.md` §11, "Parallel work on the post-v0.1.0
+    items"); 28 tags exist. An addendum must name the real exit. Weg A
+    (audit suggestion): the `v0.1.0` final tag, as the plan says; Weg B:
+    end it now (api/core changes then follow the normal package review).
+    The answer decides how many api/core nits (S-3, S-4, S-6,
+    C-8..C-13, NGINX-DUP-1 Weg B) can land before `v0.1.0`.
+  - **UPDATE-TONE-1** (audit design "Offen" 2, D-1): colour of "Update
+    ready". Weg A (recommended): disc and text orange like the library
+    card, status stays status; Weg B: both in the accent (call to
+    action), then on the card too. Weg A changes `pill.js`,
+    `status-vocabulary.json` and the Android twin. Blocks the stale part
+    of PILL-TONE-1.
+  - **UPDATE-WORD-1** (audit design "Offen" 3, D-1): "Update ready" (pill,
+    vocabulary) or "Update available" (card, UPD-6); both are pinned on
+    web and Android. No recommendation.
+  - **NEUTRAL-RAMP-1** (audit design "Offen" 4, D-7): the neutral ramp is
+    blue (hue 230-249, accent 188; mid tones chroma 0.031-0.035) while
+    the NOTES say "biased slightly toward cyan". Weg A (recommended): keep
+    it and document it as deliberate (fix the NOTES sentence; small diff,
+    no Android work); Weg B: turn it toward hue ~218 (values in the
+    audit; web + Android + goldens on both sides, recompute every
+    contrast pair).
+  - **DESKTOP-FONT-1** (audit design "Offen" 5, D-14): `--ui` starts with
+    Roboto (`web/css/theme.css:44`), which only Android has for sure; the
+    desktop renders Segoe UI or the system font. Weg A (recommended):
+    keep the stack and write the desktop choice down; Weg B: self-host
+    one font (`/css/fonts`, CSP `font-src 'self'`, licence, goldens
+    fontconfig).
+  - **ACCENT-ROLES-1** (audit D-2, low; a spec question, not a fix): the
+    accent also colours device icons, live speeds, the "Loading now" boxes
+    and the "From the internet" graph series (`web/css/kit.css:194`,
+    `:209`, `:215`, `:447`, `:453`, `:465-473`), exactly as the rc20 kit
+    specifies (`docs/design/rc20/kit.html:124`, `:133`, `:136`, `:169`,
+    `:173`, `:179-185`), while the older NOTES limit it to actions, nav,
+    focus and progress. Weg A: keep the kit and correct the NOTES rule;
+    Weg B: accent only for action, focus and selection, data in status
+    or neutral colours (kit change first). The design analysis proposes
+    Weg B; no recommendation after the cross-check.
+  - **DESIGN-MEASURE-1** (audit design "Offen" 1, Playwright): the design
+    skill's browser measurement needs Playwright, which is not installed,
+    so DOM contrast with overlays, targets below 24 px, the real fonts,
+    hover/focus/press/empty/loading/error states and the onboarding key
+    input were not measured (all contrast values are computed from CSS).
+    Weg A (audit proposal): install `playwright-core` outside the repo
+    (no `package.json` in the repo), reuse the existing Chromium build,
+    then rerun `/design:check` with measurement; needs the operator's ok
+    and possibly a devbox Antrag. Weg B: stay with code-only values.
+  - **CROSS-SITE-FILL-1** (audit S-1, medium -> low after the
+    cross-check): a foreign plain-HTTP page or HTML mail can make a LAN
+    browser fill the cache with `<img
+    src="http://lancache.steamcontent.com/depot/...">`, and `?nocache=1`
+    forces a refetch (`core/docker/nginx.conf.template:229-233` host map,
+    `:573-629` `location /depot/` checks only hop headers, method and
+    slash, `:279-282` nocache); the threat model mentions neither. Same
+    damage class as the accepted LAN DoS (TM §9); HTTPS pages upgrade to
+    the 443 passthrough (not stored). The first suggested `Sec-Fetch-*`
+    check does not work (browsers do not send it to `http://` targets).
+    Weg A: document only (TM §1: cross-site path and `nocache`); Weg B:
+    Weg A plus a `Referer`/`Origin` reject in `location /depot/`; Weg C:
+    Weg A plus a User-Agent allowlist. B and C only after measuring the
+    real Steam client and SteamPrefill headers, and with a core freeze
+    exception. Recommendation (audit): at least Weg A.
+  - **INCOMPLETE-ENDPOINT-1** (audit C-7, low): keep or remove `POST
+    /v1/prefill/incomplete` (`api/vault_api/routers/jobs.py:459-498`), a
+    documented operator endpoint (`api/README.md:657`) that web and app
+    avoid on purpose. Weg A (cross-check: same class as U-4, no finding):
+    keep; Weg B: remove (public API, api freeze). The dead demo handler
+    goes either way.
+  - **VERIFY-ALL-LABEL-1** (audit C-16, low): the button reads "Verify
+    all" on the web (`web/js/views/downloads.js:994`,
+    `components/job-row.js:27-32`) and "Complete all" on Android
+    (`IncompleteGames.kt:44`, `DownloadsIncomplete.kt:97`). Weg A: "Verify
+    all" on both; Weg B: "Complete all" on both; Weg C: keep the
+    difference and note it as deliberate. Then move the pin
+    `CacheCompletenessWebTwinTest.kt:35` to `job-row.js`. No
+    recommendation.
+  - **OLD-SERVER-FALLBACK-1** (audit U-1): the web has 57 "older server"
+    fallback branches although ADR-0022:155-156 says web and API always
+    match (the web ships in the vault-api image), while
+    `docs/learnings/web.md:192-194` asks for them; many are Android twins,
+    and Android does need them. Weg A: drop the web fallbacks feature by
+    feature, keep Android's; Weg B: keep them for twin symmetry and fix
+    the ADR wording. Decide in `web.md` or an ADR first. No
+    recommendation.
+  - **AGENT-RC8-COMPAT-1** (audit U-9): when does the agent's compatibility
+    with rc8/rc16 servers (resend without `local_addrs`,
+    `agent/go/client/client.go:37-70`, `docs/learnings/agent.md:143-149`)
+    go? Options: at `v0.1.0` final, with v0.4.0 (agents and devices), or
+    never. No recommendation.
 
 Decided 2026-10-16 (removed from the list above): VERIFY-SPEED-TEXT-1 reads
 "Verifying files, no download speed" (DOWNLOADS-1); LIVE-DELAY-1 Weg A
@@ -2127,3 +2237,338 @@ and VERIFY-COLD-1 is prose in the Sunday-test box of the rc19.3 block.
   - Hogwarts Legacy was missing next to Subnautica/Timberborn in the
     failed-jobs measurement note (added in "Before v0.1.0" above).
 
+## Audit 2026-11-20: findings
+
+On 2026-11-20 a full read-only audit ran against `main` @ 94a77cb: web UI
+design (D-1..D-16), cleanup (C-1..C-29, U-1..U-9), security (S-1..S-9),
+one full test run (T-1) and a cross-check that tried to refute every
+finding (0 dropped, 9 with a changed severity). The German analysis files
+stay outside the repo (`.design/`, `.aufraeumen/`, `.audit/`, gitignored);
+this section is the repo record. Severity is the one after the
+cross-check (T-1 was not cross-checked); effort S < 1 h, M 1-3 h,
+L > 3 h; file:line as of 94a77cb. No secrets in the tree or the history
+(1110 commits).
+
+Order (operator decision 2026-11-21, Weg A of the audit summary): wave 0
+the red-CI fix alone, wave 1 small packages, wave 2 M packages, then the
+bundled decisions (in "Open decisions" above). The low findings below are
+nits, picked up when a package touches the file. `api/`, `core/` and
+`dns/` are still under the ADR-0016 freeze (FREEZE-EXIT-1): code changes
+there need a freeze exception, comment and doc fixes do not; marked
+"(freeze)" below. Design packages that change pixels re-record the web
+goldens through the `wp/<name>-goldens` path.
+
+### Wave 0
+
+- **CI-CLOCK-1** (audit T-1; api; high / S; own branch `wp/ci-clock-1`,
+  in parallel): CI on `main` is red since 2026-11-16 on an unchanged
+  commit. `api/tests/test_graph_recent_1.py::test_loading_now_uses_the_clients_page_window_on_every_endpoint`
+  (`:336`, fixed `NOW` 2026-10-18 at `:28`) fails once the real clock is
+  30 days past `NOW`: `GET /v1/clients/overview` takes
+  `datetime.now(timezone.utc)` (`api/vault_api/routers/traffic.py:1458`,
+  `ADDRESS_LISTING_DAYS = 30` `:151`, applied `:1461`) while the other
+  handlers use `ring.clock()` / `tier.clock()` (`:871`, `:1232`, `:1393`,
+  `:1738`). Production is unaffected (both clocks agree), but it blocks
+  the release chain. Fix (operator 2026-11-21: code fix): the overview
+  takes `now` from the same injected clock.
+
+### Wave 1 (small packages, S)
+
+- **GO-LINE-1** (audit S-2; agent + ci; medium / S): the agent binaries
+  build on Go 1.25 (`agent/go/go.mod:3` `go 1.25.0`;
+  `.github/workflows/publish.yml:1780-1800` derives `1.25.x`), a line
+  without security fixes since Go 1.27. OSV lists 15 open stdlib entries
+  for 1.25.13; client-relevant: GO-2026-6605 (HTTP/1 desync after a
+  refused CONNECT), GO-2026-6610 (HTTP/2 header parsing), GO-2026-6809
+  (x509), GO-2026-6607 (TLS ECH). Fix: raise the `go` line to 1.26 or
+  1.27 (CI then builds the newest patch); learnings rule in `agent.md`:
+  raise the Go line before its EOL.
+- **LINE-CONTRAST-1** (audit D-4; web + tokens + android; high / S): input
+  borders use `--line` `#24363F`, 1.52/1.38/1.25:1 against
+  bg/surface/raised; WCAG 1.4.11 needs 3:1 (`web/css/kit.css:137-139`
+  `.kit .in`, `:821` `.kit .sortg`). The Settings switch passes (knob
+  6.4:1); the old `.toggle` (`web/css/app.css:599-605`) is dead CSS since
+  `ee90a27`. Fix: new token `--line-strong` `#5F727E` (3.82/3.45/3.13:1)
+  for input and segment borders in `docs/design/tokens.json`,
+  `web/css/theme.css` and Android `Color.kt` (contract tests on both
+  sides); `--line` stays for separators and cards. Runs as one contrast
+  package with GLYPH-CONTRAST-1.
+- **GLYPH-CONTRAST-1** (audit D-6; web; medium / S): the grey status discs
+  (cancelled, unknown, notinuse, unverified) draw the glyph in `--text` on
+  `--dim-2`, 2.81:1 (`web/css/theme.css:359`, `:362`, `:368`); the glyph
+  is the first cue. Fix: sic-ink `#08120F` like the coloured discs
+  (5.79:1).
+- **PERSONA-LOAD-1** (audit C-2; android; medium / S): the app never loads
+  the Steam persona name, Settings and Onboarding show "Persona name not
+  loaded yet" (`res/values/strings.xml:42`) for good.
+  `refreshPersonaName()` (`app/app/src/main/java/dev/steamvault/app/repo/SteamIdentityRepository.kt:86`,
+  impl `:216`, the only `setSteamPersonaName` writer `:223`) never had a
+  production caller (`b13baf3`, WP 4b.3); shown in
+  `ui/settings/SettingsScreen.kt:178`/`:874` and
+  `ui/onboarding/OnboardingScreen.kt:138`/`:326`. Fix (operator
+  2026-11-21: load it, do not remove the display): call it once after the
+  Steam login, plus a test that the UI gets a name. Same package,
+  behaviour-preserving: drop `ownedGamesCountPreview` (`:94`, `:227`, no
+  caller since `9aa4302`; interface, impl, 7 fakes) and fix
+  `app/README.md:969-972`, `:1160-1179` ("button-triggered").
+- **ROLLOUT-DOC-1** (audit C-4; deploy + docs; medium / S): the rollout
+  advice "keep `VAULT_UPSTREAM_RATE=4m` and `VAULT_UPSTREAM_RATE_WINDOW=off`"
+  (`deploy/.env.example:592-595`, `deploy/README.md:1082-1087`; also the
+  item 13 B text in `docs/PROJECT_PLAN.md` §12 "From item 13 B")
+  contradicts the rc18 deprecation of the window
+  (`.env.example:563-569`) and the measured 503 loop of 4m with cap 16
+  (`docs/learnings/deploy.md:15-21`, production went to 8m). Fix:
+  rewrite the passages to the current advice (no window pin; change the
+  rate only with a look at the 503 count). Docs only.
+- **BACKOFF-DEAD-1** (audit C-6; android; medium / S):
+  `app/app/src/main/java/dev/steamvault/app/polling/Backoff.kt:18-74` has
+  no user since `621d0e1` (WP 4b.2); the poll loops use fixed `delay(...)`
+  (`LibraryController.kt:302-317`, `DownloadsController.kt:165,175`,
+  `ClientsController.kt:177,212`), yet `app/README.md:596-608` claims the
+  web cadence. Fix: delete `Backoff.kt` and `BackoffTest.kt`, correct the
+  README (wiring it up would be a behaviour change).
+- **README-KEYS-1** (audit S-5; docs; low / S): `README.md:341-349` "Your
+  keys, and where they stop" promises more than the code: the keyless
+  list misses `/dist/<name>`, `/auth/steam/app-return` and
+  `/v1/covers/{appid}/{sig}` (signature instead of header), and
+  `VAULT_SETTINGS_READONLY` locks only `PATCH /v1/settings`
+  (`api/vault_api/routers/settings.py:315`), not the Steam key, client
+  names, jobs, deletes or GC; the Settings screen keeps the Steam key
+  field usable (`web/js/views/settings.js:864-910`). Fix: align the
+  paragraph with threat model §7. ROLLOUT-DOC-1, BACKOFF-DEAD-1 and
+  README-KEYS-1 may run as one docs/dead-code package.
+
+### Wave 2 (M packages)
+
+- **PILL-TONE-1** (audit D-1; web + android twin; medium / M): the status
+  pill's text and disc differ in 4 of 14 states
+  (`web/js/components/pill.js:32-47` against the `.sic` rules
+  `web/css/theme.css:348` stale, `:349` paused, `:352` verify, `:367`
+  partial); `pill.js:8` deviates from the kit on purpose
+  (`docs/design/rc20/kit.html:54`: disc = `currentColor` = pill tone). The
+  same state reads "Update available" in orange on the card
+  (`web/js/lib/game-status.js:200`) and "Update ready" in turquoise in the
+  pill (`status-icon.js:33`). Fix: one tone and one word per state for
+  disc and text, pinned in `docs/design/status-vocabulary.json` (Android
+  `StatusVocabularyContractTest`). The stale state needs UPDATE-TONE-1
+  and UPDATE-WORD-1 first; the audit's proposal for the rest: verify
+  run-yellow, partial orange, paused yellow. Fits `/design:fix`.
+- **FONT-FLOOR-1** (audit D-3; web; medium / M): 21 rules in
+  `web/css/app.css` sit below the own floor `--fs-1` 11 px
+  (`web/css/theme.css:55`), 8.5-10.5 px, e.g. bottom nav `:87`, nav
+  counter `:103`, delete marker `:457`, field label `:546`, `.tag` `:593`;
+  known debt with a falling pin (ADR-0028 decision 2,
+  `web/tests/css-kit-scale.test.js:52` = 95). Fix: raise them to
+  `--fs-1`/`--fs-2` and lower the pin; check the bottom nav at 360 px
+  with "Downloads". Fits `/design:fix`.
+- **ACTIVE-STATUS-1** (audit C-5; web + android; medium / M): the set of
+  active job states (queued, running, paused) is copied 11 times in the
+  web (`web/js/store.js:96`, `notifications.js:54`, `views/library.js:243`,
+  `lib/detail-job.js:25`, `lib/cache-repair.js:162`,
+  `lib/cache-completeness.js:288`, `lib/bulk-plan.js:41`,
+  `lib/updates-available.js:51`, `lib/job-partition.js:68`,
+  `lib/traffic-view.js:745`, `components/game-detail-sheet.js:208`) and
+  10 times in the app (`polling/PollingIntervals.kt:20`,
+  `ui/library/logic/CacheRepair.kt:143`, `ui/traffic/logic/TrafficView.kt:705`,
+  `ui/detail/GameDetailSheet.kt:271`, `ui/detail/logic/DetailJob.kt:30`,
+  `ui/library/logic/BulkPlan.kt:59`, `ui/downloads/logic/JobPartition.kt:74`,
+  `UpdatesAvailable.kt:68`, `notifications/NotificationDiffer.kt:52`,
+  `IncompleteGames.kt:68`) without a shared pin; a new state would miss
+  copies. Fix: export the set from `web/js/store.js` and import it; make
+  the `PollingIntervals` set non-private in the app and import it; one
+  twin pin over `docs/design/status-vocabulary.json`. (The API already
+  has one `ACTIVE_STATUSES`, used in `deletion.py:1158ff`.)
+
+### Wave 3 (bundled decisions)
+
+In "Open decisions" above: NGINX-DUP-1 (C-1), FREEZE-EXIT-1 (C-28),
+UPDATE-TONE-1, UPDATE-WORD-1, NEUTRAL-RAMP-1 (D-7), DESKTOP-FONT-1
+(D-14), ACCENT-ROLES-1 (D-2), DESIGN-MEASURE-1 (Playwright),
+CROSS-SITE-FILL-1 (S-1), plus INCOMPLETE-ENDPOINT-1 (C-7),
+VERIFY-ALL-LABEL-1 (C-16), OLD-SERVER-FALLBACK-1 (U-1) and
+AGENT-RC8-COMPAT-1 (U-9). Follow-up once the design decisions are made:
+**DESIGN-MD-1** (audit design step 10), a `DESIGN.md` at the repo root
+from the audit's target values (accent roles, status tones,
+`--line-strong`, type floor, three radii, two shadows, spacing scale,
+motion), pointing to `tokens.json` and the NOTES instead of replacing
+them.
+
+### Low findings (nits)
+
+Security:
+- S-1 cross-site cache fill: see CROSS-SITE-FILL-1 (open decision).
+- S-3 (freeze) `api/Dockerfile:242` gives uid 101 `/app` and the
+  SteamPrefill binary; no `read_only` root FS (`deploy/compose.yaml:356`
+  is only a mount); `load_dotenv()` in production (`config.py:22-27`):
+  chown only the data paths, `read_only: true` + tmpfs `/tmp` for
+  vault-api/runner/proxy/dns, `load_dotenv()` only in dev.
+- S-4 (freeze) `api/vault_api/config.py:1617-1623` accepts any non-empty
+  `VAULT_API_KEY`; a leaked cover URL allows offline guessing of a weak
+  key (`cover_cache.py:168-172`, `threat-model.md:1228`): WARN or refuse
+  below ~24 chars, or sign covers with a derived secret; TM §7 note.
+- S-6 (freeze) `core/docker/nginx.conf.template:563` `root cache;` with no
+  `location /` serves any file next to `cache/depot/`: catch-all
+  `location / { return 404; }` on port 80.
+- S-7 `app/gradle/libs.versions.toml:140` security-crypto `1.1.0-alpha06`
+  (deprecated library, holds the app's API key): 1.1.0 GA with a device
+  test (M); later own Keystore AES-GCM or Tink.
+- S-8 `api/requirements.txt:26` `uvicorn[standard]` pulls unused
+  websockets/watchfiles/pyyaml; `api/Dockerfile:175` no
+  `--require-hashes`; `api/requirements-dev.txt` pytest 8.3.4
+  (CVE-2025-71176): plain uvicorn, hashed requirements, pytest >= 9.0.3
+  (python-dotenv stays, direct dependency).
+- S-9 `.gitignore:7` ignores only `.env`: add `.env.*`, `*.env`,
+  `!*.env.example`, `*.pem`, `*.key`.
+
+Design:
+- D-2 accent in data roles: see ACCENT-ROLES-1 (open decision).
+- D-5 `web/css/app.css` colours outside the tokens: live banner
+  `#EF8F3C`/`#F6DCC4` (`:752-759`, `:780`, `:862`, `:1034`), counter ink
+  `#20180a` (`:103`, `:716`); dead `#8FA6B2` (`:604`, `.toggle`) and
+  `rgba(237,197,95,…)` (`:511`, `.jobcard.active` never set): map to
+  `--stale` (color-mix), `--text`, sic-ink; drop the dead rules.
+- D-7 neutral ramp: see NEUTRAL-RAMP-1 (open decision).
+- D-8 15 radius literals next to 4 tokens (10 px 14x, e.g.
+  `web/css/kit.css:194`, `:803`, `:821`; 14 px `kit.css:734`; 11 px
+  `theme.css:464`): map to `--r-s`/`--r-m`.
+- D-9 507 px spacing literals (kit 233, app 274), 291 off the 4 px grid
+  (`theme.css:62` claims the grid): use `--sp-*` when a rule is touched.
+- D-10 two shadow systems, 9 box-shadow values: 6 black (e.g.
+  `theme.css:465`, toast and sheets in `app.css`), 3 color-mix of the
+  surface tone: two tokens `--sh-1`/`--sh-2` from the surface tone.
+- D-11 no `:active` rule in `kit.css`/`app.css` (only the browser tap
+  highlight): one press rule `transform:scale(.97)` 100 ms on
+  `.kit .btn`, `.fchip`, `.seg button`, `.card`.
+- D-12 cards in cards (Downloads hero tiles, Settings "Connect to a
+  vault", Clients "Healthy" box) and uppercase section labels
+  (`kit.css:44`): one separator per level (M).
+- D-13 uppercase banner actions (`app.css:758`); chip "Installed, not
+  cached" (`web/js/lib/library-filters.js:83`) vs card "Installed but not
+  cached" (`game-status.js:376`): sentence case, one wording (Android twin
+  pins).
+- D-14 desktop font: see DESKTOP-FONT-1 (open decision).
+- D-15 Library toolbar at 1400 px: the last chip wraps alone
+  (`kit.css:809`, `:813`): chips in their own row under search and tools.
+- D-16 progress bar animates `width` (`app.css:654`): `transform:scaleX`.
+
+Cleanup:
+- C-3 `deploy/README.md:851-852` default column of `VAULT_EVENT_LOG` says
+  "on by default" while the compose default is empty (two keys that must
+  match, `deploy/compose.yaml:173`, `:595`): fix the column; optional,
+  after the operator's yes, `${VAULT_EVENT_LOG_PATH:-${VAULT_EVENT_LOG:-}}`
+  (check the render via `dev.sh`).
+- C-7 dead demo handler for `POST /v1/prefill/incomplete`
+  (`web/js/demo-data.js:2890-2898`, test
+  `web/tests/demo-data-completeness.test.js:136-137`): delete; the
+  endpoint itself is INCOMPLETE-ENDPOINT-1.
+- C-8 (freeze) `api/vault_api/config.py:492-510` `validate_webhook_url`
+  dead since D16b (webhook URL env-only, `settings_store.py:464`): delete
+  with its tests, or fix the docstring.
+- C-9 (freeze) `api/vault_api/depot_preview.py:264-267` `clear_preview`
+  dead (the inline copy in `oracle.py:1224-1227` is needed inside
+  `clear_app`'s transaction): delete.
+- C-10 (freeze) `_RELEASE_VERSION` twice (`api/vault_api/dist.py:72-74`,
+  `client_versions.py:52-54`): `dist.py` uses `client_versions.is_release`.
+- C-11 (freeze) unused constants `api/vault_api/webhooks.py:506-509`
+  `BYPASS_TRANSITION_EVENTS` (comment claims test use),
+  `traffic.py:123` `RANGES`, `:126` `SHORT_RANGES`: delete or fix the
+  comment; `client_names.py:52` `KEY_TYPES` stays.
+- C-12 (freeze) api functions used only by tests
+  (`depot_manifests.py:218`, `:233`, `settings_store.py:477`,
+  `runner_identity.py:321`, `event_sweep.py:807`, `live_tier.py:284`,
+  `:721`): leave; only `gc.py:1314` `extra_problems` ("worth surfacing",
+  shown nowhere) needs a choice: surface it or drop the sentence.
+- C-13 (freeze) helper copies `_RefuseRedirects` 4x, `_ts()` 4x,
+  `failure_backoff()` 2x in `api/vault_api`: no action needed.
+- C-14 Clients wording helpers dead on both sides
+  (`web/js/lib/clients-page.js:112,143,158,172,187`, `ClientsPage.kt:109-153`,
+  each kept "for the other"): remove on both sides with their tests in
+  one web+app package (M).
+- C-15 `DAMAGED_NOTE` (`web/js/lib/cache-completeness.js:171-176`) waits
+  for an Android pin retired in ANDROID-DL-2: delete it, its import
+  (`cache-completeness.test.js:53`) and assert (`:262`).
+- C-16 hollow "Complete all" twin pin (`CacheCompletenessWebTwinTest.kt:35`
+  green only via dead `cache-completeness.js:286`, `:322`): label is
+  VERIFY-ALL-LABEL-1; `completeAllAriaLabel` goes either way.
+- C-17 web exports with no caller at all: `web/js/lib/scroll-cue.js:127`
+  `refreshScrollCue`, `components/add-device-sheet.js:866`
+  `isAddDeviceSheetOpen`, `components/toast.js:37` `hideToast`,
+  `api.js:281` `health`: delete.
+- C-18 web exports used only by tests: `lib/update-check.js:60`
+  `countUpdates`, `lib/about-view.js:158` `statusPresentation`,
+  `lib/job-failure.js:144` `LOGIN_HINT`, `lib/library-meta.js:159`
+  `matchesMeta` (and Kotlin `LibraryMeta.kt:162`),
+  `lib/clients-page.js:454` `isAgentOutdated` (the Android namesake is
+  live): delete with their asserts.
+- C-19 Kotlin dead or test-only: `ui/onboarding/logic/OnboardingSteps.kt:49`
+  `LAST_ONBOARDING_STEP`, `ui/downloads/logic/IncompleteGames.kt:93`
+  `completableAppids`: delete; arrow helpers in
+  `ui/status/StatusIconLogic.kt:196,214,234`: move to the test source set
+  or leave.
+- C-20 stale header `web/js/api.js:231-234` (oracle and schedule are
+  wrapped now, `:287`, `:352`): shorten to the unwrapped routes.
+- C-21 `core/README.md:645-653` says `VAULT_EVENT_LOG_ROTATE_BYTES` is not
+  forwarded (`deploy/compose.yaml:256-258` forwards it): fix the sentence,
+  add a commented block to `deploy/.env.example` (docs).
+- C-22 stale comments on `${VAULT_PREFILL_MAX_THREADS:-8}`
+  (`core/docker/28-vault-upstream-pool.sh:36-38`, `:277-279`; compose
+  forwards `${VAULT_PREFILL_MAX_THREADS-}`; `PREFILL_DEFAULT=8` `:180` is
+  an unpinned fourth copy): fix the comments.
+- C-23 stale header `core/Dockerfile:51-54` ("test-covered code
+  (core/tests/test-core.ps1)", "the single deployment-specific value"):
+  reword.
+- C-24 CI shellcheck (`.github/workflows/ci.yml:988-1006`) globs only
+  `core/docker/*.sh` and misses `core/docker/15-vault-settings.envsh`
+  (also `core/tests/*.sh`, `agent/tests/sandbox/*.sh`,
+  `dns/tests/functional-check.sh`): add them.
+- C-25 mirrored agent/API limits (`agent/go/report/report.go:47-51`,
+  `agent/go/localaddr/localaddr.go:39-41` vs
+  `api/vault_api/agent_reports.py:50,55,71`) are unpinned: add three
+  tuples to the scrape test `api/tests/test_agent_feat_1_packaging.py:144-175`.
+- C-26 `tools/doc-lines-check.py` one-off proof: already tracked (rc22
+  block, NITS-APP-1 review nit).
+- C-27 `agent/README.md:40-100` tree misses `localaddr/`,
+  `cmd/vault-agent/version.go`, the presence tests and
+  `packaging/windows/tests/test-packaging-unit.ps1`: add them (the 58
+  "Python" comment lines in `agent/go/acf/*.go` are history and may stay).
+- C-28 freeze exit: see FREEZE-EXIT-1 (open decision).
+- C-29 old name "SteamVAULT" in the hidden kit example
+  (`web/js/views/kit.js:195`): change it with the next golden refresh.
+
+Uncertain or deliberate (U-items):
+- U-1 57 "older server" fallback branches in the web (e.g.
+  `web/js/lib/update-check.js:23-27`, `views/downloads.js:1949`) vs
+  ADR-0022:155-156: see OLD-SERVER-FALLBACK-1 (open decision).
+- U-2 `VAULT_PREFILL_MODE=subprocess` is the code default
+  (`api/vault_api/config.py:1219-1220`), compose always ships `queue`
+  (`deploy/compose.yaml:504`, `:1013`); deliberate (ADR-0012 §6):
+  recheck if NGINX-DUP-1 retires the native rigs.
+- U-3 legacy upstream pool (`VAULT_UPSTREAM_EDGE=off`,
+  `settings_store.py:370-381`, `core/docker/28-vault-upstream-pool.sh:298-370`),
+  deliberate rollback switch (ADR-0021:260-297): recheck after stable edge
+  mode in production.
+- U-4 endpoints without a client in the repo (`GET /v1/client-names`,
+  `GET /v1/stats`, oracle GET/refresh/DELETE, mapping PUT/DELETE) are
+  documented operator API (`api/README.md`): no finding.
+- U-5 release-version and VER grammars in 5-7 copies, mostly pinned; the
+  core hook copy (`core/docker/29-vault-build-version.sh:85-94`) is pinned
+  only by its own table (`core/tests/test-build-version-hook.sh:71-89`):
+  optionally feed `_VERSION_GRAMMAR` into that table.
+- U-6 Go client options used only by tests
+  (`agent/go/client/client.go:209-247`) are documented test seams: no
+  finding.
+- U-7 `deploy/VERIFICATION-20260805-204016.md:3` is marked SUPERSEDED
+  (ADR-0013:146-151 keeps the set): at most delete that one file.
+- U-8 five byte formatters in the web (`web/js/lib/format.js:15,38`,
+  `traffic-view.js:152`, `cache-repair.js:103`, `dist-downloads.js:191`
+  base 1000) mirrored in Android, visibly different and pinned: do not
+  merge; at most a note in `docs/learnings/web.md`.
+- U-9 agent compatibility with rc8/rc16 servers
+  (`agent/go/client/client.go:37-70`, `docs/learnings/agent.md:143-149`):
+  see AGENT-RC8-COMPAT-1 (open decision).
+
+Not covered by this audit (candidates for the next one): OS packages of
+the base images (no trivy/grype), SteamPrefill and its .NET dependencies,
+transitive Gradle dependencies and GitHub Actions advisories, S-1 and port
+443 live, Android on a device, Windows packaging, unused CSS/element
+IDs/Android resources/demo data fields, `dev.sh verify`.

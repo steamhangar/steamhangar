@@ -82,3 +82,8 @@ keystore.properties
 # image build; only the placeholder README is tracked.
 api/dist/*
 !api/dist/README.md
+
+# audit 2026-11-20 analyses, local only (findings: post-0.1.0 roadmap)
+.design/
+.aufraeumen/
+.audit/
