@@ -468,7 +468,8 @@ their open boxes (items 2, 7 and 11) are in section 12. Item 13 stays here.
     - rc23 (operator decision 2026-11-01: rc22 rolls out as is, these
       follow in rc23): APP-DL-STATS-1 (Downloads page values: active card,
       avg/peak, served/from internet while the runner loads; web vs app
-      twin check first), APP-DL-CARD-1 (design pass of the active-job
+      twin check first; 1b Weg A 2026-11-21: the API stitches the unswept
+      live ring into summary and job figures), APP-DL-CARD-1 (design pass of the active-job
       card), OUTPUT-TRIM-TAP-1 (dev tooling), CAP-503-FIX-1 Weg A
       (operator decision 2026-11-01: client priority, the runner pauses
       while a PC downloads), APP-EXPERT-SWITCH-1 (operator 2026-11-01),
