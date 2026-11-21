@@ -212,7 +212,9 @@ data class GlyphSegment(val x1: Float, val y1: Float, val x2: Float, val y2: Flo
 /**
  * The download arrow as straight segments -- the SVG paths "M12 3.5V13" and
  * "M7.4 8.7 12 13.3 16.6 8.7", ported coordinate for coordinate. The SAME
- * list is what `StatusIcon.kt` draws and what the geometry functions below
+ * list is what `StatusIcon.kt` draws and what the test-only geometry helpers
+ * (`arrowNearestInkDistance`, `arrowLengthInsideDisc`, `arrowTotalLength` in
+ * src/test `StatusIconArrowGeometry.kt`, WP STATUS-ICON-TEST-HELPERS-1)
  * measure, so the tests pin the drawn shape, not a copy of it.
  */
 val DOWNLOAD_ARROW_SEGMENTS: List<GlyphSegment> = listOf(
@@ -238,52 +240,3 @@ fun downloadArrowOffsets(progress: Float): List<Float> {
     val lead = downloadFallOffset(progress)
     return listOf(lead, lead - DOWNLOAD_FALL_PERIOD)
 }
-
-/**
- * The closest any ink of the arrow (shifted down by [dy]) comes to the disc
- * centre, minus the stroke half-width: a value greater than
- * [BADGE_DISC_RADIUS_UNITS] means the arrow is fully outside the disc.
- * Sampled along each segment (web test helper `nearestEdge`).
- */
-fun arrowNearestInkDistance(dy: Float, segments: List<GlyphSegment> = DOWNLOAD_ARROW_SEGMENTS): Float {
-    var best = Float.MAX_VALUE
-    for (s in segments) {
-        for (i in 0..SAMPLES) {
-            val t = i.toFloat() / SAMPLES
-            val x = s.x1 + (s.x2 - s.x1) * t
-            val y = s.y1 + (s.y2 - s.y1) * t + dy
-            best = minOf(best, kotlin.math.hypot(x - 12f, y - 12f) - GLYPH_STROKE_WIDTH_UNITS / 2f)
-        }
-    }
-    return best
-}
-
-/**
- * Stroke length of the arrow (shifted down by [dy]) whose centre line lies
- * inside the disc shrunk by [inset] (web test helper `insideLength`).
- * `inset = stroke half-width` counts only length whose ink is fully inside.
- */
-fun arrowLengthInsideDisc(
-    dy: Float,
-    inset: Float = 0f,
-    radius: Float = BADGE_DISC_RADIUS_UNITS,
-    segments: List<GlyphSegment> = DOWNLOAD_ARROW_SEGMENTS,
-): Float {
-    var total = 0f
-    for (s in segments) {
-        val len = kotlin.math.hypot(s.x2 - s.x1, s.y2 - s.y1)
-        for (i in 0 until SAMPLES) {
-            val t = (i + 0.5f) / SAMPLES
-            val x = s.x1 + (s.x2 - s.x1) * t
-            val y = s.y1 + (s.y2 - s.y1) * t + dy
-            if (kotlin.math.hypot(x - 12f, y - 12f) <= radius - inset) total += len / SAMPLES
-        }
-    }
-    return total
-}
-
-/** Total stroke length of the arrow. */
-fun arrowTotalLength(segments: List<GlyphSegment> = DOWNLOAD_ARROW_SEGMENTS): Float =
-    segments.sumOf { kotlin.math.hypot(it.x2 - it.x1, it.y2 - it.y1).toDouble() }.toFloat()
-
-private const val SAMPLES = 200
