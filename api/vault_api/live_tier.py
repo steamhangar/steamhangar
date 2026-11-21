@@ -51,6 +51,17 @@ on its own cursor, for the graph only:
   HIT/MISS split) and the bytes no address explains, so the Downloads
   "Loading now" rows, the pill and the device count come from one read.
 
+* **Unswept span (WP APP-DL-STATS-1b).** ``stitch_view`` gives the
+  Downloads summary tiles and the job cards the ring's totals per 1- or
+  5-minute bucket plus served bytes per address and depot per 5-minute bucket
+  (``_bucket_depots``), so they can count the minutes the sweep has not read
+  yet. The per-depot store is bounded: at most ``MAX_DEPOT_BUCKET_ENTRIES``
+  (bucket, address, depot) entries in total. Beyond that the OLDEST bucket is
+  dropped whole (the running one last) and marked incomplete; a bucket whose
+  depot bytes are incomplete (dropped, or a depot line folded into the
+  anonymous overflow address) is never used for a job figure, which then
+  shows the swept value for that bucket (late, never twice).
+
 Known limits (honest, not bugs): the sweep truncates the log once it has
 caught up; lines that arrive between our last read and that truncation never
 reach the ring (the persisted tiers have them). A shrunk file or a changed
@@ -113,6 +124,14 @@ CURRENT_SECONDS = 15
 #: Depots kept per address and cell (WP CLIENTS-LIVE-1); bytes on further
 #: depots of that cell count as "not linked to one game".
 MAX_DEPOTS_PER_ADDR_CELL = 16
+
+#: WP APP-DL-STATS-1b: the per-depot store for the unswept span is kept per
+#: 5-minute bucket (the 5-minute tier's bucket, so a ring bucket and a swept
+#: ``client_depot_traffic`` row cover the same lines)...
+DEPOT_BUCKET_SECONDS = 300
+#: ...and holds at most this many (bucket, address, depot) entries in total
+#: (a prefill job touches a handful of depots; about 1-1.5 MB worst case).
+MAX_DEPOT_BUCKET_ENTRIES = 4096
 
 #: Runner marker lines kept (WP CAP-503-FIX-1a, ``runner_marks``), one per
 #: address and token; the oldest is dropped beyond this, so a flood of marker
@@ -278,6 +297,14 @@ class LiveTier:
         #: The time of the first parsed line of the current tail (any line,
         #: also one older than the ring), for ``_data_from``.
         self._first_seen: float | None = None
+        #: WP APP-DL-STATS-1b: 5-minute bucket start -> address -> depot id ->
+        #: served bytes, for the whole ring (``stitch_view``), at most
+        #: ``MAX_DEPOT_BUCKET_ENTRIES`` entries (``_bucket_depot_entries``).
+        self._bucket_depots: dict[int, dict[str, dict[int, int]]] = {}
+        self._bucket_depot_entries = 0
+        #: Buckets whose depot bytes are incomplete (dropped for the bound, or
+        #: depot bytes folded into the overflow address): no job figure uses them.
+        self._bucket_depots_incomplete: set[int] = set()
         #: WP CAP-503-FIX-1a: (address, token) -> newest runner marker line
         #: (epoch s) inside the ring, at most ``MAX_MARKS`` (``runner_marks``).
         self._marks: dict[tuple[str, str], float] = {}
@@ -501,12 +528,54 @@ class LiveTier:
                 by_depot = self._depots.setdefault(key, {}).setdefault(addr, {})
                 if line.depotid in by_depot or len(by_depot) < MAX_DEPOTS_PER_ADDR_CELL:
                     by_depot[line.depotid] = by_depot.get(line.depotid, 0) + line.bytes_sent
+            if line.depotid is not None and line.bytes_sent > 0:
+                bucket = _floor(seen_epoch, DEPOT_BUCKET_SECONDS)
+                if addr == OVERFLOW_ADDR:
+                    # Depot bytes no address keeps: the bucket's per-depot
+                    # figures would be short, so no job figure uses it.
+                    self._drop_depot_bucket(bucket)
+                else:
+                    self._add_bucket_depot(bucket, addr, line.depotid, line.bytes_sent)
         return seen_epoch
+
+    def _drop_depot_bucket(self, bucket: int) -> None:
+        """Forget a bucket's depot bytes and mark it incomplete."""
+        by_addr = self._bucket_depots.pop(bucket, None)
+        if by_addr:
+            self._bucket_depot_entries -= sum(len(d) for d in by_addr.values())
+        self._bucket_depots_incomplete.add(bucket)
+
+    def _add_bucket_depot(self, bucket: int, addr: str, depotid: int, size: int) -> None:
+        """WP APP-DL-STATS-1b: one line's depot bytes into the bounded store.
+
+        A known entry just grows. A new entry beyond ``MAX_DEPOT_BUCKET_ENTRIES``
+        first drops the oldest buckets (each marked incomplete); when only
+        this bucket is left and still full, it is dropped and marked too.
+        """
+        if bucket in self._bucket_depots_incomplete:
+            return
+        by_depot = self._bucket_depots.get(bucket, {}).get(addr)
+        if by_depot is not None and depotid in by_depot:
+            by_depot[depotid] += size
+            return
+        while self._bucket_depot_entries >= MAX_DEPOT_BUCKET_ENTRIES:
+            oldest = min(self._bucket_depots, default=None)
+            if oldest is None or oldest >= bucket:
+                break
+            self._drop_depot_bucket(oldest)
+        if self._bucket_depot_entries >= MAX_DEPOT_BUCKET_ENTRIES:
+            self._drop_depot_bucket(bucket)
+            return
+        self._bucket_depots.setdefault(bucket, {}).setdefault(addr, {})[depotid] = size
+        self._bucket_depot_entries += 1
 
     def _clear_cells(self) -> None:
         self._cells.clear()
         self._depots.clear()
         self._marks.clear()
+        self._bucket_depots.clear()
+        self._bucket_depot_entries = 0
+        self._bucket_depots_incomplete.clear()
 
     def _prune(self, epoch: float) -> None:
         horizon = _floor(epoch - self._ring_seconds, CELL_SECONDS)
@@ -518,6 +587,12 @@ class LiveTier:
             del self._depots[key]
         for key in [k for k, seen in self._marks.items() if seen < epoch - self._ring_seconds]:
             del self._marks[key]
+        # WP APP-DL-STATS-1b: a depot bucket goes once it ends before the ring.
+        for bucket in [b for b in self._bucket_depots if b + DEPOT_BUCKET_SECONDS <= epoch - self._ring_seconds]:
+            self._bucket_depot_entries -= sum(len(d) for d in self._bucket_depots.pop(bucket).values())
+        self._bucket_depots_incomplete = {
+            b for b in self._bucket_depots_incomplete if b + DEPOT_BUCKET_SECONDS > epoch - self._ring_seconds
+        }
 
     # -- reading ----------------------------------------------------------
 
@@ -627,18 +702,52 @@ class LiveTier:
         ``prefer_ring``. Keys are bucket starts (epoch s), from the oldest
         bucket that still ends inside the ring up to the running one.
         """
-        epoch = _epoch(now)
         cells, data_from = self._copy()
-        first = _floor(epoch - self._ring_seconds, bucket_seconds)
-        out: dict[int, RingBucket] = {}
-        for start in range(first, _floor(epoch, bucket_seconds) + 1, bucket_seconds):
-            all_t, run_t, _peak = _ring_totals(cells, start, start + bucket_seconds, is_runner)
-            out[start] = RingBucket(
-                all=all_t,
-                runner=run_t,
-                seconds=covered_seconds(start, bucket_seconds, epoch, data_from),
-            )
-        return out
+        return _ring_buckets(cells, data_from, _epoch(now), self._ring_seconds, bucket_seconds, is_runner)
+
+    @property
+    def ring_seconds(self) -> int:
+        """How much history the ring keeps (seconds)."""
+        return self._ring_seconds
+
+    def stitch_view(
+        self,
+        now: datetime,
+        unit_seconds: int,
+        is_runner: Callable[[str, str], bool],
+    ) -> "StitchView":
+        """WP APP-DL-STATS-1b: what the summary tiles and the job figures
+        stitch in for the span the sweep has not read: totals per
+        ``unit_seconds`` bucket (the summary's peak unit, 60 or 300) and
+        served bytes per address and depot per 5-minute bucket (the job
+        figures' tier), plus the 5-minute buckets whose depot bytes are
+        incomplete. ``read`` is False while the
+        tailer has never read the log (no ring to trust: the swept figures
+        stand alone).
+        """
+        epoch = _epoch(now)
+        # Cells first, then the depot store: a tail in between can only add
+        # depot bytes the cells lack, and the job figures decide on their own
+        # bytes (``traffic_stitch.stitch_job_since``), the summary on cells.
+        cells, data_from = self._copy()
+        with self._lock:
+            depots = {
+                bucket: {addr: dict(d) for addr, d in by_addr.items()}
+                for bucket, by_addr in self._bucket_depots.items()
+            }
+            incomplete = frozenset(self._bucket_depots_incomplete)
+            read = self._covered_from is not None
+        return StitchView(
+            read=read,
+            units=_ring_buckets(cells, data_from, epoch, self._ring_seconds, unit_seconds, is_runner),
+            depots=depots,
+            depots_incomplete=incomplete,
+        )
+
+    def depot_bucket_entries(self) -> int:
+        """Entries in the per-depot store (``MAX_DEPOT_BUCKET_ENTRIES`` bound)."""
+        with self._lock:
+            return self._bucket_depot_entries
 
     def active_clients(self, now: datetime, is_runner: Callable[[str, str], bool]) -> int:
         """Client addresses loading now: served bytes in the "now" window.
@@ -765,6 +874,42 @@ class LiveTier:
     def cell_count(self) -> int:
         with self._lock:
             return len(self._cells)
+
+
+def _ring_buckets(
+    cells: dict[int, dict[str, tuple[int, ...]]],
+    data_from: float | None,
+    epoch: float,
+    ring_seconds: int,
+    bucket_seconds: int,
+    is_runner: Callable[[str, str], bool],
+) -> dict[int, "RingBucket"]:
+    """Ring totals per bucket, from the oldest bucket that still ends inside
+    the ring up to the running one (``LiveTier.buckets``)."""
+    first = _floor(epoch - ring_seconds, bucket_seconds)
+    out: dict[int, RingBucket] = {}
+    for start in range(first, _floor(epoch, bucket_seconds) + 1, bucket_seconds):
+        all_t, run_t, _peak = _ring_totals(cells, start, start + bucket_seconds, is_runner)
+        out[start] = RingBucket(
+            all=all_t,
+            runner=run_t,
+            seconds=covered_seconds(start, bucket_seconds, epoch, data_from),
+        )
+    return out
+
+
+@dataclass(frozen=True)
+class StitchView:
+    """One read of the ring for the unswept span (``LiveTier.stitch_view``)."""
+
+    #: The tailer has read the log at least once.
+    read: bool
+    #: Totals per summary unit bucket (60 or 300 s), keyed by bucket start.
+    units: dict[int, "RingBucket"]
+    #: 5-minute bucket start -> address -> depot id -> served bytes.
+    depots: dict[int, dict[str, dict[int, int]]]
+    #: 5-minute buckets whose depot bytes are incomplete (bound or overflow).
+    depots_incomplete: frozenset[int]
 
 
 @dataclass(frozen=True)

@@ -5053,6 +5053,27 @@ before it was recorded, so "all" starts there.
   `peak_bytes_per_second` the busiest 5-minute bucket. `active_clients`:
   distinct addresses that loaded bytes in the range, the runner not
   counted.
+- **Unswept span (WP APP-DL-STATS-1b, rc23).** With the feed `ok` and once
+  the live ring has read the log, the summary's byte figures (`bytes_served`,
+  `hit_bytes`, `miss_bytes`, `client_bytes_served`, `internet_bytes`,
+  `prefill_runner`'s bytes, and the active-bucket count and peak behind
+  `average_bytes_per_second` / `peak_bytes_per_second`) include the minutes
+  the sweep has not read yet. Per bucket the ring reaches (1-minute buckets
+  on the 1-minute tier of `1h`/`6h`, 5-minute buckets otherwise) ONE source
+  stands, the larger of the swept row and the ring's totals (the series'
+  rule, `live_tier.prefer_ring`): the figure is the swept total minus that
+  bucket's swept row plus the ring's, so no line is counted twice. The swept
+  total and the swept rows come from one SQLite read transaction. Request
+  counts (`requests`, `hits`, `misses`, `errors`, `hit_rate`) and
+  `active_clients` stay swept (the ring counts bytes only). Lines a sweep
+  read and truncated before the tailer reached them, and the older part of
+  a bucket when the tailer restarted after an idle gap (it then holds only
+  the newest part, disjoint from what the sweep has; the larger part
+  stands), can leave a figure short until the next sweep reads that bucket
+  (at most about one sweep interval); never doubled, and the summary is
+  never below the swept-only figure. Until rc23 the summary was
+  swept only (GRAPH-RECENT-1) and read 0 in the first minutes of a download
+  after an idle hour (operator report 2026-11-01).
 - **`jobs`**: one entry per RUNNING prefill job, never omitted. Attribution
   is by depot: bytes on the app's **exclusive** depots (in `depot_app_map`
   for this app only) from any address. A shared depot is not counted, and a
@@ -5062,6 +5083,26 @@ before it was recorded, so "all" starts there.
   `mapped_depots` > 0 means every depot is shared (no per-app speed is
   attributable), while both 0 means no mapping yet.
   `bytes_since_start` is bucket-aligned (5-minute buckets within 48 h).
+  WP APP-DL-STATS-1b (rc23): with the feed `ok` and the ring read,
+  `bytes_per_second` is the ring's "current speed" window (`now.window_seconds`,
+  ~15-20 s, the read behind `now.loading_sources`) on the counted depots,
+  not the swept 5-10 minute window (which started before the job and read
+  0 until the first sweep after its start), and `bytes_since_start` is the
+  swept bytes since the start bucket plus, per 5-minute bucket, what the
+  ring holds of the job's bytes beyond the swept row (decided on the job's
+  own bytes, so it never goes below the swept value; a preview
+  `remaining_bytes` follows it). The ring keeps the per-depot bytes for
+  this in a bounded store (4096 bucket/address/depot entries); beyond that
+  the oldest bucket is dropped and, like a bucket whose depot bytes fell
+  into the overflow address, keeps its swept value. Known undercount: the
+  ring's "now" window keeps at most 16 depots per address and 5 s cell
+  (`MAX_DEPOTS_PER_ADDR_CELL`), so a job loading more depots at once at one
+  address reads a lower speed. Known lag: a mapped game's
+  `remaining_bytes` (`completeness`) stays swept while its "so far" is
+  stitched, so for up to one sweep interval the two do not add up. Without
+  the ring the swept figures stand, as before. `miss_bytes_per_second`
+  stays swept (the ETA's fallback); a non-running job's `preview` ETA
+  divides by its ring speed (`eta_speed_source` `live`).
 - **First download (WP JOB-SIZE-1, additive).** With both 0 the server
   asks the D19 depot preview (same gate as the card open:
   `VAULT_DEPOT_PREVIEW` AND the oracle; same TTL, dedupe and rate limit; the

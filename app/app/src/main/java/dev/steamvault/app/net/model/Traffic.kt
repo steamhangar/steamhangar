@@ -226,6 +226,11 @@ data class SeriesPointOut(
     val runner_hit_bytes: Long? = null,
     /** WP RUNNER-SPLIT-1: the runner's MISS bytes; `null` from an older server. */
     val runner_miss_bytes: Long? = null,
+    /** WP APP-DL-STATS-1: the point's own length, set only by `liveSeries`
+     * from a [LivePointOut] (the live series mixes 5, 15 and 60 s points;
+     * the web keeps the live point objects). The server's series points have
+     * no such field (`null`: the series' `bucket_seconds` applies). */
+    val bucket_seconds: Int? = null,
 )
 
 @Serializable
