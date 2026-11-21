@@ -16,7 +16,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -43,7 +42,6 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
-import androidx.compose.material3.Snackbar
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -114,8 +112,11 @@ import dev.steamvault.app.ui.library.logic.ownedNoticeFor
 import dev.steamvault.app.ui.library.logic.normalizeQuery
 import dev.steamvault.app.ui.library.logic.visibleGames
 import dev.steamvault.app.ui.theme.VaultColors
+import dev.steamvault.app.ui.theme.VaultSnackbar
 import dev.steamvault.app.ui.theme.vaultFieldButtonBorder
 import dev.steamvault.app.ui.theme.vaultFilterChipBorder
+import dev.steamvault.app.ui.theme.vaultFilterChipColors
+import dev.steamvault.app.ui.theme.vaultMenuBorder
 import dev.steamvault.app.ui.theme.vaultSegmentedButtonColors
 import dev.steamvault.app.ui.theme.vaultTextFieldColors
 import kotlinx.coroutines.CoroutineScope
@@ -295,37 +296,12 @@ fun LibraryScreen(
                     delay(toastState.durationMs)
                     controller.dismissToast()
                 }
-                if (toastState.warn) {
-                    // S2 fix (Opus review on this WP): `colorScheme.errorContainer`/
-                    // `onErrorContainer` are NOT in Theme.kt's VaultDarkColorScheme
-                    // (only `error`/`onError` are defined there), so the original
-                    // version of this branch silently fell back to Material 3's
-                    // BASELINE red (#8C1D18/#F9DEDC) -- outside the frozen, literal-
-                    // pinned palette, and wrong on MEANING too: a paused dedupe is a
-                    // partial success ("N queued... N paused, resume or cancel it
-                    // first"), not an error, and painting it full-red says the
-                    // opposite. web's own warn toast (`.toast.warn .toast-key`,
-                    // theme.css) does not recolour the whole surface either -- it
-                    // keeps the normal toast background and swaps a 3px leading
-                    // accent bar from `--accent` to `--stale` (VaultColors.StatusStale
-                    // here). Ported as the same leading stripe, on the default
-                    // (unchanged) Snackbar surface, so "warn" reads as "pay
-                    // attention", never as "failed".
-                    Snackbar(modifier = Modifier.padding(12.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(
-                                modifier = Modifier
-                                    .width(3.dp)
-                                    .height(20.dp)
-                                    .background(VaultColors.StatusStale, RoundedCornerShape(2.dp)),
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(toastState.message)
-                        }
-                    }
-                } else {
-                    Snackbar(modifier = Modifier.padding(12.dp)) { Text(toastState.message) }
-                }
+                // S2 fix (Opus review, earlier WP): a warn toast (a paused dedupe is a
+                // partial success, not an error) keeps the normal toast ground and only
+                // swaps the 3px key line from --accent to --stale, like the web's
+                // `.toast.warn .toast-key` (theme.css); never Material's baseline
+                // errorContainer red. VaultSnackbar draws both (ANDROID-SHEET-BG-1).
+                VaultSnackbar(toastState.message, modifier = Modifier.padding(12.dp), warn = toastState.warn)
             }
         },
         bottomBar = {
@@ -564,7 +540,7 @@ private fun SortRow(active: LibrarySort, keys: List<LibrarySortKey>, onSelect: (
                 Text(active.key.label, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 ChevronDownGlyph(Modifier.padding(start = 2.dp))
             }
-            DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+            DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }, border = vaultMenuBorder()) {
                 for (key in keys) {
                     DropdownMenuItem(
                         text = { Text(key.label) },
@@ -611,7 +587,7 @@ private fun CheckUpdatesMenu(controller: LibraryController, scope: CoroutineScop
             onClick = { open = true },
             modifier = Modifier.semantics { contentDescription = more },
         ) { ChevronDownGlyph() }
-        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }, border = vaultMenuBorder()) {
             DropdownMenuItem(
                 enabled = !controller.checkAndUpdateBusy,
                 text = {
@@ -718,6 +694,8 @@ private fun FilterChipsRow(
                 onClick = { onSelect(chip.key) },
                 // WP CONTRAST-1: a 3:1 accent edge on the selected chip (web `.fchip`).
                 border = vaultFilterChipBorder(selected = chip.key == selectedKey),
+                // WP ANDROID-SHEET-BG-1: the `.fchip[aria-pressed]` accent fill and label.
+                colors = vaultFilterChipColors(),
                 // WP ANDROID-REDESIGN-1b (web `.chip small`): the count in the
                 // dim caption tone after the word; one spoken label.
                 label = {

@@ -1,7 +1,10 @@
 package dev.steamvault.app.ui.settings
 
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.withStyle
 import dev.steamvault.app.ui.library.logic.STEAM_LIBRARY_SETTING_KEY
 import dev.steamvault.app.ui.settings.logic.AboutDisplayStatus
 import dev.steamvault.app.ui.settings.logic.AboutLoadFailure
@@ -96,8 +99,14 @@ import dev.steamvault.app.ui.settings.logic.effectiveAsFieldText
 import dev.steamvault.app.ui.settings.logic.parseSettingsApplies
 import dev.steamvault.app.ui.settings.logic.parseSettingsSource
 import dev.steamvault.app.ui.settings.logic.sweepTargetsMessage
+import dev.steamvault.app.ui.theme.VaultDialogShape
+import dev.steamvault.app.ui.theme.VaultTilePadding
+import dev.steamvault.app.ui.theme.VaultTileShape
+import dev.steamvault.app.ui.theme.vaultDialogBorder
 import dev.steamvault.app.ui.theme.vaultSegmentedButtonColors
+import dev.steamvault.app.ui.theme.vaultSwitchColors
 import dev.steamvault.app.ui.theme.vaultTextFieldColors
+import dev.steamvault.app.ui.theme.vaultTileBorderColor
 import kotlinx.coroutines.launch
 
 /**
@@ -532,19 +541,28 @@ private fun StorageBalanceCard(view: StorageBalanceView) {
             )
         }
         for (tile in view.tiles) {
+            // WP ANDROID-SHEET-BG-1: web `.kit .tile` (Surface, LineSoft, 12dp) and
+            // `.kit .tile.hi` (border stale 55 % into Line). The value keeps --text on
+            // a highlighted tile like `.tile .v`; its sub is `.v small` (--dim, smaller).
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(VaultColors.Raised, RoundedCornerShape(8.dp))
-                    .border(1.dp, if (tile.hi) VaultColors.StatusStale else VaultColors.LineSoft, RoundedCornerShape(8.dp))
-                    .padding(8.dp)
+                    .background(VaultColors.Surface, VaultTileShape)
+                    .border(1.dp, vaultTileBorderColor(tile.hi), VaultTileShape)
+                    .padding(VaultTilePadding)
                     .testTag("balance-${tile.key}"),
             ) {
                 Text(tile.label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Text(
-                    if (tile.sub != null) "${tile.value} · ${tile.sub}" else tile.value,
+                    buildAnnotatedString {
+                        append(tile.value)
+                        tile.sub?.let { sub ->
+                            append(" ")
+                            withStyle(SpanStyle(color = VaultColors.Dim, fontSize = MaterialTheme.typography.bodySmall.fontSize)) { append(sub) }
+                        }
+                    },
                     style = MaterialTheme.typography.titleMedium,
-                    color = if (tile.hi) VaultColors.StatusStale else MaterialTheme.colorScheme.onSurface,
+                    color = VaultColors.Text,
                 )
                 Text(tile.note, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
@@ -558,7 +576,7 @@ private fun StorageBalanceCard(view: StorageBalanceView) {
 private fun ExpertSwitchRow(on: Boolean, dirty: Boolean, onChange: (Boolean) -> Unit) {
     Column {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Switch(checked = on, onCheckedChange = onChange)
+            Switch(checked = on, onCheckedChange = onChange, colors = vaultSwitchColors())
             Text(stringResource(R.string.settings_expert_switch))
             if (dirty) UnsavedDot(stringResource(R.string.settings_expert_unsaved))
         }
@@ -627,6 +645,8 @@ private fun SettingHelpRow(entry: SettingInfoOut) {
 private fun RiskyConfirmDialog(controller: SettingsController, scope: kotlinx.coroutines.CoroutineScope) {
     val items = controller.riskyPending ?: return
     AlertDialog(
+        shape = VaultDialogShape,
+        modifier = Modifier.vaultDialogBorder(),
         onDismissRequest = { controller.cancelRisky() },
         title = { Text(stringResource(R.string.settings_risky_title)) },
         text = {
@@ -1298,6 +1318,8 @@ private fun ConnectionSection(
 
     if (showDisconnectConfirm) {
         AlertDialog(
+            shape = VaultDialogShape,
+            modifier = Modifier.vaultDialogBorder(),
             onDismissRequest = { showDisconnectConfirm = false },
             title = { Text(stringResource(R.string.settings_disconnect_confirm_title)) },
             text = { Text(stringResource(R.string.settings_disconnect_confirm_body)) },

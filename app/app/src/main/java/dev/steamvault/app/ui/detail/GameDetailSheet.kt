@@ -30,7 +30,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.ScrollableTabRow
-import androidx.compose.material3.Snackbar
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -134,6 +133,11 @@ import dev.steamvault.app.ui.status.pillGroundColor
 import dev.steamvault.app.ui.status.pillTextColor
 import dev.steamvault.app.ui.status.toneFor
 import dev.steamvault.app.ui.theme.VaultColors
+import dev.steamvault.app.ui.theme.VaultDialogShape
+import dev.steamvault.app.ui.theme.VaultScrim
+import dev.steamvault.app.ui.theme.VaultSheetDragHandle
+import dev.steamvault.app.ui.theme.VaultSnackbar
+import dev.steamvault.app.ui.theme.vaultDialogBorder
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -190,6 +194,9 @@ fun GameDetailSheet(
     ModalBottomSheet(
         onDismissRequest = { controller.close() },
         sheetState = sheetState,
+        // WP ANDROID-SHEET-BG-1: web `.sheet-backdrop` (Bg 62 %) and `.sheet .grab` (38 x 4, Line).
+        scrimColor = VaultScrim,
+        dragHandle = { VaultSheetDragHandle() },
     ) {
         // WP APP-DEMO review round 3 (F2): the banner is called directly
         // here, in THIS top-level public composable, rather than delegated
@@ -389,7 +396,7 @@ internal fun GameDetailSheetBody(
                 controller.dismissToast()
             }
             Spacer(Modifier.height(8.dp))
-            Snackbar { Text(message) }
+            VaultSnackbar(message)
         }
     }
 }
@@ -1110,6 +1117,8 @@ private fun DetailDeleteConfirmDialog(
     onDismiss: () -> Unit,
 ) {
     AlertDialog(
+        shape = VaultDialogShape,
+        modifier = Modifier.vaultDialogBorder(),
         onDismissRequest = onDismiss,
         title = { Text(pluralStringResource(R.plurals.library_delete_title, 1, 1)) },
         text = {
@@ -1253,6 +1262,8 @@ private fun GroupDeleteConfirmDialog(
     val namesByAppid = remember(games) { games.associate { it.appid to it.name } }
     val nameFor: (Int, String?) -> String = { id, serverName -> appTitle(id, namesByAppid[id], serverName) }
     AlertDialog(
+        shape = VaultDialogShape,
+        modifier = Modifier.vaultDialogBorder(),
         onDismissRequest = onDismiss,
         title = { Text(pluralStringResource(R.plurals.library_delete_title, 1, 1)) },
         text = {
@@ -1445,6 +1456,8 @@ private fun GcExecuteConfirmDialog(
     onDismiss: () -> Unit,
 ) {
     AlertDialog(
+        shape = VaultDialogShape,
+        modifier = Modifier.vaultDialogBorder(),
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.detail_gc_confirm_title)) },
         text = {

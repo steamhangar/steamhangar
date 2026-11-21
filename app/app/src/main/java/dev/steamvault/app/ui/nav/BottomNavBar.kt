@@ -11,8 +11,14 @@ import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import dev.steamvault.app.R
+import dev.steamvault.app.ui.theme.VaultColors
+import dev.steamvault.app.ui.theme.VaultNavBarContainer
+import dev.steamvault.app.ui.theme.vaultNavBarItemColors
+import dev.steamvault.app.ui.theme.vaultNavBarTopBorder
 
 /** The bottom nav (WP 4b.4 brief: three items; WP D15d added Clients) -- see [Destination]'s kdoc for
  * why this is a plain state switch, not Navigation Compose.
@@ -29,7 +35,9 @@ import dev.steamvault.app.R
  */
 @Composable
 fun BottomNavBar(current: Destination, pendingJobsCount: Int = 0, onSelect: (Destination) -> Unit) {
-    NavigationBar {
+    // WP ANDROID-SHEET-BG-1: the web `.nav` twin -- near-Bg ground, a
+    // LineSoft top edge, the current item in accent with no indicator pill.
+    NavigationBar(containerColor = VaultNavBarContainer, modifier = Modifier.vaultNavBarTopBorder()) {
         for (destination in Destination.entries) {
             val showPip = destination == Destination.DOWNLOADS && pendingJobsCount > 0
             val itemModifier = if (showPip) {
@@ -46,6 +54,7 @@ fun BottomNavBar(current: Destination, pendingJobsCount: Int = 0, onSelect: (Des
                 selected = destination == current,
                 onClick = { onSelect(destination) },
                 modifier = itemModifier,
+                colors = vaultNavBarItemColors(),
                 icon = {
                     val icon: @Composable () -> Unit = {
                         when (destination) {
@@ -56,7 +65,18 @@ fun BottomNavBar(current: Destination, pendingJobsCount: Int = 0, onSelect: (Des
                         }
                     }
                     if (showPip) {
-                        BadgedBox(badge = { Badge { Text(pendingJobsCount.coerceAtMost(99).toString()) } }) { icon() }
+                        // WP ANDROID-SHEET-BG-1: web `.nav-pip` (--run, sic ink, mono 700).
+                        BadgedBox(
+                            badge = {
+                                Badge(containerColor = VaultColors.StatusRun, contentColor = VaultColors.StatusIconInk) {
+                                    Text(
+                                        pendingJobsCount.coerceAtMost(99).toString(),
+                                        fontFamily = FontFamily.Monospace,
+                                        fontWeight = FontWeight.Bold,
+                                    )
+                                }
+                            },
+                        ) { icon() }
                     } else {
                         icon()
                     }

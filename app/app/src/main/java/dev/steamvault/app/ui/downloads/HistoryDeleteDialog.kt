@@ -39,6 +39,8 @@ import dev.steamvault.app.ui.downloads.logic.SCOPE_OLDER
 import dev.steamvault.app.ui.downloads.logic.historyDeleteButtonText
 import dev.steamvault.app.ui.downloads.logic.historyDeleteErrorText
 import dev.steamvault.app.ui.downloads.logic.isHistoryScope
+import dev.steamvault.app.ui.theme.VaultDialogShape
+import dev.steamvault.app.ui.theme.vaultDialogBorder
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 
@@ -120,6 +122,8 @@ fun HistoryDeleteButton(flow: HistoryDeleteFlow) {
 fun HistoryDeleteDialog(flow: HistoryDeleteFlow, scope: CoroutineScope, onDeleted: suspend (HistoryDeleteOut) -> Unit) {
     if (!flow.isOpen) return
     AlertDialog(
+        shape = VaultDialogShape,
+        modifier = Modifier.vaultDialogBorder(),
         onDismissRequest = { flow.cancel() },
         title = { Text(HISTORY_DELETE_TITLE) },
         text = {
