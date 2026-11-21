@@ -264,3 +264,13 @@ at the end, under a dated heading, one entry each with the WP that proved it.
   platform: `isVaultReturnTo` exists only in Android.
 - `node --test web/tests` (bare directory) fails on Node 22; use
   `node --test "web/tests/*.test.js"`.
+
+## 2026-11-21 — rc23 audit fix run (PILL-TONE-1, FONT-FLOOR-1)
+- **Before trusting a local screenshot, check that the served JS/CSS is
+  your worktree's:** a fixed `tools/web-serve.mjs` port may already be held
+  by another session serving a different worktree, and its shot shows old
+  code. Pick a free port or grep the served file for your change.
+- **A layout token must match the rendered box:** `--nav-h` said 64 px
+  while the bottom nav rendered 68-70 px depending on the font; fix the
+  boxes (icon height, label line height) so the height is font-independent
+  and pin the sum against the token.
