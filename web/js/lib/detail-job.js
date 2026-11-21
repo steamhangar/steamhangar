@@ -22,7 +22,7 @@
  * Pure — no DOM, no fetch. Covered in web/tests/detail-job.test.js.
  */
 
-const TRACKED_STATUSES = new Set(["queued", "running", "paused"]);
+import { ACTIVE_JOB_STATUSES } from "./job-status.js";
 
 /**
  * The prefill job (if any) queued/running/paused for `appid` right now.
@@ -32,7 +32,7 @@ const TRACKED_STATUSES = new Set(["queued", "running", "paused"]);
  */
 export function findTrackedJob(jobs, appid) {
   if (!Array.isArray(jobs)) return undefined;
-  return jobs.find((j) => j.appid === appid && j.type === "prefill" && TRACKED_STATUSES.has(j.status));
+  return jobs.find((j) => j.appid === appid && j.type === "prefill" && ACTIVE_JOB_STATUSES.has(j.status));
 }
 
 export const DETAIL_JOB_ACTION = Object.freeze({

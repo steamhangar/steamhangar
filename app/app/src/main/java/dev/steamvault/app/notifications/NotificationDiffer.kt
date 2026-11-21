@@ -1,5 +1,7 @@
 package dev.steamvault.app.notifications
 
+import dev.steamvault.app.polling.PollingIntervals.ACTIVE_JOB_STATUSES
+
 /**
  * Client-side notification differ (WP 4b.8) -- Kotlin port of
  * `web/js/notifications.js` onto the compact snapshot entries in
@@ -25,7 +27,7 @@ package dev.steamvault.app.notifications
  * `web/js/lib/job-partition.js` does -- the underlying principle is "an
  * unrecognized value must not make real information about a job disappear
  * without a trace." The web notification differ's `wasActive` check
- * (`JOB_ACTIVE_STATUSES.has(prev.status)`) has the analogous gap: a job
+ * (`ACTIVE_JOB_STATUSES.has(prev.status)`) has the analogous gap: a job
  * whose PREVIOUS status was neither a known active status
  * (queued/running/paused) nor a known terminal one (done/error/cancelled)
  * -- a genuinely new status value this client has never seen, or a
@@ -36,7 +38,7 @@ package dev.steamvault.app.notifications
  * reporting-real-news posture [JobPartition] already established for the
  * Downloads screen), so a job's genuine arrival at a terminal status is
  * never dropped just because its prior status was one this client's
- * [JOB_ACTIVE_STATUSES]/[JOB_TERMINAL_STATUSES] tables don't recognize yet.
+ * [ACTIVE_JOB_STATUSES]/[JOB_TERMINAL_STATUSES] tables don't recognize yet.
  * This is an IMPROVEMENT over the web behaviour, not a behavioural
  * requirement carried over from it -- recorded here per the WP brief,
  * mirroring how `JobPartition.kt`'s own divergence is recorded.
@@ -49,13 +51,12 @@ package dev.steamvault.app.notifications
  * explicitly.
  */
 
-private val JOB_ACTIVE_STATUSES = setOf("queued", "running", "paused")
 private val JOB_TERMINAL_STATUSES = setOf("done", "error", "cancelled")
 
 /** @see NotificationDiffer.kt's kdoc, "Divergence from the web port". */
 private fun wasJobActive(prev: JobSnapshotEntry?): Boolean {
     if (prev == null) return true // brand-new row -- assume the neutral/active baseline (web parity)
-    if (prev.status in JOB_ACTIVE_STATUSES) return true
+    if (prev.status in ACTIVE_JOB_STATUSES) return true
     if (prev.status !in JOB_TERMINAL_STATUSES) return true // unrecognized -- Android improvement, see kdoc
     return false
 }

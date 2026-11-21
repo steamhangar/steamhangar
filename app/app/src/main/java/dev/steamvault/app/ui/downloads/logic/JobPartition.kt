@@ -2,6 +2,7 @@ package dev.steamvault.app.ui.downloads.logic
 
 import dev.steamvault.app.net.model.GameSummary
 import dev.steamvault.app.net.model.JobSummary
+import dev.steamvault.app.polling.PollingIntervals.ACTIVE_JOB_STATUSES
 import dev.steamvault.app.ui.library.logic.liveRunKind
 
 /**
@@ -64,14 +65,11 @@ data class PartitionedJobs(
     val history: List<JobSummary>,
 )
 
-/** Statuses that count toward "something is pending" (the Downloads nav
- * pip) — mirrors [dev.steamvault.app.polling.PollingIntervals]'s own
- * `JOB_ACTIVE_STATUSES`, kept as an independent local copy rather than a
- * shared import: this module must stay standalone, and the two sets are
- * pinned to the same value by api/README.md's status table, not by each
- * other (same reasoning `web/js/lib/job-partition.js`'s header gives for
- * its own `PENDING_STATUSES` copy). */
-private val PENDING_STATUSES = setOf("queued", "running", "paused")
+// "Something is pending" (the Downloads nav pip) counts the shared
+// [ACTIVE_JOB_STATUSES] (PollingIntervals, WP ACTIVE-STATUS-1; a pure object,
+// so this module stays standalone), like `web/js/lib/job-partition.js`.
+// KNOWN_STATUSES below is its own list on purpose: it names the statuses
+// `partitionJobs` sorts into a section.
 private val HISTORY_STATUSES = setOf("done", "error", "cancelled", "not_owned")
 private val KNOWN_STATUSES = setOf("queued", "running", "paused", "done", "error", "cancelled", "not_owned")
 
@@ -89,7 +87,7 @@ fun partitionJobs(jobs: List<JobSummary>): PartitionedJobs {
 }
 
 /** How many jobs the Downloads nav pip should count. */
-fun countPending(jobs: List<JobSummary>): Int = jobs.count { it.status in PENDING_STATUSES }
+fun countPending(jobs: List<JobSummary>): Int = jobs.count { it.status in ACTIVE_JOB_STATUSES }
 
 /**
  * 1-based queue position of [jobId] within an already-FIFO-sorted `queued`

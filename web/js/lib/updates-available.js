@@ -39,16 +39,13 @@
 import { isToolApp } from "./game-status.js";
 import { partitionCachedPrefillOutcome, countForcedCachedGames } from "./cached-prefill-outcome.js";
 import { ERROR_KINDS } from "../errors.js";
+import { ACTIVE_JOB_STATUSES } from "./job-status.js";
 
 export const UPDATES_HEADING = "Updates available";
 export const UPDATE_NOW_LABEL = "Update now";
 export const UPDATE_ALL_LABEL = "Update all";
 export const STARTING_LABEL = "Starting…";
 export const MANUAL_ONLY_NOTE = "Manual only — no schedule window is set.";
-
-/** Job statuses that put an app into the normal queue (Active / Paused /
- * Queue sections) and therefore out of this list. */
-const ACTIVE_JOB_STATUSES = new Set(["queued", "running", "paused"]);
 
 /**
  * The flagged games without an active prefill job, sorted by display name
@@ -61,6 +58,8 @@ const ACTIVE_JOB_STATUSES = new Set(["queued", "running", "paused"]);
 export function pendingUpdates(games, jobs, titleOf = (g) => String(g.name ?? "")) {
   const busy = new Set(
     (Array.isArray(jobs) ? jobs : [])
+      // An active job (lib/job-status.js) puts the app into the normal queue
+      // (Active / Paused / Queue sections) and therefore out of this list.
       .filter((j) => j && j.type === "prefill" && ACTIVE_JOB_STATUSES.has(j.status))
       .map((j) => j.appid),
   );

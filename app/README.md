@@ -1608,7 +1608,7 @@ relevant"): a job whose PREVIOUS status is neither a known active status
 nor a known terminal one (a value this client has never seen) is now
 treated as "was active" rather than "was not active" when deciding whether
 a transition to `done`/`error` is real news — the web differ's
-`JOB_ACTIVE_STATUSES.has(prev.status)` check would silently swallow that
+`ACTIVE_JOB_STATUSES.has(prev.status)` check would silently swallow that
 transition instead. Same fail-toward-reporting-real-information posture
 `ui/downloads/logic/JobPartition.kt`'s WP 4b.5 divergence already
 established for the Downloads screen; see `NotificationDiffer.kt`'s kdoc

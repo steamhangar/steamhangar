@@ -11,6 +11,7 @@ import dev.steamvault.app.net.model.SeriesOut
 import dev.steamvault.app.net.model.SeriesPointOut
 import dev.steamvault.app.net.model.SummaryOut
 import dev.steamvault.app.net.model.ThroughputOut
+import dev.steamvault.app.polling.PollingIntervals.ACTIVE_JOB_STATUSES
 import dev.steamvault.app.ui.clients.logic.formatAgo
 import dev.steamvault.app.ui.library.logic.formatBytesGB
 import java.time.Instant
@@ -702,7 +703,6 @@ private val RANGE_MS: Map<String, Long> = mapOf(
     "7d" to 7 * 86_400_000L,
     "30d" to 30 * 86_400_000L,
 )
-private val IN_FLIGHT = setOf("queued", "running", "paused")
 
 private fun parseMs(iso: String?): Long? = try {
     if (iso.isNullOrBlank()) null else Instant.parse(iso).toEpochMilli()
@@ -720,7 +720,7 @@ fun filterJobsByRange(jobs: List<JobSummary>, range: String, nowMs: Long = Syste
     val span = RANGE_MS[range] ?: return jobs.toList()
     val cutoff = nowMs - span
     return jobs.filter { job ->
-        if (job.status in IN_FLIGHT) return@filter true
+        if (job.status in ACTIVE_JOB_STATUSES) return@filter true
         val t = parseMs(job.finished_at ?: job.started_at ?: job.created_at)
         t == null || t >= cutoff
     }

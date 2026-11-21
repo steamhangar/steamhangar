@@ -30,6 +30,7 @@
  */
 
 import { dispKind, findLiveJob, hasVisibleCacheContent, isNotOwnedApp, isToolApp, KIND } from "./game-status.js";
+import { ACTIVE_JOB_STATUSES } from "./job-status.js";
 
 /** Appids with a prefill job that is queued, running or paused right now —
  * shared by both classifiers below (queued jobs count as busy here, unlike
@@ -38,7 +39,7 @@ import { dispKind, findLiveJob, hasVisibleCacheContent, isNotOwnedApp, isToolApp
 function busyAppidsFromJobs(jobs) {
   return new Set(
     (Array.isArray(jobs) ? jobs : [])
-      .filter((j) => j.type === "prefill" && ["queued", "running", "paused"].includes(j.status))
+      .filter((j) => j.type === "prefill" && ACTIVE_JOB_STATUSES.has(j.status))
       .map((j) => j.appid),
   );
 }

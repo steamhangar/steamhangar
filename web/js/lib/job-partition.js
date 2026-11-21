@@ -57,15 +57,14 @@
  */
 
 import { KIND, liveRunKind } from "./game-status.js";
+import { ACTIVE_JOB_STATUSES } from "./job-status.js";
 
-/** Statuses that count toward "something is pending" (the Downloads nav
- * pip, mockup's `syncPip`) — ported onto the real status set (no
- * `verify` status; WP WEB-FEAT-6's verify KIND is a running job). Mirrors `JOB_ACTIVE_STATUSES` in store.js/library.js, kept as
- * an independent local copy rather than a shared import: this module must
- * stay standalone (no view-layer coupling), and the two lists are pinned
- * to the same value by api/README.md's "ACTIVE_STATUSES" table, not by
- * each other. */
-const PENDING_STATUSES = new Set(["queued", "running", "paused"]);
+/* "Something is pending" (the Downloads nav pip, mockup's `syncPip`) counts
+ * the shared `ACTIVE_JOB_STATUSES` (lib/job-status.js, WP ACTIVE-STATUS-1;
+ * a leaf module, so this module stays standalone with no view-layer
+ * coupling). The real status set has no `verify` status; WP WEB-FEAT-6's
+ * verify KIND is a running job. `KNOWN_STATUSES` below is its own list on
+ * purpose: it names the statuses `partitionJobs` sorts into a section. */
 const HISTORY_STATUSES = new Set(["done", "error", "cancelled", "not_owned"]);
 const KNOWN_STATUSES = new Set(["queued", "running", "paused", "done", "error", "cancelled", "not_owned"]);
 
@@ -109,7 +108,7 @@ export function partitionJobs(jobs) {
  * ported onto the real status set). */
 export function countPending(jobs) {
   const list = Array.isArray(jobs) ? jobs : [];
-  return list.filter((j) => PENDING_STATUSES.has(j.status)).length;
+  return list.filter((j) => ACTIVE_JOB_STATUSES.has(j.status)).length;
 }
 
 /**

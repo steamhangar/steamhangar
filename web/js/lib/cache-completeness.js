@@ -73,6 +73,7 @@ import { partitionCachedPrefillOutcome } from "./cached-prefill-outcome.js";
 import { formatBytesGB, formatTimestamp } from "./format.js";
 import { formatWindow, MANUAL_ONLY_NOTE } from "./updates-available.js";
 import { ERROR_KINDS } from "../errors.js";
+import { ACTIVE_JOB_STATUSES } from "./job-status.js";
 
 /** The three completeness states of a CACHED card. */
 export const COMPLETENESS = Object.freeze({
@@ -284,8 +285,6 @@ export const INCOMPLETE_HEADING = "Incomplete";
 export const AUTO_COMPLETE_OFF_NOTE = "Manual only — automatic completion is off in Settings.";
 export const COMPLETE_NOW_LABEL = "Verify";
 export const COMPLETE_ALL_LABEL = "Complete all";
-
-const ACTIVE_JOB_STATUSES = new Set(["queued", "running", "paused"]);
 
 /**
  * The incomplete games the Downloads section lists (module header), sorted

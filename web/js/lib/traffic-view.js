@@ -29,6 +29,7 @@
 
 import { formatAgo, formatBytesGB } from "./format.js";
 import { PRODUCT_NAME } from "./product.js";
+import { ACTIVE_JOB_STATUSES } from "./job-status.js";
 
 /** The four ranges every traffic endpoint and the jobs filter accept. */
 export const RANGES = Object.freeze(["24h", "7d", "30d", "all"]);
@@ -742,7 +743,6 @@ export function jobSpeedText(entry, state, { verifying = false, nowMs = Date.now
 // ---------------------------------------------------------------------
 
 const RANGE_MS = Object.freeze({ "24h": 86_400_000, "7d": 7 * 86_400_000, "30d": 30 * 86_400_000 });
-const IN_FLIGHT = new Set(["queued", "running", "paused"]);
 
 /**
  * The server's history rule, client-side, for the rows the store's poll
@@ -760,7 +760,7 @@ export function filterJobsByRange(jobs, range, nowMs = Date.now()) {
   if (!span) return jobs.slice();
   const cutoff = nowMs - span;
   return jobs.filter((job) => {
-    if (IN_FLIGHT.has(job.status)) return true;
+    if (ACTIVE_JOB_STATUSES.has(job.status)) return true;
     const t = Date.parse(job.finished_at || job.started_at || job.created_at || "");
     return !Number.isFinite(t) || t >= cutoff;
   });

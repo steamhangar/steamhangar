@@ -60,7 +60,8 @@ class CacheRepairWebTwinTest {
         "? ` The already queued job #\${report.job_id} fetches fresh copies.`",
         ": ` Job #\${report.job_id} fetches fresh copies.`;",
         // Visibility.
-        "const ACTIVE_JOB_STATUSES = new Set([\"queued\", \"running\", \"paused\"]);",
+        // WP ACTIVE-STATUS-1: the shared set (ActiveJobStatusesWebTwinTest pins its value).
+        "import { ACTIVE_JOB_STATUSES } from \"./job-status.js\";",
         "(j) => j && j.type === \"prefill\" && j.appid === appid && ACTIVE_JOB_STATUSES.has(j.status),",
         "if (!row || isToolApp(row) || isNotOwnedApp(row)) return false;",
         "if (!isDamagedOnly(row)) return false;",

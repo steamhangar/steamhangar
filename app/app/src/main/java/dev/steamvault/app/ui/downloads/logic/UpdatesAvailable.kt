@@ -5,6 +5,7 @@ import dev.steamvault.app.net.model.GameSummary
 import dev.steamvault.app.net.model.JobSummary
 import dev.steamvault.app.net.model.PrefillJobRef
 import dev.steamvault.app.net.model.ScheduleOut
+import dev.steamvault.app.polling.PollingIntervals.ACTIVE_JOB_STATUSES
 import dev.steamvault.app.ui.library.logic.countForcedCachedGames
 import dev.steamvault.app.ui.library.logic.isToolApp
 import dev.steamvault.app.ui.library.logic.partitionCachedPrefillOutcome
@@ -63,10 +64,6 @@ object UpdatesWording {
     const val START_FAILED = "Could not start the update."
 }
 
-/** Job statuses that put an app into the normal queue (Active / Paused /
- * Queue sections) and therefore out of this list. */
-private val ACTIVE_JOB_STATUSES = setOf("queued", "running", "paused")
-
 /**
  * The flagged games without an active prefill job, sorted by display name
  * (case-insensitive), then appid.
@@ -77,6 +74,8 @@ fun pendingUpdates(
     jobs: List<JobSummary>,
     titleOf: (GameSummary) -> String = { it.name ?: "" },
 ): List<GameSummary> {
+    // An active job puts the app into the normal queue (Active / Paused /
+    // Queue sections) and therefore out of this list.
     val busy = jobs.filter { it.type == "prefill" && it.status in ACTIVE_JOB_STATUSES }.map { it.appid }.toSet()
     return games
         .filter { it.update_available && !isToolApp(it) && it.appid !in busy }

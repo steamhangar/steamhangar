@@ -204,8 +204,8 @@ import { buildIntroNodes, buildPlanNodes, createDeleteConfirm } from "./delete-c
 import { createTabs } from "./tabs.js";
 import { watchScrollCue } from "../lib/scroll-cue.js";
 import { buildPackagesSection, packagesStructuralKey, patchPackagesSection } from "./package-list.js";
+import { ACTIVE_JOB_STATUSES } from "../lib/job-status.js";
 
-const ACTIVE_JOB_STATUSES = ["queued", "running", "paused"];
 const GC_POLL_INTERVAL_MS = 1200;
 
 function errorText(err) {
@@ -216,7 +216,7 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 function activeJobAppidsFrom(jobs) {
-  return new Set(jobs.filter((j) => ACTIVE_JOB_STATUSES.includes(j.status)).map((j) => j.appid));
+  return new Set(jobs.filter((j) => ACTIVE_JOB_STATUSES.has(j.status)).map((j) => j.appid));
 }
 function namesFor(appids, gamesByAppid) {
   return appids.map((id) => appTitle(id, gamesByAppid.get(id)?.name)).join(", ");

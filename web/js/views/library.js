@@ -165,6 +165,7 @@ import {
   unknownNote,
 } from "../lib/library-meta.js";
 import { chipCounts, normalizeQuery, visibleGames } from "../lib/library-filters.js";
+import { ACTIVE_JOB_STATUSES } from "../lib/job-status.js";
 import {
   classifyBulkSelection,
   buildBulkDownloadPlan,
@@ -240,7 +241,6 @@ const LAYOUT_CLASS = { grid2: "", grid3: "compact", list: "list" };
 // tiles vs. more, smaller ones), not a literal count. "List" is unchanged —
 // it never claimed a column count.
 const LAYOUT_LABEL = { grid2: "Comfortable", grid3: "Compact", list: "List" };
-const ACTIVE_JOB_STATUSES = ["queued", "running", "paused"];
 
 // "Check & update", never "Check" (docs/PROJECT_PLAN.md §7 Phase 4c) —
 // pressing this can consume real bandwidth; a label implying a read-only
@@ -1185,7 +1185,7 @@ async function openDeleteConfirm(ids, notice) {
       api.mapping(),
     ]);
     const activeJobAppids = new Set(
-      state.jobs.filter((j) => ACTIVE_JOB_STATUSES.includes(j.status)).map((j) => j.appid),
+      state.jobs.filter((j) => ACTIVE_JOB_STATUSES.has(j.status)).map((j) => j.appid),
     );
     const plan = buildMultiPlan(ids, { details, mapping, gamesByAppid, activeJobAppids });
     renderDeletePlan(plan, ids, gamesByAppid);
@@ -1208,7 +1208,7 @@ async function openMixedDeleteConfirm(ids, groupIds, gamesByAppid, myGen, notice
   const nameFor = (id, serverName) => gamesByAppid.get(id)?.name || serverName || UNKNOWN_APP_NAME;
   try {
     const activeJobAppids = new Set(
-      state.jobs.filter((j) => ACTIVE_JOB_STATUSES.includes(j.status)).map((j) => j.appid),
+      state.jobs.filter((j) => ACTIVE_JOB_STATUSES.has(j.status)).map((j) => j.appid),
     );
     const [plans, plain] = await Promise.all([
       Promise.all(groupIds.map((id) => api.deletePlan(id))),
