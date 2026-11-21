@@ -323,7 +323,10 @@ class ControlColorsPinTest {
             "VaultSnackbar: the Snackbar modifier needs `.semantics { liveRegion = LiveRegionMode.Polite }`",
             Regex("""modifier = modifier\s*\.semantics \{ liveRegion = LiveRegionMode\.Polite \}""").containsMatchIn(toast),
         )
-        for (call in calls("VaultSnackbar")) {
+        val snackbarCalls = calls("VaultSnackbar")
+        // Five call sites (Detail, Downloads, Library, two Clients notices); the declaration matches too.
+        assertTrue("expected at least 5 VaultSnackbar calls, found ${snackbarCalls.size}", snackbarCalls.size >= 5)
+        for (call in snackbarCalls) {
             assertTrue(
                 "${call.file}:${call.line} VaultSnackbar call sets its own live region; VaultSnackbar already does (SNACKBAR-LIVE-1)",
                 !call.args.contains("liveRegion"),

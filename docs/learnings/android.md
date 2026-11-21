@@ -204,7 +204,10 @@ at the end, under a dated heading, one entry each with the WP that proved it.
   Raised still sits on `surfaceVariant` and `surfaceContainerHigh`, so an
   AlertDialog surface's LocalContentColor resolves to Dim; harmless,
   because AlertDialogContent sets explicit title and text colours
-  (SNACKBAR-LIVE-1 review).
+  (ANDROID-SHEET-BG-1 review).
+- **A toast or notice helper owns its live region; call sites add none**
+  (SNACKBAR-LIVE-1: only the two Clients notices were announced before).
+  material3's SnackbarHost does the same on its container.
 - **A border passed through `ModalBottomSheet`'s `modifier` does not follow
   the sheet**: in material3 1.3.1 the modifier sits before the internal
   `draggableAnchors` placement, so it would draw at the unshifted position.
