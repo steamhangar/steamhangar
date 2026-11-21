@@ -6,8 +6,7 @@ import {
   footer,
   fullOutputFile,
   isLong,
-  isTap,
-  trimTapText,
+  trimAny,
   trimText,
   type TrimSettings,
 } from './trim.ts'
@@ -74,17 +73,19 @@ async function readText($: EngineInterface, path: string): Promise<string | unde
 const PERSISTED_FIELDS = ['persistedOutputPath', 'persistedOutputSize', 'stdoutHoldsOutputEnd'] as const
 
 /**
- * The Bash record with its TAP stdout trimmed (see trimTapText), or
- * undefined to leave the record to the generic trimming.
+ * The Bash record with long output trimmed, or undefined to leave it as it
+ * came.
  *
  * Output above about 30 KB reaches the hook already cut by the harness,
  * which keeps the whole output in its own file (`persistedOutputPath`) and
- * shows the model a 2 KB preview of `stdout`. The TAP summary sits at the
- * end, so the whole text is read back from that file, trimmed, and the
- * record is answered without the persisted fields: the trimmed text is then
- * shown inline, footer included, instead of a preview that cuts it off.
+ * shows the model a 2 KB preview of `stdout`. The whole text is then read
+ * back from that file and trimmed (`trimAny`: TAP and spec test output by
+ * their structure), and the record is answered without the persisted
+ * fields, so the trimmed text and the file line are shown inline. When the
+ * file cannot be read, the cut `stdout` is trimmed as before this read-back
+ * existed (head, failure lines, tail) and the persisted fields stay.
  */
-async function trimTapRecord(
+async function trimRecord(
   $: EngineInterface,
   configuredDir: string,
   toolUseId: string,
@@ -94,21 +95,27 @@ async function trimTapRecord(
   const persisted = typeof record.persistedOutputPath === 'string' && record.persistedOutputPath !== ''
     ? record.persistedOutputPath
     : undefined
-  const stdout = persisted === undefined ? record.stdout : await readText($, persisted)
-  if (stdout === undefined) return undefined
+  const whole = persisted === undefined ? record.stdout : await readText($, persisted)
+  const stdout = whole ?? record.stdout
   const { stderr } = record
   const full = fullOutputFile(stdout, stderr)
   if (!isLong(full, settings)) return undefined
 
-  const newStdout = trimTapText(stdout, settings)
-  if (newStdout === undefined) return undefined
+  const newStdout = whole === undefined
+    ? (isLong(stdout, settings) ? trimText(stdout, settings) : undefined)
+    : trimAny(stdout, settings)
   const newStderr = isLong(stderr, settings) ? trimText(stderr, settings) : undefined
+  if (newStdout === undefined && newStderr === undefined) return undefined
+  // Never put a whole read-back output inline untrimmed.
+  if (persisted !== undefined && newStdout === undefined) return undefined
 
   const line = await keep($, configuredDir, toolUseId, full)
   if (line === undefined) return undefined
 
-  const result: BashRecord = { ...record, stdout: `${newStdout}\n${line}`, stderr: newStderr ?? stderr }
-  for (const field of PERSISTED_FIELDS) delete result[field]
+  const result: BashRecord = { ...record, stdout: `${newStdout ?? stdout}\n${line}`, stderr: newStderr ?? stderr }
+  if (persisted !== undefined && whole !== undefined) {
+    for (const field of PERSISTED_FIELDS) delete result[field]
+  }
   return result
 }
 
@@ -128,44 +135,17 @@ export const register: Register = (on, options) => {
 
     const toolUseId = typeof e.tool_use_id === 'string' ? e.tool_use_id : 'call'
 
-    if (ran.isError === true) {
-      // A failing command (non-zero exit): the model reads the error text.
-      const text = typeof ran.text === 'string' ? ran.text
-        : typeof ran.result === 'string' ? ran.result : undefined
-      if (text === undefined || !isLong(text, settings)) return ran
-      // A failing TAP run: the error text holds only the first ~30 KB (no
-      // summary, no persisted file to read it from), so it is left as the
-      // harness gave it rather than trimmed into a misleading excerpt.
-      if (isTap(text)) return ran
-      const trimmed = trimText(text, settings)
-      if (trimmed === undefined) return ran
-      const line = await keep($, configuredDir, toolUseId, text)
-      if (line === undefined) return ran
-      const shown = `${trimmed}\n${line}`
-      return { isError: true, result: shown, text: shown, context: ran.context } satisfies ToolCallResult
-    }
+    // A failing command (non-zero exit) is answered as core gave it. Its
+    // error text holds only the first ~30 KB (no persisted file to read the
+    // rest from), and Claude Code 2.1.319 refuses a hook's rewritten errored
+    // result (`{ isError, result: <text> }` fails the Bash output shape and
+    // the model got no output at all); no documented shape carries
+    // replacement text for an errored call.
+    if (ran.isError === true) return ran
 
     if (!isBashRecord(ran.result)) return ran
-    const { stdout, stderr } = ran.result
-    if (isTap(stdout)) {
-      const tap = await trimTapRecord($, configuredDir, toolUseId, ran.result, settings)
-      if (tap !== undefined) return { result: tap, context: ran.context } as ToolCallResult
-    }
-    const full = fullOutputFile(stdout, stderr)
-    if (!isLong(full, settings)) return ran
-
-    const newStdout = isLong(stdout, settings) ? trimText(stdout, settings) : undefined
-    const newStderr = isLong(stderr, settings) ? trimText(stderr, settings) : undefined
-    if (newStdout === undefined && newStderr === undefined) return ran
-
-    const line = await keep($, configuredDir, toolUseId, full)
-    if (line === undefined) return ran
-
-    const result = {
-      ...ran.result,
-      stdout: `${newStdout ?? stdout}\n${line}`,
-      stderr: newStderr ?? stderr,
-    }
+    const result = await trimRecord($, configuredDir, toolUseId, ran.result, settings)
+    if (result === undefined) return ran
     return { result, context: ran.context } as ToolCallResult
   }).catch(($, e, next) => next(e))
 }

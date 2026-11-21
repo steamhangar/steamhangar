@@ -221,19 +221,146 @@ export const trimTap = (text: string): string | undefined => {
 }
 
 /**
- * TAP output trimmed by `trimTap`; when that is still long, its head, tail
- * and `not ok` lines (numbered as in the full output) as `trimText` cuts
- * any output. Undefined when `text` is not TAP or nothing gets shorter.
+ * Lines a structured trim kept, as text; when that is still long, its head,
+ * tail and `match` lines (numbered as in the full output) as `trimText` cuts
+ * any output. Undefined when nothing gets shorter.
  */
-export const trimTapText = (text: string, settings: TrimSettings): string | undefined => {
-  if (!isTap(text)) return undefined
+const fitKept = (
+  text: string,
+  kept: Kept | undefined,
+  settings: TrimSettings,
+  match: RegExp,
+): string | undefined => {
   const lines = text.replace(/\n$/, '').split('\n')
-  const kept = keepTap(text) ?? { lines, numbers: lines.map((_, k) => k + 1) }
-  const tap = kept.lines.join('\n')
-  const shorter = byteLength(tap) < byteLength(text) ? tap : undefined
-  if (!isLong(tap, settings)) return shorter
-  return trimText(tap, settings, TAP_MATCH, kept.numbers) ?? shorter
+  const use = kept ?? { lines, numbers: lines.map((_, k) => k + 1) }
+  const joined = use.lines.join('\n')
+  const shorter = byteLength(joined) < byteLength(text) ? joined : undefined
+  if (!isLong(joined, settings)) return shorter
+  return trimText(joined, settings, match, use.numbers) ?? shorter
 }
+
+/**
+ * TAP output trimmed by `trimTap`, cut once more by `fitKept` when still
+ * long. Undefined when `text` is not TAP or nothing gets shorter.
+ */
+export const trimTapText = (text: string, settings: TrimSettings): string | undefined =>
+  isTap(text) ? fitKept(text, keepTap(text), settings, TAP_MATCH) : undefined
+
+// node --test's default `spec` reporter (node 24 also when not on a terminal).
+const SPEC_SUITE = /^( *)\u25b6 /
+const SPEC_PASS = /^( *)\u2714 /
+const SPEC_FAIL = /^( *)\u2716 /
+const SPEC_SKIP = /^( *)\ufe63 /
+const SPEC_SUMMARY = /^\u2139 (tests|suites|pass|fail|cancelled|skipped|todo|duration_ms) /
+const SPEC_DURATION = / \(\d+(\.\d+)?m?s\)( # (SKIP|TODO).*)?$/
+const SPEC_FAILING = /^\u2716 failing tests:$/
+
+// Lines kept from the middle when even the trimmed spec output is long.
+export const SPEC_MATCH = /^ *\u2716 /
+
+/** An `ℹ tests N` summary line and at least one `✔`/`✖` test line. */
+export const isSpec = (text: string): boolean => {
+  const lines = text.split('\n').map(line => line.trimEnd())
+  return lines.some(line => /^\u2139 tests \d+$/.test(line)) &&
+    lines.some(line => (SPEC_PASS.test(line) || SPEC_FAIL.test(line)) && SPEC_DURATION.test(line))
+}
+
+/**
+ * Spec output reduced to what a reader needs: every `✖` line after the `▶`
+ * names of its parent suites (each once), the `ℹ` summary, the whole
+ * `✖ failing tests:` section to the end, and every line that is not a test
+ * line (an error printed below a `✖` line, a test's console output, noise
+ * around the run). Dropped: `✔` lines (passed tests and suites, todos),
+ * `﹣` skipped tests and the other `▶` suite headers. One marker line says what went; `numbers` as in `keepTap`.
+ * Undefined for output that is not spec or when nothing is dropped.
+ */
+const keepSpec = (text: string): Kept | undefined => {
+  if (!isSpec(text)) return undefined
+  const lines = text.replace(/\n$/, '').split('\n')
+  const out: string[] = []
+  const numbers: number[] = []
+  const push = (from: number, to = from) => {
+    for (let k = from; k <= to; k++) {
+      out.push(lines[k] ?? '')
+      numbers.push(k + 1)
+    }
+  }
+  // Open `▶` suite headers, outermost first.
+  const open: { indent: number; index: number; shown: boolean }[] = []
+  const close = (indent: number) => {
+    while (open.length > 0 && (open[open.length - 1]?.indent ?? -1) >= indent) open.pop()
+  }
+  let passed = 0
+  let failed = 0
+  let markerAt = -1
+  const drop = () => {
+    if (markerAt < 0) markerAt = out.length
+  }
+
+  for (let i = 0; i < lines.length; i++) {
+    const bare = (lines[i] ?? '').trimEnd()
+    if (SPEC_FAILING.test(bare)) {
+      push(i, lines.length - 1)
+      break
+    }
+    const suite = SPEC_SUITE.exec(bare)
+    if (suite !== null) {
+      const indent = suite[1]?.length ?? 0
+      close(indent)
+      open.push({ indent, index: i, shown: false })
+      drop()
+      continue
+    }
+    const pass = SPEC_PASS.exec(bare) ?? SPEC_SKIP.exec(bare)
+    if (pass !== null) {
+      passed++
+      drop()
+      // A suite's own result line ends it and every deeper one.
+      close(pass[1]?.length ?? 0)
+      continue
+    }
+    const fail = SPEC_FAIL.exec(bare)
+    if (fail !== null) {
+      const indent = fail[1]?.length ?? 0
+      for (const parent of open) {
+        if (parent.indent < indent && !parent.shown) {
+          push(parent.index)
+          parent.shown = true
+        }
+      }
+      push(i)
+      failed++
+      close(indent)
+      continue
+    }
+    push(i)
+  }
+
+  const omitted = lines.length - out.length
+  if (omitted <= 0) return undefined
+  const marker = `[output-trim: spec, ${omitted} lines omitted: ${passed} passed or skipped tests` +
+    ` and suites, suite headers; ${failed} failing tests and suites kept with their parent suites]`
+  const at = markerAt < 0 ? out.length : markerAt
+  out.splice(at, 0, marker)
+  numbers.splice(at, 0, 0)
+  return { lines: out, numbers }
+}
+
+/**
+ * Spec output trimmed by `keepSpec`, cut once more by `fitKept` when still
+ * long. Undefined when `text` is not spec output or nothing gets shorter.
+ */
+export const trimSpecText = (text: string, settings: TrimSettings): string | undefined =>
+  isSpec(text) ? fitKept(text, keepSpec(text), settings, SPEC_MATCH) : undefined
+
+/**
+ * Long output as the model gets it: TAP or spec test output by its
+ * structure, anything else as `trimText` cuts it. Undefined when nothing
+ * gets shorter.
+ */
+export const trimAny = (text: string, settings: TrimSettings): string | undefined =>
+  trimTapText(text, settings) ?? trimSpecText(text, settings) ??
+    (isLong(text, settings) ? trimText(text, settings) : undefined)
 
 /** One file per call, named so a listing sorts by time. */
 export const fileName = (nowMs: number, toolUseId: string): string => {

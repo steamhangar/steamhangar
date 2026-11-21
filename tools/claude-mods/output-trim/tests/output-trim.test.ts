@@ -96,10 +96,14 @@ test('more than 20 KB in few lines is cut per line', async ($, on) => {
   expect(out.length).toBeLessThan(6000)
 })
 
-test('a long failing command keeps its error text trimmed', async ($, on) => {
+// The error path's shape, pinned: a non-zero exit is answered exactly as
+// core gave it (no rewritten `{ isError, result: <text> }`, which Claude
+// Code 2.1.319 refuses as not matching Bash's output shape).
+test('a long failing command is answered as core gave it, nothing written', async ($, on) => {
   const long = `Exit code 1\n${numbered(1000, i => (i === 300 ? ' Traceback (most recent call last):' : ''))}`
+  const inner = { isError: true as const, result: long, text: long, context: ['inner note'] }
   const writes: Write[] = []
-  on('tool.call', () => ({ isError: true, result: long, text: long }))
+  on('tool.call', () => inner)
   on('fs.write', (_, e) => {
     writes.push({ path: e.path, text: e.text })
     return { value: undefined }
@@ -107,11 +111,8 @@ test('a long failing command keeps its error text trimmed', async ($, on) => {
   mock.env(on, { CLAUDE_PLUGIN_DATA: '/data/plugin' })
 
   const ran = await $.tool.call({ tool: 'Bash', command: 'go test ./...' })
-  expect(ran.isError).toBe(true)
-  expect(ran.text).toContain('Exit code 1')
-  expect(ran.text).toContain('301: line 300 Traceback')
-  expect(ran.text).toContain('/data/plugin/output-trim/bash-')
-  expect(writes[0]?.text).toBe(long)
+  expect(ran).toEqual(inner)
+  expect(writes.length).toBe(0)
 })
 
 test('when the file cannot be written the output stays whole', async ($, on) => {
@@ -372,4 +373,197 @@ test('not TAP: test-point-like lines without a TAP version line get the generic 
   expect(writes[0]?.text).toBe(long)
   expect(out).toContain('ok 40 - step\n[output-trim: 880 lines omitted; 0 matching lines')
   expect(out).not.toContain('[output-trim: TAP')
+})
+
+// --- read-back of output the harness cut (any format) --------------------
+
+const persistedEngine = (on: On, cut: string, whole: string | undefined) => {
+  const writes: Write[] = []
+  const reads: string[] = []
+  on('tool.call', () => ({
+    result: {
+      stdout: cut,
+      stderr: '',
+      interrupted: false,
+      persistedOutputPath: '/home/dev/.claude/projects/p/s/tool-results/xyz.txt',
+      persistedOutputSize: (whole ?? cut).length,
+      stdoutHoldsOutputEnd: false,
+    },
+  }))
+  on('fs.read', (_, e) => {
+    reads.push(e.path)
+    return whole === undefined ? { deny: 'no such file' } : { value: whole }
+  })
+  on('fs.write', (_, e) => {
+    writes.push({ path: e.path, text: e.text })
+    return { value: undefined }
+  })
+  mock.env(on, { HOME: '/home/dev' })
+  return { writes, reads }
+}
+
+test('cut generic output is read back whole: right tail, line count and file line, shown inline', async ($, on) => {
+  const whole = numbered(40000, i => (i === 20000 ? ' FAILED deep in the middle' : ''))
+  const cut = whole.slice(0, 30000)
+  const { writes, reads } = persistedEngine(on, cut, whole)
+  const ran = await $.tool.call({ tool: 'Bash', command: 'seq-like run' })
+  const result = ran.result as Record<string, unknown>
+  const out = result.stdout as string
+
+  expect(reads).toEqual(['/home/dev/.claude/projects/p/s/tool-results/xyz.txt'])
+  expect(writes[0]?.text).toBe(whole)
+  expect(out).toContain('line 40\n[output-trim: 39880 lines omitted; 1 matching lines')
+  expect(out).toContain('20000: line 20000 FAILED deep in the middle')
+  expect(out).toContain('line 39921\n')
+  expect(out).toContain('line 40000\n')
+  expect(out).toContain(`full output (40000 lines, ${whole.length} bytes) in ${writes[0]?.path}]`)
+  for (const field of ['persistedOutputPath', 'persistedOutputSize', 'stdoutHoldsOutputEnd']) {
+    expect(field in result).toBe(false)
+  }
+})
+
+test('cut generic output whose file cannot be read: the cut is trimmed, persisted fields stay', async ($, on) => {
+  const cut = numbered(40000).slice(0, 30000)
+  const { writes } = persistedEngine(on, cut, undefined)
+  const ran = await $.tool.call({ tool: 'Bash', command: 'seq-like run' })
+  const result = ran.result as Record<string, unknown>
+  expect(writes[0]?.text).toBe(cut)
+  expect(result.stdout).toContain('lines omitted; 0 matching lines')
+  expect(result.persistedOutputPath).toBe('/home/dev/.claude/projects/p/s/tool-results/xyz.txt')
+})
+
+// --- node --test spec reporter (node 24's default) -----------------------
+
+const passLine = (indent: string, name: string) => `${indent}✔ ${name} (0.51ms)`
+const specSummary = (tests: number, fail: number): string[] => [
+  `ℹ tests ${tests}`,
+  'ℹ suites 1',
+  `ℹ pass ${tests - fail}`,
+  `ℹ fail ${fail}`,
+  'ℹ cancelled 0',
+  'ℹ skipped 1',
+  'ℹ todo 0',
+  'ℹ duration_ms 812.5',
+]
+
+const passingSpec = (count: number): string => [
+  ...Array.from({ length: count }, (_, i) => passLine('', `case ${i + 1}`)),
+  ...specSummary(count, 0),
+].join('\n') + '\n'
+
+// As node 24 prints it: a suite with a nested failing test, a skipped one,
+// console output, the summary, then the failing tests section.
+const failingSpec = (): { text: string; section: string[] } => {
+  const section = [
+    '✖ failing tests:',
+    '',
+    'test at web/tests/x.test.js:6:5',
+    '✖ deep fails (2.0ms)',
+    '  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:',
+    '  ',
+    '  1 !== 2',
+    '  ',
+    '      at TestContext.<anonymous> (/repo/web/tests/x.test.js:6:37) {',
+    "    code: 'ERR_ASSERTION'",
+    '  }',
+    '',
+    'test at web/tests/x.test.js:11:1',
+    '✖ top fails (0.12ms)',
+    '  Error: boom top',
+    '      at TestContext.<anonymous> (/repo/web/tests/x.test.js:11:33)',
+  ]
+  const lines = [
+    'log line from a test',
+    ...Array.from({ length: 300 }, (_, i) => passLine('', `case ${i + 1}`)),
+    '▶ outer',
+    passLine('  ', 'sibling passes'),
+    '  ▶ inner',
+    passLine('    ', 'deep passes'),
+    '    ✖ deep fails (2.0ms)',
+    '  ✖ inner (2.4ms)',
+    '  ﹣ skipped one (0.09ms) # SKIP',
+    '✖ outer (4.3ms)',
+    '▶ other suite',
+    passLine('  ', 'all fine here'),
+    passLine('', 'other suite'),
+    '✖ top fails (0.12ms)',
+    '  Error: printed under the line',
+    '      at x (/repo/web/tests/x.test.js:11:9)',
+    ...specSummary(305, 4),
+    '',
+    ...section,
+  ]
+  return { text: lines.join('\n') + '\n', section }
+}
+
+test('spec: a passing run shrinks to the summary plus the file hint', async ($, on) => {
+  const spec = passingSpec(400)
+  const writes = engine(on, spec)
+  const out = stdoutOf(await $.tool.call({ tool: 'Bash', command: 'dev.sh test-web' }))
+  expect(writes[0]?.text).toBe(spec)
+  expect(out).toBe([
+    '[output-trim: spec, 400 lines omitted: 400 passed or skipped tests and suites, suite headers;' +
+      ' 0 failing tests and suites kept with their parent suites]',
+    ...specSummary(400, 0),
+    `[output-trim: full output (408 lines, ${new TextEncoder().encode(spec).length} bytes) in ${writes[0]?.path}]`,
+  ].join('\n'))
+})
+
+test('spec: a failing run keeps every failure with its parents, the summary and the failing section', async ($, on) => {
+  const { text, section } = failingSpec()
+  const writes = engine(on, text)
+  const out = stdoutOf(await $.tool.call({ tool: 'Bash', command: 'dev.sh test-web || true' }))
+
+  expect(writes.length).toBe(1)
+  expect(writes[0]?.text === text).toBe(true)
+  expect(out).toContain('log line from a test\n[output-trim: spec, ')
+  expect(out).toContain(['▶ outer', '  ▶ inner', '    ✖ deep fails (2.0ms)', '  ✖ inner (2.4ms)',
+    '✖ outer (4.3ms)'].join('\n'))
+  // A failure's indented lines go with it.
+  expect(out).toContain('✖ top fails (0.12ms)\n  Error: printed under the line\n      at x (')
+  expect(out).toContain(`${specSummary(305, 4).join('\n')}\n\n${section.join('\n')}\n[output-trim: full output`)
+  expect(out).not.toContain('✔')
+  expect(out).not.toContain('skipped one')
+  expect(out).not.toContain('other suite')
+  expect(out).toContain('306 lines omitted: 305 passed or skipped tests and suites')
+  expect(out).toContain('4 failing tests and suites kept with their parent suites]')
+})
+
+test('spec: output the harness cut is read back and trimmed by its structure', async ($, on) => {
+  const { text, section } = failingSpec()
+  const { writes } = persistedEngine(on, text.slice(0, 2000), text)
+  const ran = await $.tool.call({ tool: 'Bash', command: 'dev.sh test-web; true' })
+  const result = ran.result as Record<string, unknown>
+  expect(writes.length).toBe(1)
+  expect(writes[0]?.text === text).toBe(true)
+  expect(result.stdout).toContain(section.join('\n'))
+  expect(result.stdout).toContain('[output-trim: spec, ')
+  expect('persistedOutputPath' in result).toBe(false)
+})
+
+test('spec: still long after the spec cut, the failing lines are kept numbered as in the file', {
+  options: { maxLines: 40, headLines: 5, tailLines: 10 },
+}, async ($, on) => {
+  const lines = Array.from({ length: 30 }, (_, i) => [
+    passLine('', `fine ${i + 1}`),
+    `✖ broken ${i + 1} (1ms)`,
+    `  Error: number ${i + 1}`,
+  ]).flat()
+  const spec = [...lines, ...specSummary(60, 30)].join('\n') + '\n'
+  const writes = engine(on, spec)
+  const out = stdoutOf(await $.tool.call({ tool: 'Bash', command: 'dev.sh test-web || true' }))
+  expect(out).toContain('[output-trim: spec, 30 lines omitted')
+  // `broken 15` is line 3 * 14 + 2 of the full output.
+  expect(out).toContain(`${3 * 14 + 2}: ✖ broken 15 (1ms)`)
+  expect(writes[0]?.text.split('\n')[3 * 14 + 1]).toBe('✖ broken 15 (1ms)')
+  expect(out).not.toMatch(/^\d+: +Error:/m)
+  expect(out).toContain(specSummary(60, 30).join('\n'))
+})
+
+test('not spec: check marks without an ℹ summary get the generic trim', async ($, on) => {
+  const long = Array.from({ length: 1000 }, (_, i) => `✔ step ${i + 1} (1ms)`).join('\n') + '\n'
+  engine(on, long)
+  const out = stdoutOf(await $.tool.call({ tool: 'Bash', command: 'make check' }))
+  expect(out).toContain('880 lines omitted; 0 matching lines')
+  expect(out).not.toContain('[output-trim: spec')
 })
