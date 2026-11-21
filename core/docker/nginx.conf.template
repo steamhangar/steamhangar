@@ -1,41 +1,83 @@
-# SteamHangar vault-core — CONTAINER nginx config TEMPLATE (Phase 1, WP 1.9).
+# SteamHangar vault-core — nginx config TEMPLATE, the one source of the cache
+# config (Phase 1: WP 1.1 wrote the config, WP 1.9 made it this template).
 #
-# ############################################################################
-# # THIS FILE IS A NEAR-VERBATIM COPY OF core/nginx/nginx.conf.              #
-# #                                                                          #
-# # Only the directive lines enumerated in core/docker/check-config-drift.sh #
-# # may differ (seven kinds today), and they are all container-runtime       #
-# # plumbing (log destinations, pid file, worker user, resolver and event-   #
-# # log placeholders). Every other directive MUST stay byte-identical to     #
-# # core/nginx/nginx.conf, which is the reviewed, test-covered source of     #
-# # truth for the cache behaviour (ADR-0001 requirements 1-4).               #
-# #                                                                          #
-# # That contract is MACHINE-CHECKED, not a promise:                         #
-# #     core/docker/check-config-drift.sh                                    #
-# # strips comments/blank lines from both files, un-applies the enumerated   #
-# # substitutions, and diffs the result. Any other divergence fails.         #
-# # Run it after touching either file.                                       #
-# ############################################################################
+# Derives from the proven Phase-0 PoC (poc/conf/nginx.conf) plus the four
+# binding production requirements from docs/adr/0001-proxy-store-feasibility.md
+# ("Production requirements discovered in Phase 0", items 1-4). Each is
+# called out by "ADR req N" comments at its implementation site below; see
+# core/README.md for the full requirement -> config-line mapping table.
 #
-# The allowed differences (container form  <-  native dev form); the list
-# in check-config-drift.sh is authoritative, this one is for the reader:
-#   1. user nginx;                    <-  (absent; nginx's compile-time default)
-#   2. pid /var/run/nginx.pid;        <-  pid logs/nginx.pid;
-#   3. error_log /dev/stderr warn;    <-  error_log logs/error.log warn;
-#   4. resolver ${VAULT_RESOLVER} ... <-  resolver 1.1.1.1 ...
-#   5. access_log /dev/stdout vault;  <-  access_log logs/access.log vault;
-#   6. access_log ${VAULT_EVENT_LOG} vault_event ...  <-  access_log logs/event.log vault_event ...
-#   7. access_log /dev/stdout vault_tls;  <-  access_log logs/tls.log vault_tls;
-#      (the stream block's log, WP CORE-FIX-3)
-# Delta 4 appears twice: in http {} and in the stream {} block at the end.
+# ONE SOURCE (NGINX-DUP-1, ADR-0001 addendum 2026-11-21): until rc23 a
+# native twin, core/nginx/nginx.conf, ran on the Windows dev rig and a drift
+# checker kept the two in step. Both are retired; this template is the only
+# copy. Its invariants are machine-checked against THIS file:
+#   - core/tests/test-template-invariants.sh (docker-free: the container
+#     plumbing lines, the store/Range/allowlist/retry/cap pins, the exact
+#     stream block, the worker connection budget, the committed default
+#     renders in core/docker/golden/)
+#   - .github/scripts/verify-core-nginx.sh (`nginx -t` of every render in the
+#     pinned image; `dev.sh test-core` and CI's `core / nginx -t`)
+#   - core/Dockerfile's build-time checks and deploy/tests/verify-stack.sh
+#     (the live stack against the real Steam CDN)
+# Run core/tests/test-template-invariants.sh after touching this file.
 #
-# NOT a delta (WP TH-1a): `include vault-upstream-rate.conf;` is the same
-# line in both files. What differs is the FILE it names -- rendered at start
-# by 27-vault-upstream-rate.sh here, static and uncapped natively; the
-# drift check pins the line and asserts the static file equals the cap-off
-# render. Same contract for `include vault-upstream-pool.conf;` (WP
-# CORE-FEAT-1b, ADR-0017): rendered by 28-vault-upstream-pool.sh here,
-# static and empty natively, pinned by drift-check step 2d (byte for byte).
+# --- Cache layout -----------------------------------------------------------
+# Request URI /depot/<depotid>/{chunk,manifest,patch}/<hash> maps 1:1 onto
+# cache/depot/<depotid>/{chunk,manifest,patch}/<hash> on disk (root "cache"
+# + try_files $uri), exactly as proven in Phase 0. This is the whole point
+# of the project: the depot ID is part of the path, so deleting a game is
+# "rm -rf cache/depot/<depotid-for-that-game>", no log parsing needed.
+#
+# --- Loop-safety reasoning (ADR req 4) --------------------------------------
+# vault-agent's optional hosts-file mode (docs/PROJECT_PLAN.md, vault-agent
+# section) writes "lancache.steamcontent.com -> <this server's IP>" into a
+# client machine's hosts file. That entry lives on the CLIENT, not on this
+# server, so it cannot loop nginx into itself directly. The real risk this
+# config guards against is nginx being tricked into resolving/dialing back
+# to itself (or to an attacker-chosen host) via the Host header:
+#   1. `resolver ${VAULT_RESOLVER}` (default 1.1.1.1) makes nginx do its own
+#      DNS resolution over the network for every upstream connection. It
+#      never consults the host's hosts file or OS resolver cache, so a
+#      steamcontent.com/steamserver.net entry there cannot point nginx back
+#      at itself. (A RESOLVER that rewrites *.steamcontent.com could, which
+#      is why 40-vault-preflight.sh refuses to boot on one.)
+#   2. The Host allowlist (below) means nginx only ever dials hosts that
+#      look like real Steam CDN edges in the first place -- an attacker
+#      cannot use this server as an open proxy by sending an arbitrary Host.
+#   3. `lancache.steamcontent.com` itself has no public A record (it is
+#      Valve's client-side cache-discovery marker, not a resolvable CDN
+#      edge -- see docs/PROJECT_PLAN.md vault-agent section). If a client
+#      ever sends that literal Host to us (plausible: it's exactly the name
+#      the hosts-file mode redirects), attempting to resolve and proxy_pass
+#      to it would fail. Instead this config special-cases that exact
+#      hostname to a concrete, confirmed-reachable Valve CDN edge
+#      (dist-fra1.discovery.steamserver.net -- same one used and verified
+#      reachable throughout poc/), never trying to resolve the marker
+#      hostname itself.
+#   4. A request that already passed through a SteamHangar cache carries
+#      X-SteamHangar-Hop and is answered 508 in /depot/ (loop guard).
+#
+# --- Container plumbing -----------------------------------------------------
+# The lines that only make sense in the image, each pinned with its exact
+# count by core/tests/test-template-invariants.sh:
+#   1. user nginx;  pid /var/run/nginx.pid;  error_log /dev/stderr warn;
+#   2. resolver ${VAULT_RESOLVER} ...      (twice: http and stream)
+#   3. access_log /dev/stdout vault;       (http level, re-stated in /depot/,
+#      @miss and the runner marker; access_log inheritance is REPLACE)
+#   4. access_log ${VAULT_EVENT_LOG} vault_event ...  (three times, each with
+#      the event-log marker comment; 25-vault-eventlog.sh removes them when
+#      the log is off)
+#   5. access_log /dev/stdout vault_tls;   (the stream block's log)
+#   6. the opt-in debug log lines, each with the debug marker comment
+#      (hook 31- removes them unless its flag is on; the marked lines
+#      explain the feature)
+#
+# Four includes are rendered at start, never edited by hand:
+# vault-upstream-rate.conf (27-vault-upstream-rate.sh), vault-upstream-pool.conf
+# and vault-upstream-cap.conf (28-vault-upstream-pool.sh) and
+# vault-settings-generation.conf (15-vault-settings.envsh). Their default
+# renders are committed in core/docker/golden/ and compared by the image build
+# and core/tests/.
 #
 # --- Rendering (${VAULT_RESOLVER}) ------------------------------------------
 # This file is NOT read by nginx directly. It is installed at
@@ -47,12 +89,11 @@
 # ^VAULT_ means "only ${VAULT_*} placeholders are touched" — this file uses
 # ${VAULT_RESOLVER} (twice: http and stream) and ${VAULT_EVENT_LOG}.
 #
-# NOT a delta either (WP CORE-FIX-3): the stream {} block at the end of the
-# file, the HTTPS passthrough on port 443. It is identical in both files
-# apart from deltas 4 and 7; the container additionally wraps it in
+# The stream {} block at the end of the file is the HTTPS passthrough on
+# port 443 (WP CORE-FIX-3). It is wrapped in
 # "# VAULT_TLS_PASSTHROUGH_BEGIN/END" marker comments, which
 # 26-vault-tls-passthrough.sh uses to delete the block when
-# VAULT_TLS_PASSTHROUGH=0 (comments are not compared by the drift check).
+# VAULT_TLS_PASSTHROUGH=0.
 #
 # What that filter is actually for, measured rather than assumed: with the
 # image's stock environment it changes nothing — rendering with and without it
@@ -140,13 +181,13 @@ http {
 
     # ADR req 4: resolve upstream hostnames ourselves, at request time, over
     # the network -- never via the OS resolver/hosts file (see loop-safety
-    # note in core/nginx/nginx.conf). valid=30s is deliberately short (vs.
+    # reasoning at the top of this file). valid=30s is deliberately short (vs.
     # the PoC's 300s): a dead upstream IP should stop being handed out again
     # reasonably soon after a failover (Phase 0 observed real 42s stalls /
     # 502 waves from a transient upstream-IP outage --
     # poc/linux-client-test findings).
     #
-    # CONTAINER DELTA: the address is ${VAULT_RESOLVER}, rendered by envsubst
+    # Container plumbing: the address is ${VAULT_RESOLVER}, rendered by envsubst
     # at container start (default 1.1.1.1 -- ENV in core/Dockerfile, override
     # via deploy/.env). Homelabs that must not send DNS to Cloudflare (or that
     # run a split-horizon resolver) can point this at their own. The value is
@@ -177,9 +218,9 @@ http {
     # --- Host-header allowlist + upstream host (ADR req 4 abuse guard) -----
     # Only these two hostname families are legitimate Steam CDN edges. This
     # is what stops this server being usable as a generic open HTTP proxy
-    # via a forged Host header -- see the "Host-header allowlist" test in
-    # core/tests/test-core.ps1 and the SEC-FIX-1 probes in
-    # .github/scripts/verify-core-nginx.sh.
+    # via a forged Host header -- see verify-stack step 5d, the SEC-FIX-1
+    # probes in .github/scripts/verify-core-nginx.sh and the exact map pin
+    # in core/tests/test-template-invariants.sh.
     #
     # Keyed on $host, not $http_host (nitpick fixed in review): $host is
     # nginx's normalized view of the effective hostname -- lowercased and
@@ -219,8 +260,7 @@ http {
     #     guard in @miss and the name proxy_pass dials cannot disagree.
     #
     # Exception: "lancache.steamcontent.com" has no public A record (see
-    # the loop-safety note in
-    # core/nginx/nginx.conf) -- a client that resolved this server via the
+    # the loop-safety reasoning at the top of this file) -- a client that resolved this server via the
     # hosts-file mode's marker hostname sends exactly this Host. Falling
     # back to a concrete, known-good Valve CDN edge here is the "safe
     # fallback default edge" required by ADR req 4. An exact string beats
@@ -291,12 +331,11 @@ http {
     # --- Upstream rate cap (WP TH-1a, core/README.md "Upstream rate cap") ---
     # Defines $vault_upstream_rate, consumed by proxy_limit_rate in @miss.
     # Relative include = resolved against this file's own directory (nginx's
-    # conf prefix): core/nginx/vault-upstream-rate.conf natively (a static
-    # "no cap" file), /etc/nginx/vault-upstream-rate.conf in the container,
-    # rendered at start by /docker-entrypoint.d/27-vault-upstream-rate.sh from
-    # VAULT_UPSTREAM_RATE / VAULT_UPSTREAM_RATE_WINDOW. The line itself is
-    # identical in both files; check-config-drift.sh pins it and asserts the
-    # native file equals the script's cap-off render.
+    # conf prefix): /etc/nginx/vault-upstream-rate.conf, rendered at start
+    # by /docker-entrypoint.d/27-vault-upstream-rate.sh from
+    # VAULT_UPSTREAM_RATE / VAULT_UPSTREAM_RATE_WINDOW.
+    # core/tests/test-template-invariants.sh pins the line and asserts the
+    # cap-off render equals core/docker/golden/vault-upstream-rate.conf.
     include vault-upstream-rate.conf;
 
     # --- Upstream keepalive pool (ADR-0017, core/README.md "Upstream keepalive
@@ -307,9 +346,10 @@ http {
     # proxy_pass matches a group by the evaluated host name ($vault_upstream_host
     # never carries a port); unlisted hosts take the per-request resolver path
     # above, unchanged. Same include contract as the rate cap: rendered at start
-    # by /docker-entrypoint.d/28-vault-upstream-pool.sh in the container, static
-    # (header only, no pool) natively; check-config-drift.sh pins the line and
-    # asserts the native file is the hook's empty render byte for byte. Must stay
+    # by /docker-entrypoint.d/28-vault-upstream-pool.sh; the empty render
+    # (header only, no pool) is core/docker/golden/vault-upstream-pool.conf
+    # byte for byte, and core/tests/test-template-invariants.sh pins the line
+    # and its place directly after the rate include. Must stay
     # at http level (upstream blocks live in http context) and after the
     # resolver above, which the groups inherit.
     include vault-upstream-pool.conf;
@@ -326,7 +366,7 @@ http {
     # VAULT_UPSTREAM_MAX_CONNS by the same hook, default 16, range 1..64) is
     # included inside @miss. Over the cap the client gets 503 (a
     # HIT never reaches the cap). Same include contract as the pool file:
-    # static default render natively, check-config-drift.sh asserts it.
+    # the default render is core/docker/golden/vault-upstream-cap.conf.
     limit_conn_zone $server_port zone=vault_upstream_total:64k;
     limit_conn_status 503;
 
@@ -399,10 +439,12 @@ http {
     # literal ones nginx inserts BETWEEN fields from the log_format string
     # itself, never from a variable's content, so a naive
     # `line.split("\t")` in WP 3.11's sweeper always gets exactly 8 fields
-    # no matter what a client sends. PINNED by a dedicated hostile-URI test
-    # (core/tests/test-core.ps1) that sends %09/%0A/%22/%C3%A9 inside a
-    # request path and asserts the resulting event-log line still splits
-    # into exactly 8 tab-separated fields with field 1 == "v1".
+    # no matter what a client sends. Proven by a hostile-URI test on the
+    # WP 1.1 native rig (core/tests/test-core.ps1, retired by NGINX-DUP-1)
+    # that sent %09/%0A/%22/%C3%A9 inside a request path and asserted the
+    # resulting event-log line still split into exactly 8 tab-separated
+    # fields with field 1 == "v1". Today core/tests/test-template-invariants.sh
+    # pins escape=default and the literal tabs of this line.
     #
     # --- depot id extraction ------------------------------------------------
     # Bounded ([0-9]+ only, anchored at the URI start) on purpose -- the
@@ -450,7 +492,7 @@ http {
     # object served from local disk or fetched". $upstream_cache_status
     # does not apply here either -- MEASURED, not assumed: this config uses
     # proxy_store, never proxy_cache, and an empirical check during this
-    # work package (core/tests/test-core.ps1) confirmed $upstream_cache_status
+    # work package (WP 1.1 native rig, retired) confirmed $upstream_cache_status
     # is the literal string "-" (nginx's documented "not configured" value)
     # on BOTH the try_files-HIT path (no upstream module ever invoked) and
     # the proxy_store MISS path -- it carries no HIT/MISS information at
@@ -525,7 +567,7 @@ http {
     # One compact tab-separated line per depot request, written ONLY when # VAULT_DEBUG_TP_LINE
     # VAULT_DEBUG_THROUGHPUT is on (the access_log lines in /depot/ and @miss # VAULT_DEBUG_TP_LINE
     # exist only in the container render, see core/docker/31-vault-debug- # VAULT_DEBUG_TP_LINE
-    # throughput.sh and delta 8 in check-config-drift.sh). The format itself # VAULT_DEBUG_TP_LINE
+    # throughput.sh and the plumbing list at the top). The format itself # VAULT_DEBUG_TP_LINE
     # is inert while no access_log names it. Fields, in order: # VAULT_DEBUG_TP_LINE
     #   tp1 msec client depot method status range bytes_sent request_time # VAULT_DEBUG_TP_LINE
     #   upstream_response_time cache connection connection_requests # VAULT_DEBUG_TP_LINE
@@ -540,7 +582,7 @@ http {
     log_format vault_tp_hb escape=default # VAULT_DEBUG_TP_LINE
         'hb1	$msec	$remote_addr	$status	$request_time	$connection	$connection_requests	$tcpinfo_rtt'; # VAULT_DEBUG_TP_LINE
 
-    # CONTAINER DELTA: stdout instead of logs/access.log. `docker logs` is the
+    # Container plumbing: stdout, not a file. `docker logs` is the
     # single place both nginx logs appear, and the json-file driver's
     # max-size/max-file (deploy/compose.yaml) is what bounds them on disk.
     access_log  /dev/stdout  vault;
@@ -651,13 +693,13 @@ http {
             # here silently killed the existing human-readable "vault" log
             # for every /depot/ request (it went from 2 log files to 1 for
             # this location, with no warning from nginx -- reproduced by
-            # core/tests/test-core.ps1's own pre-existing smoke-test
-            # assertions failing after this WP's first draft). The parent's
+            # the WP 1.1 native rig's smoke-test assertions failing after
+            # this WP's first draft). The parent's
             # "vault" access_log MUST be re-stated explicitly at this level
             # to keep both logs alive here -- same fix applied in @miss.
             access_log /dev/stdout vault;
             #
-            # CONTAINER DELTA (6th, see check-config-drift.sh): the path is
+            # Container plumbing (item 4 at the top): the path is
             # ${VAULT_EVENT_LOG}, rendered by envsubst -- empty/unset means
             # "feature off" (ADR-0008: optional at runtime), which envsubst
             # alone cannot turn into "no access_log directive at all"
@@ -669,7 +711,7 @@ http {
             # reasoning. The marker itself is inert to nginx (a normal
             # trailing comment) and is stripped when the feature stays on.
             access_log ${VAULT_EVENT_LOG} vault_event buffer=64k flush=5s; # VAULT_EVENT_LOG_LINE
-            # Opt-in throughput log (delta 8): removed unless VAULT_DEBUG_THROUGHPUT is on. # VAULT_DEBUG_TP_LINE
+            # Opt-in throughput log (plumbing 6): removed unless VAULT_DEBUG_THROUGHPUT is on. # VAULT_DEBUG_TP_LINE
             access_log /vault/logs/throughput-debug/throughput.log vault_tp buffer=64k flush=5s; # VAULT_DEBUG_TP_LINE
         }
 
@@ -679,8 +721,8 @@ http {
             # WP 3.10 (ADR-0008): cache-event log for the MISS/BYPASS path
             # (see location /depot/ above for why this is duplicated here
             # instead of living at server/http level, the access_log
-            # -inheritance-is-REPLACE blocker fix, and the CONTAINER DELTA /
-            # toggle-script explanation).
+            # -inheritance-is-REPLACE blocker fix, and the container
+            # plumbing / toggle-script explanation).
             #
             # buffer=64k keeps this off the request's hot path: nginx
             # appends into the in-memory buffer and only issues a write()
@@ -694,7 +736,7 @@ http {
             # yet" test/expectation would be flaky; don't write one.
             access_log /dev/stdout vault;
             access_log ${VAULT_EVENT_LOG} vault_event buffer=64k flush=5s; # VAULT_EVENT_LOG_LINE
-            # Opt-in throughput log (delta 8): removed unless VAULT_DEBUG_THROUGHPUT is on. # VAULT_DEBUG_TP_LINE
+            # Opt-in throughput log (plumbing 6): removed unless VAULT_DEBUG_THROUGHPUT is on. # VAULT_DEBUG_TP_LINE
             access_log /vault/logs/throughput-debug/throughput.log vault_tp buffer=64k flush=5s; # VAULT_DEBUG_TP_LINE
 
             # ADR req 4 abuse guard: refuse to proxy anywhere for a Host
@@ -832,7 +874,7 @@ http {
             # proxy_limit_rate only acts on BUFFERED responses, and
             # proxy_store needs buffering too -- so buffering is stated
             # explicitly (it is nginx's default) and pinned by
-            # check-config-drift.sh and the CI gate, and the upstream may
+            # core/tests/test-template-invariants.sh and the CI gate, and the upstream may
             # not switch it off per response with "X-Accel-Buffering: no"
             # (nginx honours that header by default; ignoring it is a
             # reasoned guard, not measured against a header-sending upstream).
@@ -885,9 +927,9 @@ http {
         location = /health {
             # D16c: X-Vault-Settings-Generation, the core settings generation
             # these workers serve (the settings watcher polls it after a
-            # reload). Natively a static "0" (core/nginx/
-            # vault-settings-generation.conf); in the container rendered by
-            # 15-vault-settings.envsh / 47-vault-settings-watch.sh.
+            # reload). Rendered by 15-vault-settings.envsh /
+            # 47-vault-settings-watch.sh; generation 0 is
+            # core/docker/golden/vault-settings-generation.conf.
             include vault-settings-generation.conf;
             return 200 "ok\n";
         }
@@ -898,7 +940,7 @@ http {
         # GETs this before trusting an IP as a real cache and requires the
         # X-LanCache-Processed-By response header to be present.
         location = /lancache-heartbeat {
-            # Opt-in heartbeat timing (delta 8, VAULT_DEBUG_THROUGHPUT on): a # VAULT_DEBUG_TP_LINE
+            # Opt-in heartbeat timing (plumbing 6, VAULT_DEBUG_THROUGHPUT on): a # VAULT_DEBUG_TP_LINE
             # location's own access_log REPLACES the inherited one, so the # VAULT_DEBUG_TP_LINE
             # normal log is restated next to the hb1 line. # VAULT_DEBUG_TP_LINE
             access_log /dev/stdout vault; # VAULT_DEBUG_TP_LINE
@@ -932,7 +974,7 @@ http {
 #
 # CONTAINER: the BEGIN/END marker comments around this block let
 # /docker-entrypoint.d/26-vault-tls-passthrough.sh delete the whole block
-# when VAULT_TLS_PASSTHROUGH=0. Natively the block is always on.
+# when VAULT_TLS_PASSTHROUGH=0.
 stream {
     # Same resolver as the HTTP cache (ADR-0001 req 4), never the LAN DNS:
     # a resolver that rewrites *.steamcontent.com would send every
@@ -995,8 +1037,8 @@ stream {
         'target="$vault_tls_upstream" upstream=$upstream_addr status=$status '
         'bytes_sent=$bytes_sent bytes_received=$bytes_received '
         'session_time=$session_time';
-    # CONTAINER DELTA (7th, see check-config-drift.sh): stdout, next to the
-    # HTTP access log, instead of logs/tls.log.
+    # Container plumbing (item 5 at the top): stdout, next to the HTTP
+    # access log.
     access_log /dev/stdout vault_tls;
 
     server {

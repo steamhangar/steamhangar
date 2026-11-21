@@ -28,7 +28,7 @@ G7  deploy/.env.example documents the default (api/.env.example's twin is in
 
 The nginx half (tries 2; ``error`` was dropped here and restored by WP
 CORE-FEAT-1b2 for the keepalive pool, ADR-0017 decision 6A) is pinned by
-``core/docker/check-config-drift.sh`` step 2c, run by ``dev.sh test-core`` /
+``core/tests/test-template-invariants.sh`` step 2c, run by ``dev.sh test-core`` /
 CI's core job.
 """
 

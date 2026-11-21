@@ -4488,8 +4488,9 @@ counted by category and skipped — never partially trusted, never crashed on:
 - **not exactly 9 fields** → `field-count`. `escape=default` renders a
   percent-encoded tab or newline in a hostile request path as the literal text
   `\x09`/`\x0A`, so the only real tabs on a line are nginx's own separators —
-  the guarantee is pinned empirically on the producing side
-  (`core/tests/test-core.ps1`) and defended here anyway.
+  the guarantee was pinned empirically on the producing side (the WP 3.10
+  native rig, retired by NGINX-DUP-1; `core/tests/test-template-invariants.sh`
+  holds the config side) and defended here anyway.
 - **field 1 is not `v1`** → `unknown-version`, its own category on purpose. A
   future v2 with nine fields in a *different order* is exactly the line that
   must not be read as v1; it would otherwise produce wrong depot ids and wrong

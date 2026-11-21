@@ -33,19 +33,20 @@
          has no such luck-of-the-codepage dependency.
 
     Also parse-only (no ASCII requirement -- that invariant is documented
-    for the packaging scripts specifically, not these) over two harnesses
-    outside agent/packaging/windows that are PowerShell but must NEVER be
-    executed in CI (review round 2, N3): core/tests/test-core.ps1 (runs
-    against the real Steam CDN) and dns/tests/test-dnsmasq-config.ps1. Parse-
-    checking them here catches a broken edit without ever running them.
+    for the packaging scripts specifically, not these) over PowerShell
+    files outside agent/packaging/windows that must NEVER be executed in CI
+    (review round 2, N3): today the web UI's generated install command
+    (web/tests/fixtures/windows-install-command.ps1). The two native rigs
+    first listed here, core/tests/test-core.ps1 and
+    dns/tests/test-dnsmasq-config.ps1, were retired by NGINX-DUP-1.
+    Parse-checking catches a broken edit without ever running the file.
 
     Also deliberately does NOT execute anything it checks: the packaging
     scripts mutate real machine state (Scheduled Tasks, secret env files
     with owner-only ACLs -- see agent/packaging/windows/install-task.ps1),
     and agent/packaging/windows/tests/test-install-uninstall.ps1's own doc
-    comment already says "Not `go test` - run by hand". core/tests/
-    test-core.ps1 and dns/tests/test-dnsmasq-config.ps1 need the real
-    network. This gate is pure static analysis: no execution, no network,
+    comment already says "Not `go test` - run by hand". The install
+    command downloads and installs. This gate is pure static analysis: no execution, no network,
     no container.
 #>
 
@@ -118,8 +119,6 @@ foreach ($f in $packagingFiles) {
 # committed copy drifts from what the page generates; parsed here with the
 # real 5.1 parser, never executed (it downloads and installs).
 $parseOnlyTargets = @(
-    (Join-Path $repoRoot "core\tests\test-core.ps1"),
-    (Join-Path $repoRoot "dns\tests\test-dnsmasq-config.ps1"),
     (Join-Path $repoRoot "web\tests\fixtures\windows-install-command.ps1")
 )
 

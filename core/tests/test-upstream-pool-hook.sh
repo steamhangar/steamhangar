@@ -21,10 +21,10 @@ set -euo pipefail
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 core_dir="$(cd "$script_dir/.." && pwd)"
 HOOK="$core_dir/docker/28-vault-upstream-pool.sh"
-NATIVE="$core_dir/nginx/vault-upstream-pool.conf"
+GOLDEN="$core_dir/docker/golden/vault-upstream-pool.conf"
 
 [ -f "$HOOK" ]   || { echo "missing $HOOK" >&2; exit 1; }
-[ -f "$NATIVE" ] || { echo "missing $NATIVE" >&2; exit 1; }
+[ -f "$GOLDEN" ] || { echo "missing $GOLDEN" >&2; exit 1; }
 
 # The image's ENV defaults (edge ON) must not leak into the legacy cases.
 unset VAULT_UPSTREAM_EDGE VAULT_UPSTREAM_MAX_CONNS VAULT_PREFILL_MAX_THREADS VAULT_UPSTREAM_POOL_HOSTS
@@ -110,12 +110,12 @@ assert_shape() {
     return 0
 }
 
-# --- 1. unset -> header-only file, byte-identical to the static native file --
+# --- 1. unset -> header-only file, byte-identical to the committed golden ----
 render unset UNSET "$work/unset.conf"
 if [ "$rc" -ne 0 ]; then
     bad "unset var" "hook failed: $(head -n1 "$work/unset.log")"
-elif ! cmp -s "$work/unset.conf" "$NATIVE"; then
-    bad "unset var" "render differs from core/nginx/vault-upstream-pool.conf"
+elif ! cmp -s "$work/unset.conf" "$GOLDEN"; then
+    bad "unset var" "render differs from core/docker/golden/vault-upstream-pool.conf"
 elif [ "$(grep -v '^#' "$work/unset.conf")" != 'map $vault_upstream_host $vault_upstream_target {
     default $vault_upstream_host;
 }' ]; then
@@ -123,13 +123,13 @@ elif [ "$(grep -v '^#' "$work/unset.conf")" != 'map $vault_upstream_host $vault_
 elif ! grep -q 'Pooled edges: 0 ' "$work/unset.conf"; then
     bad "unset var" "header does not say 'Pooled edges: 0'"
 else
-    ok "unset var: header + legacy target map only, byte-identical to the static native file"
+    ok "unset var: header + legacy target map only, byte-identical to the committed golden"
 fi
 
 # --- 2. set but empty -> the same -------------------------------------------
 render empty "" "$work/empty.conf"
-if [ "$rc" -ne 0 ] || ! cmp -s "$work/empty.conf" "$NATIVE"; then
-    bad "empty var" "render differs from the static native file or hook failed"
+if [ "$rc" -ne 0 ] || ! cmp -s "$work/empty.conf" "$GOLDEN"; then
+    bad "empty var" "render differs from the committed golden or hook failed"
 else
     ok "empty var: same header-only render"
 fi
@@ -148,8 +148,8 @@ cat > "$work/two.golden" <<'EOF'
 # SteamHangar vault-core -- upstream keepalive pool include (ADR-0017, ADR-0021).
 # Rendered at container start by /docker-entrypoint.d/28-vault-upstream-pool.sh from
 # VAULT_UPSTREAM_EDGE and VAULT_UPSTREAM_POOL_HOSTS -- do not edit; see core/README.md
-# "Upstream keepalive pool". Natively (core/nginx/vault-upstream-pool.conf) this file
-# is the empty legacy render, byte for byte (check-config-drift.sh asserts it).
+# "Upstream keepalive pool". The empty legacy render is kept byte for byte as
+# core/docker/golden/vault-upstream-pool.conf (the image build compares them).
 # Pooled edges: 2 (keepalive 8 idle per group, ceiling 32 idle = at most 4 groups).
 # The shared zone's size is given once, on the first group (nginx docs, zone:
 # "Several groups may share the same zone. In this case, it is enough to
@@ -343,8 +343,8 @@ cat > "$work/edge.golden" <<EOF
 # SteamHangar vault-core -- upstream keepalive pool include (ADR-0017, ADR-0021).
 # Rendered at container start by /docker-entrypoint.d/28-vault-upstream-pool.sh from
 # VAULT_UPSTREAM_EDGE and VAULT_UPSTREAM_POOL_HOSTS -- do not edit; see core/README.md
-# "Upstream keepalive pool". Natively (core/nginx/vault-upstream-pool.conf) this file
-# is the empty legacy render, byte for byte (check-config-drift.sh asserts it).
+# "Upstream keepalive pool". The empty legacy render is kept byte for byte as
+# core/docker/golden/vault-upstream-pool.conf (the image build compares them).
 # Edge mode (ADR-0021): every allowed MISS goes to $EDGE_DEFAULT, pooled with
 # keepalive 16 (= the connection cap). The Host header the client sent only
 # has to pass the allowlist; it never selects the upstream.
@@ -365,12 +365,12 @@ if [ "$rc" -ne 0 ]; then
     bad "edge mode" "hook failed: $(head -n1 "$work/edge.log")"
 elif ! cmp -s "$work/edge.conf" "$work/edge.golden"; then
     bad "edge mode" "render differs from the golden:"; diff -u "$work/edge.golden" "$work/edge.conf" >&2 || true
-elif ! cmp -s "$work/vault-upstream-cap.conf" "$core_dir/nginx/vault-upstream-cap.conf"; then
-    bad "edge mode" "default cap include differs from core/nginx/vault-upstream-cap.conf"
+elif ! cmp -s "$work/vault-upstream-cap.conf" "$core_dir/docker/golden/vault-upstream-cap.conf"; then
+    bad "edge mode" "default cap include differs from core/docker/golden/vault-upstream-cap.conf"
 elif ! grep -q "upstream edge mode ON: every MISS goes to $EDGE_DEFAULT .*connection cap 16" "$work/edge.log"; then
     bad "edge mode" "log line does not name the edge and the cap: $(head -n1 "$work/edge.log")"
 else
-    ok "edge mode: golden render (one group named like the edge, keepalive = cap), default cap include = native file, log names edge and cap"
+    ok "edge mode: golden render (one group named like the edge, keepalive = cap), default cap include = golden, log names edge and cap"
 fi
 
 # --- 12. the pool list is ignored in edge mode -------------------------------

@@ -845,7 +845,7 @@ def test_core_image_ships_the_version_hook_and_serves_no_version() -> None:
     assert "/docker-entrypoint.d/29-vault-build-version.sh /docker-entrypoint.d/40-vault-preflight.sh" in dockerfile
     hook = (REPO / "core" / "docker" / "29-vault-build-version.sh").read_text(encoding="utf-8")
     assert 'OUT="${1:-/vault/logs/vault-core-version.json}"' in hook
-    for conf in (REPO / "core" / "nginx" / "nginx.conf", REPO / "core" / "docker" / "nginx.conf.template"):
+    for conf in (REPO / "core" / "docker" / "nginx.conf.template",):
         text = conf.read_text(encoding="utf-8")
         assert "vault-version" not in text and "vault-core-version" not in text, conf
         assert re.search(r"^\s*root cache;", text, re.MULTILINE), conf

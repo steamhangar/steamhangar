@@ -207,7 +207,7 @@ ADR that describes it:
   raw ClientHello against a live listener in
   `.github/scripts/tls-sni-probe.sh`, and judged by the logged target plus
   the absence of any resolve/connect attempt, not by a status code. The map
-  is pinned to exactly its two entries by `check-config-drift.sh` and
+  is pinned to exactly its two entries by `core/tests/test-template-invariants.sh` and
   re-checked at every boot by `40-vault-preflight.sh`, which refuses a
   widened, loosened or extra entry (`.github/scripts/tls-preflight-tamper.cases`).
   Both scripts also pin the whole `stream {}` block as an exact directive

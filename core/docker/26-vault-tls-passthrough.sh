@@ -25,8 +25,8 @@
 #
 # WP CORE-FIX-4d (ADR-0021 addendum 2026-10-09): the two connection caps of
 # the passthrough are operator-tunable. The template carries the defaults
-# as literal lines (so core/nginx/nginx.conf and the template stay
-# byte-identical, check-config-drift.sh); with the passthrough ON this hook
+# as literal lines (pinned by core/tests/test-template-invariants.sh);
+# with the passthrough ON this hook
 # validates the env and rewrites exactly those two lines:
 #     VAULT_TLS_CLIENT_MAX_CONNS -> limit_conn vault_tls_client N;
 #         per client address, whole number 1..256, empty/unset = 64

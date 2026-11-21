@@ -138,3 +138,25 @@ at the end, under a dated heading, one entry each with the WP that proved it.
   0 ms in nginx's own log: the wait happens before the request is read.
   Measure heartbeat latency from outside, e.g. curl from a second
   container.
+
+## 2026-11-21 - rc23 audit (NGINX-DUP-1)
+- **One nginx config source.** `core/docker/nginx.conf.template` is the only
+  nginx config; the native twin `core/nginx/nginx.conf`, its drift checker
+  and the Windows rigs that needed `poc/` are gone (ADR-0001 addendum
+  2026-11-21). A twin kept in step by a drift diff cost 12 double changes
+  from 2026-10-01 to the 2026-11-20 audit, while the rigs that tested the
+  native side were untouched since 2026-10-01 and needed `poc/` to run:
+  the "tested source of truth" was a claim nothing re-proved.
+  Edit the template and run `sh core/tests/test-template-invariants.sh`.
+- **Retiring a twin: keep what the diff carried.** A drift diff also made
+  the copy inherit every behaviour test of the original. When the original
+  goes, pin those blocks as exact directive lists on the survivor (step 2g:
+  the Host allowlist, store-guard, nocache and BYPASS maps, `/depot/`,
+  `@miss`, `/tmp/`, the heartbeat) and list which behaviours lost their
+  live test (core/README.md "Testing", CORE-LIVE-PARITY-1) instead of
+  claiming coverage. Static includes the twin used become goldens of the
+  hooks' default renders (`core/docker/golden/`, cmp in the image build).
+- **No marker tokens in template comments.** The Dockerfile counts
+  `# VAULT_EVENT_LOG_LINE` (3) and `# VAULT_DEBUG_TP_LINE` (28) in the
+  template, and 25-/31- delete lines by those markers. Write "the event-log
+  marker" in prose, never the token itself (NGINX-DUP-1 header rewrite).

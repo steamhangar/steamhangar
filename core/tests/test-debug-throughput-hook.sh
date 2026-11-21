@@ -168,7 +168,7 @@ CONF
 }
 # AIO-DEFAULT-1b: `off` (the opt-out) leaves the file untouched, byte for byte
 tconf "$work/t0.conf"; cp "$work/t0.conf" "$work/t0.ref"
-out=$(VAULT_NGINX_AIO=off VAULT_NGINX_WORKERS= sh "$HOOK" "$work/t0.conf" 2>&1)
+out=$(VAULT_NGINX_AIO=off VAULT_NGINX_WORKERS='' sh "$HOOK" "$work/t0.conf" 2>&1)
 if cmp -s "$work/t0.conf" "$work/t0.ref"; then ok "tuning 'off': config byte-identical (aio opted out, workers unset)"; else bad "tuning 'off': config changed: $out"; fi
 printf '%s' "$out" | grep -q "VAULT_NGINX_AIO=off: no aio" && ok "tuning 'off': the opt-out is logged" || bad "tuning 'off': no opt-out log line: $out"
 # unset / empty / threads: aio threads right after 'http {', sendfile off,

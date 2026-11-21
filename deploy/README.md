@@ -71,7 +71,7 @@ deploy/
   review rounds. **The 4 failures were a genuine pre-existing bug in step
   5i**, unrelated to the packaging work package that finally ran it for
   real: nginx's cache-event `access_log` uses `buffer=64k flush=5s`
-  (`core/nginx/nginx.conf`), and step 5i grepped the log file immediately
+  (`core/docker/nginx.conf.template`), and step 5i grepped the log file immediately
   after the triggering request with no wait for that flush — an isolated
   repro confirmed the correct 9-field line appears once you wait past the
   5-second buffer (a fresh `docker run` of vault-core, one real MISS, and a
@@ -334,7 +334,7 @@ an RFC1918-or-loopback IPv4 address:
 For **each** candidate that resolves to a private/loopback IPv4, it sends
 `GET http://<ip>/lancache-heartbeat` and accepts the candidate only if the
 response carries `X-LanCache-Processed-By` — vault-core answers this at
-`core/nginx/nginx.conf`'s `/lancache-heartbeat` location with `steamhangar`.
+`core/docker/nginx.conf.template`'s `/lancache-heartbeat` location with `steamhangar`.
 It stops at the first candidate that passes. If none does, SteamPrefill
 quietly downloads straight from Valve instead: **the job still finishes and
 reports success, and the cache stays empty.** No error, no red job status —
@@ -1877,7 +1877,8 @@ sudo sh deploy/tests/verify-stack.sh
 Builds every image (`vault-core`, `vault-api`, `vault-proxy`, `vault-dns` —
 `vault-runner` reuses `vault-api`'s) and runs **204 checks** (measured
 2026-10-01) against real
-containers: the config-drift contract (both directions), **the web UI baked
+containers: the config-drift contract (both directions; since NGINX-DUP-1
+section 1 runs the template invariant check instead), **the web UI baked
 into the vault-api image and served from it with no bind mount involved**
 (packaging work package), all twelve env-forwarding-audit keys
 (`VAULT_EVENT_LOG_PATH`, `VAULT_MANIFEST_ORACLE` and the ten more B1 found —
@@ -1988,9 +1989,12 @@ It uses its own Compose project name and loopback-only, non-default ports, so
 it cannot touch a running deployment, and it removes its own containers and
 volumes afterwards. A recorded run is in `VERIFICATION-*.md` in this directory.
 
-Component-level tests live with their components: `core/tests/test-core.ps1`,
-`api/tests/` (pytest), `dns/tests/test-dnsmasq-config.ps1`, and
-`core/docker/check-config-drift.sh`.
+Component-level tests live with their components: `core/tests/` (the
+docker-free hook tests and `test-template-invariants.sh`, run by
+`.github/scripts/verify-core-nginx.sh`) and `api/tests/` (pytest). vault-dns
+has no component-level suite; section 7 here tests it live. The native
+Windows rigs (`core/tests/test-core.ps1`, `dns/tests/test-dnsmasq-config.ps1`)
+were retired by NGINX-DUP-1.
 
 **One check `verify-stack.sh` deliberately does NOT cover** (it never enters
 Steam credentials and this trap only shows up with a dedicated
@@ -2013,7 +2017,7 @@ as a comma list of the ids the transcript prints:
 | Value | Runs |
 | --- | --- |
 | unset, empty or `full` | everything (the nightly CI job sets `full` explicitly; the gate before a release tag runs `full`, per the plan) |
-| `lean` | `1,3,8,5a-5d,6a-6e`: config drift, compose rendering, the fail-fast guards, one stack start with the vault-core basics (health, heartbeat, temp paths, Host allowlist) and the vault-api basics (health, auth, mapping, shared volume, database volume). No Steam CDN or other internet step |
+| `lean` | `1,3,8,5a-5d,6a-6e`: config invariants, compose rendering, the fail-fast guards, one stack start with the vault-core basics (health, heartbeat, temp paths, Host allowlist) and the vault-api basics (health, auth, mapping, shared volume, database volume). No Steam CDN or other internet step |
 | `1` .. `11` | one whole section |
 | `5a`, `6i-core`, `4-settings`, `3.5-runner` ... | one step; step ids exist for sections 4, 5 and 6 |
 | `5a-5d`, `1-3` | a range in script order (steps within one section, or section numbers) |

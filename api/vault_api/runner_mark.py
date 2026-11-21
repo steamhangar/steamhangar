@@ -55,7 +55,7 @@ CANDIDATE_HOSTS = ("lancache.steamcontent.com", "localhost", "172.17.0.1")
 HEARTBEAT_PATH = "/lancache-heartbeat"
 HEARTBEAT_HEADER = "X-LanCache-Processed-By"
 
-#: vault-core answers the marker with this header (core/nginx/nginx.conf), so
+#: vault-core answers the marker with this header (core/docker/nginx.conf.template), so
 #: the runner can tell "logged" from an old core's 404.
 MARK_HEADER = "X-SteamHangar-Runner-Mark"
 

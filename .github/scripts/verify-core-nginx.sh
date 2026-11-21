@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # vault-core CI gate (WP 5.1): `nginx -t` against the RENDERED container
-# config, inside the exact pinned upstream nginx image -- never against
-# core/nginx/nginx.conf directly, since that native-dev file is not what the
-# container actually runs (see core/README.md "The Docker image").
+# config, inside the exact pinned upstream nginx image -- the template
+# core/docker/nginx.conf.template is the one config source since
+# NGINX-DUP-1 (the native core/nginx/nginx.conf is retired; see
+# core/README.md "The Docker image").
 #
 # Explicitly OUT of scope here (per the WP 5.1 brief): no `docker build` of
 # any SteamHangar image (that would start crossing into image-publishing
@@ -38,7 +39,7 @@
 # (actions/runner-images). No local Docker is required to develop this
 # script -- it was written and read-reviewed without Docker (none available
 # on the dev machine, a standing constraint noted in docs/LEARNINGS.md /
-# memory) and is therefore CI-only verified beyond the drift check below;
+# memory) and is therefore CI-only verified beyond the docker-free checks below;
 # see the WP 5.1 coder report for what *was* verified locally.
 set -euo pipefail
 
@@ -55,10 +56,11 @@ for f in "$dockerfile" \
          "$core_dir/docker/27-vault-upstream-rate.sh" \
          "$script_dir/tls-sni-probe.sh" \
          "$script_dir/tls-preflight-tamper.cases" \
-         "$core_dir/nginx/vault-upstream-rate.conf" \
+         "$core_dir/docker/golden/vault-upstream-rate.conf" \
          "$core_dir/docker/28-vault-upstream-pool.sh" \
-         "$core_dir/nginx/vault-upstream-pool.conf" \
-         "$core_dir/nginx/vault-upstream-cap.conf" \
+         "$core_dir/docker/golden/vault-upstream-pool.conf" \
+         "$core_dir/docker/golden/vault-upstream-cap.conf" \
+         "$core_dir/docker/golden/vault-settings-generation.conf" \
          "$core_dir/tests/test-upstream-pool-hook.sh" \
          "$core_dir/tests/test-tls-caps-hook.sh" \
          "$core_dir/docker/29-vault-build-version.sh" \
@@ -74,7 +76,7 @@ for f in "$dockerfile" \
          "$core_dir/docker/40-vault-preflight.sh" \
          "$core_dir/docker/45-vault-eventlog-rotate.sh" \
          "$core_dir/tests/test-eventlog-rotate-hook.sh" \
-         "$core_dir/docker/check-config-drift.sh" \
+         "$core_dir/tests/test-template-invariants.sh" \
          "$core_dir/docker/vault-settings-lib.sh" \
          "$core_dir/docker/15-vault-settings.envsh" \
          "$core_dir/docker/47-vault-settings-watch.sh" \
@@ -85,27 +87,49 @@ for f in "$dockerfile" \
     [ -f "$f" ] || { echo "missing expected file: $f" >&2; exit 1; }
 done
 
-# --- 0a. every COPY from nginx/ survives core/.dockerignore ------
-# A new file that is COPY-ed but not un-ignored passes every docker-free
-# check and only fails in the image build ("not found" in the build context;
-# CORE-FIX-4a vault-upstream-cap.conf). Docker-free, so it fails fast.
+# --- 0a. every COPY source is in the build context --------------------------
+# A file that is COPY-ed but excluded by core/.dockerignore passes every
+# docker-free check and only fails in the image build ("not found" in the
+# build context; CORE-FIX-4a vault-upstream-cap.conf). Since NGINX-DUP-1 the
+# image COPYs from docker/ only (the goldens moved to docker/golden/), and no
+# .dockerignore pattern may match a COPY source or one of its parent
+# directories. Matched with bash patterns, where `*` also crosses `/`: that
+# is stricter than Docker's own matching, never looser, and `!` re-includes
+# are not honoured (an image input must simply not be excluded). Docker-free,
+# fails fast.
+copy_srcs=()
 while read -r _copy src _rest; do
-    # Only nginx/ is excluded wholesale (core/.dockerignore); a COPY from it
-    # needs its own "!" line.
-    case "$src" in nginx/*) ;; *) continue ;; esac
-    if ! grep -qxF "!$src" "$core_dir/.dockerignore"; then
-        echo "FAIL: Dockerfile COPYs '$src' but core/.dockerignore has no '!$src' line (the build context would not contain it)" >&2
-        exit 1
-    fi
+    copy_srcs+=("$src")
+    case "$src" in
+        docker/*) [ -e "$core_dir/$src" ] || { echo "FAIL: Dockerfile COPYs '$src', which does not exist" >&2; exit 1; } ;;
+        *) echo "FAIL: Dockerfile COPYs '$src' from outside core/docker/ (keep every image input under docker/, see core/.dockerignore)" >&2; exit 1 ;;
+    esac
 done < <(grep -E '^COPY [^ ]+ ' "$dockerfile")
+while IFS= read -r pat || [ -n "$pat" ]; do
+    pat=${pat%$'\r'}
+    case "$pat" in ''|'#'*|'!'*) continue ;; esac
+    pat=${pat#/}; pat=${pat%/}; pat=${pat//\*\*/*}
+    for src in "${copy_srcs[@]}"; do
+        p=$src
+        while :; do
+            # shellcheck disable=SC2053  # $pat is a pattern on purpose
+            if [[ $p == $pat ]]; then
+                echo "FAIL: core/.dockerignore pattern '$pat' matches '$p', which holds the image input '$src'" >&2
+                exit 1
+            fi
+            case "$p" in */*) p=${p%/*} ;; *) break ;; esac
+        done
+    done
+done < "$core_dir/.dockerignore"
+[ "${#copy_srcs[@]}" -gt 0 ] || { echo "FAIL: no COPY line found in $dockerfile" >&2; exit 1; }
 
-# --- 0. drift check first (S3): pure POSIX, no Docker, ~1s -----------------
-# Fails fast and cheaply if the container template has silently diverged
-# from the reviewed, real-CDN-tested native config (core/README.md "The
-# Docker image") -- no point spending a docker pull/run cycle validating a
+# --- 0. template invariants first (S3): pure POSIX, no Docker, ~1s ---------
+# Fails fast and cheaply if the one config source broke a pinned invariant
+# (the successor of the retired native-vs-template drift check, see the
+# script's header) -- no point spending a docker pull/run cycle validating a
 # rendered config that already failed this much narrower, much faster check.
-echo "--- core/docker/check-config-drift.sh ---"
-sh "$core_dir/docker/check-config-drift.sh"
+echo "--- core/tests/test-template-invariants.sh ---"
+sh "$core_dir/tests/test-template-invariants.sh"
 
 # --- 0b. the upstream keepalive pool hook, docker-free (WP CORE-FEAT-1b) ---
 # ADR-0017: renders VAULT_UPSTREAM_POOL_HOSTS lists through the real
@@ -170,22 +194,22 @@ bash "$core_dir/tests/test-root-only-dir.sh"
 # --- 0c. ADR-0017 decision 5A: the upstream rate cap stays in @miss --------
 # The keepalive pool (WP CORE-FEAT-1b) ships with the cap untouched, and the
 # ADR asks for a CI assertion that `proxy_limit_rate $vault_upstream_rate;`
-# is still inside location @miss in BOTH config files. The drift guard
-# (step 0, 2b) pins the same line and 2d pins the pool include's place
-# directly after the rate include -- neither is repeated here beyond this
-# one named assertion, docker-free, so a moved cap fails under the ADR's
-# own name.
+# is still inside location @miss of the config (both copies until
+# NGINX-DUP-1, the template alone since). core/tests/test-template-invariants.sh
+# (step 0, 2b and the exact @miss list in 2g) pins the same line and 2d pins
+# the pool include's place directly after the rate include -- neither is
+# repeated here beyond this one named assertion, docker-free, so a moved cap
+# fails under the ADR's own name.
 echo "--- ADR-0017 decision 5A: proxy_limit_rate \$vault_upstream_rate stays in @miss ---"
-for f in "$core_dir/nginx/nginx.conf" "$core_dir/docker/nginx.conf.template"; do
-    n=$(grep -v '^[[:space:]]*#' "$f" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]][[:space:]]*/ /g' \
-        | awk '/^location @miss [{]$/ { f = 1 } f { print; d += gsub(/[{]/, "&") - gsub(/[}]/, "&"); if (d <= 0) exit }' \
-        | grep -c -x -F "proxy_limit_rate \$vault_upstream_rate;" || true)
-    if [ "$n" != "1" ]; then
-        echo "FAIL (ADR-0017 decision 5A): 'proxy_limit_rate \$vault_upstream_rate;' found $n times inside location @miss of $f, expected exactly 1" >&2
-        exit 1
-    fi
-    echo "decision 5A OK: proxy_limit_rate \$vault_upstream_rate; exactly once in @miss of ${f#"$repo_root"/}"
-done
+f="$core_dir/docker/nginx.conf.template"
+n=$(grep -v '^[[:space:]]*#' "$f" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]][[:space:]]*/ /g' \
+    | awk '/^location @miss [{]$/ { f = 1 } f { print; d += gsub(/[{]/, "&") - gsub(/[}]/, "&"); if (d <= 0) exit }' \
+    | grep -c -x -F "proxy_limit_rate \$vault_upstream_rate;" || true)
+if [ "$n" != "1" ]; then
+    echo "FAIL (ADR-0017 decision 5A): 'proxy_limit_rate \$vault_upstream_rate;' found $n times inside location @miss of $f, expected exactly 1" >&2
+    exit 1
+fi
+echo "decision 5A OK: proxy_limit_rate \$vault_upstream_rate; exactly once in @miss of ${f#"$repo_root"/}"
 
 # --- S2: derive the pinned image ref from core/Dockerfile itself -----------
 # Round 1 duplicated the tag+digest as a literal in this script -- a bump to
@@ -250,7 +274,7 @@ docker pull "$IMAGE"
 # turns them into dynamic modules fails here, before any render.
 echo "--- nginx -V: stream + ssl_preread compiled in statically ---"
 nginx_v=$(docker run --rm --network none --entrypoint nginx "$IMAGE" -V 2>&1)
-printf '%s\n' "$nginx_v" | head -n 1
+printf '%s\n' "${nginx_v%%$'\n'*}"   # first line, no pipe: head exiting early SIGPIPEs printf under pipefail
 for want in "--with-stream " "--with-stream_ssl_preread_module"; do
     case "$nginx_v" in
         *"$want"*) echo "module OK: $want" ;;
@@ -718,8 +742,8 @@ render_and_test() {
 
             # --- WP CORE-FEAT-1b2 (ADR-0017): the upstream keepalive pool --
             # The include is wired in the RENDERED config (its place directly
-            # after the rate include is pinned in both source files by the
-            # drift guard, step 2d -- not repeated here), and
+            # after the rate include is pinned in the template by
+            # core/tests/test-template-invariants.sh, step 2d -- not repeated here), and
             # 28-vault-upstream-pool.sh rendered the group file for this
             # scenario'"'"'s VAULT_UPSTREAM_POOL_HOSTS: N upstream blocks, N
             # `server <host> resolve max_fails=0;`, N `keepalive 8;`, N

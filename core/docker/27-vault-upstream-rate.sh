@@ -51,14 +51,14 @@
 #     connection-count map with a positive default. It is not a full
 #     independent re-derivation of the render.
 # With no cap configured the file still defines $vault_upstream_rate (= 0,
-# unlimited), so the directive in nginx.conf is always present and the
-# native core/nginx/nginx.conf can carry the identical lines (its static
-# core/nginx/vault-upstream-rate.conf is byte-for-byte this script's cap-off
-# output -- check-config-drift.sh asserts that).
+# unlimited), so the directive in nginx.conf is always present. The cap-off
+# output is committed as core/docker/golden/vault-upstream-rate.conf;
+# core/tests/test-template-invariants.sh asserts the two are identical
+# (comments aside).
 #
 # Usage: 27-vault-upstream-rate.sh [output-file]
-#   (no argument when run by docker-entrypoint.sh; the drift check passes a
-#   temp path to compare the cap-off render against the native file)
+#   (no argument when run by docker-entrypoint.sh; the template invariant
+#   test passes a temp path to compare the cap-off render with the golden)
 #
 # POSIX sh (busybox ash in the image, dash in CI); no bashisms.
 
@@ -75,7 +75,7 @@ DIVISOR_VAR='$connections_writing'
 # One bucket per possible connection: nginx.conf pins worker_processes 1 and
 # worker_connections 1024, so $connections_writing can never exceed 1024 and
 # every live count has its own exact bucket -- no count can fall through to
-# the default and overshoot the total. check-config-drift.sh asserts
+# the default and overshoot the total. core/tests/test-template-invariants.sh asserts
 # BUCKETS >= worker_processes x worker_connections, so raising either in the
 # template without raising this fails CI. The default only covers a count of
 # 0 (e.g. a variable evaluated in the log phase).

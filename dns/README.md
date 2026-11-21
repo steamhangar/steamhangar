@@ -20,9 +20,7 @@ Deployment instructions: `deploy/README.md`.
 ```
 dns/
 ├── dnsmasq.conf.template   # the config, with ${VAR} placeholders (see below)
-├── tests/
-│   ├── test-dnsmasq-config.ps1   # entry point: renders + validates the template
-│   └── functional-check.sh        # WSL2-side helper invoked by the .ps1 above
+├── Dockerfile, docker-entrypoint.sh   # the image (WP 1.9)
 └── README.md                      # this file
 ```
 
@@ -359,22 +357,18 @@ implements):
 
 ## Validating the template
 
-```powershell
-dns\tests\test-dnsmasq-config.ps1
-```
+`deploy/tests/verify-stack.sh` section 7 builds the image, refuses a
+missing or malformed `CACHE_IP` (7a, 7b), starts the `dns` profile and
+checks the rendered config live: a realistic Steam CDN edge hostname and
+an arbitrary `*.steamcontent.com` subdomain both answer the cache IP (7e),
+AAAA answers NODATA (7f, ADR-0001 requirement 6), everything else is
+forwarded upstream (7g), and the healthcheck passes (7h). The image build
+itself runs the installed dnsmasq binary once.
 
-Renders the template with test placeholder values and runs
-`dnsmasq --test` against the result inside WSL2 (dnsmasq 2.92 is already
-installed there from Phase 0's `poc/linux-client-test/wsl-setup.sh`) to
-confirm it's syntactically valid. Optionally also runs a short-lived,
-throwaway dnsmasq instance on a non-standard port to prove the rendered
-config actually behaves correctly -- for both an arbitrary synthetic
-`*.steamcontent.com` subdomain and a realistic Steam CDN edge hostname
-(`cache2-ams1.steamcontent.com`, the same one `core/tests/test-core.ps1`
-and `poc/linux-client-test/scenario-b.sh` use): A -> cache IP, AAAA ->
-NODATA -- see the script's header comment for exactly how it avoids
-touching the live scenario-B dnsmasq instance that may already be running
-in WSL2 on port 53.
+The WP 1.8 Windows rig (`dns/tests/test-dnsmasq-config.ps1` plus its WSL2
+helper `functional-check.sh`, `dnsmasq --test` and the same A/AAAA checks
+against a throwaway WSL2 dnsmasq) was retired by NGINX-DUP-1 (rc23):
+it needed `poc/`'s WSL2 setup and duplicated section 7.
 
 ## What this work package does NOT cover
 

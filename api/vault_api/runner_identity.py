@@ -92,7 +92,7 @@ from datetime import datetime, timedelta, timezone
 
 from vault_api.jobs import parse_utc_iso, to_utc_iso
 
-#: The path prefix vault-core logs as a runner marker (core/nginx/nginx.conf,
+#: The path prefix vault-core logs as a runner marker (core/docker/nginx.conf.template,
 #: ``location ^~ /steamhangar/runner-mark/``). The token follows it.
 MARK_PATH_PREFIX = "/steamhangar/runner-mark/"
 

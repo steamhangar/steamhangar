@@ -257,9 +257,11 @@ def _server_80_block(text: str) -> str:
 
 
 @pytest.mark.parametrize(
-    "path", ["core/docker/nginx.conf.template", "core/nginx/nginx.conf"]
+    # One config source since NGINX-DUP-1 (the native core/nginx/nginx.conf
+    # is retired).
+    "path", ["core/docker/nginx.conf.template"]
 )
-def test_s6_catch_all_location_in_both_configs(path: str) -> None:
+def test_s6_catch_all_location_in_the_config(path: str) -> None:
     text = (REPO_ROOT / path).read_text(encoding="utf-8")
     block = _server_80_block(text)
     code = "\n".join(ln.split("#", 1)[0].rstrip() for ln in block.splitlines())

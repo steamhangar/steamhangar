@@ -5,105 +5,99 @@ Phase-0 PoC (`poc/conf/nginx.conf`, frozen as evidence) plus the four
 binding production requirements discovered there and recorded in
 [`docs/adr/0001-proxy-store-feasibility.md`](../docs/adr/0001-proxy-store-feasibility.md).
 
-This file started as the WP 1.1 config README; the config is still
-runnable natively on Windows for development exactly like the PoC was. The
-container image arrived with WP 1.9 -- see "The Docker image" below.
+This file started as the WP 1.1 config README. The container image arrived
+with WP 1.9 -- see "The Docker image" below. Since NGINX-DUP-1 (rc23,
+ADR-0001 addendum 2026-11-21) the image template
+`core/docker/nginx.conf.template` is the **only** nginx config: the native
+Windows twin `core/nginx/nginx.conf`, its drift checker and the Windows
+rigs that ran it are retired (see "Testing" below for where their checks
+went).
 
 ## Files
 
 ```
 core/
-├── nginx/
-│   ├── nginx.conf                        # the config itself
-│   └── vault-upstream-rate.conf          # static "no cap" include (see "Upstream rate cap")
+├── Dockerfile
+├── docker/
+│   ├── nginx.conf.template               # THE config (rendered at container start)
+│   ├── NN-vault-*.sh, 15-vault-settings.envsh, vault-settings-lib.sh   # start hooks
+│   └── golden/                           # committed default renders of the hooks (see "Testing")
 ├── tools/throughput-report.py             # throughput debug log analysis (see "Throughput debug log")
 ├── tests/
-│   ├── test-core.ps1                     # automated suite, runs against the real Steam CDN
-│   ├── fixtures/
-│   │   ├── retry-regression.conf         # local throwaway rig for the B1 retry regression
-│   │   └── eventlog-off.conf             # cache-event log OFF rig (WP 3.10 test group)
-│   └── mvp/                              # MVP run script + recorded results (evidence)
-├── Dockerfile, docker/                   # the container image -- see "The Docker image"
+│   ├── test-template-invariants.sh       # docker-free invariants of the template (see "Testing")
+│   ├── test-*.sh, *-rig.sh, test_throughput_report.py   # docker-free hook tests and race rigs
+│   ├── fixtures/                         # settings grammar table, throughput sample log
+│   └── mvp/                              # WP 1.7 MVP results (historical evidence, see mvp/README.md)
 └── README.md                              # this file
 ```
 
-`core/cache/`, `core/logs/`, `core/tmp/`, `core/_testcore_tmp/` are created
-at runtime (by `test-core.ps1`, idempotently) and gitignored -- see the
-repo root `.gitignore`.
-
 ## ADR-0001 requirement -> config mapping
 
-| # | Requirement | Where in `core/nginx/nginx.conf` |
+| # | Requirement | Where in `core/docker/nginx.conf.template` |
 |---|---|---|
 | 1 | LanCache heartbeat contract | `location = /lancache-heartbeat` (bottom of the `server` block) |
 | 2 | Strip client `Range`/`Accept-Encoding`/`If-Range` upstream + store only 200 (incl. retry lists) | `proxy_set_header Range/Accept-Encoding/If-Range ""` in `@miss`; `map $upstream_status $vault_store_path` (`200` or `"~, 200$"` -> real path, else empty) feeding `proxy_store $vault_store_path` |
 | 3 | `?nocache=1` bypass | `map $arg_nocache $vault_try_target` (forces `try_files` onto a guaranteed-missing path) used by `location /depot/` |
-| 4 | Client-Host upstream, resolver, timeouts, retry, abuse guard | `resolver 1.1.1.1 ipv6=off valid=30s`; `map $host $vault_upstream_host` (full-match Steam hostnames, else empty) + `map $vault_upstream_host $vault_host_allowed`; `proxy_connect_timeout 3s`; `proxy_next_upstream error timeout http_502 http_503 http_504` with `proxy_next_upstream_tries 2` (at most one retry, none when the name resolves to a single address: nginx zeroes `tries` for a single-peer group; `error` dropped by WP CORE-FIX-2 and restored by WP CORE-FEAT-1b2 for the keepalive pool, ADR-0017 decision 6A, whose stale-pooled-connection case keeps its one free retry); the `if ($vault_host_allowed = 0) { return 403; }` guard in `@miss` |
+| 4 | Client-Host upstream, resolver, timeouts, retry, abuse guard | `resolver ${VAULT_RESOLVER} ipv6=off valid=30s` (default 1.1.1.1); `map $host $vault_upstream_host` (full-match Steam hostnames, else empty) + `map $vault_upstream_host $vault_host_allowed`; `proxy_connect_timeout 3s`; `proxy_next_upstream error timeout http_502 http_503 http_504` with `proxy_next_upstream_tries 2` (at most one retry, none when the name resolves to a single address: nginx zeroes `tries` for a single-peer group; `error` dropped by WP CORE-FIX-2 and restored by WP CORE-FEAT-1b2 for the keepalive pool, ADR-0017 decision 6A, whose stale-pooled-connection case keeps its one free retry); the `if ($vault_host_allowed = 0) { return 403; }` guard in `@miss` |
 
 (`Accept-Encoding`/`If-Range` stripping and the `"~, 200$"` retry-list
 match were added in a review-fix pass after the initial WP 1.1 submission
 -- see "Store guard" and the Accept-Encoding note below for why.)
 
 Every requirement also has an inline comment at its implementation site in
-`nginx.conf` explaining the *why*, not just the *what* -- this file is the
+the template explaining the *why*, not just the *what* -- this file is the
 map/index, not a duplicate of that reasoning.
 
-## Running it natively (development)
+## Testing
 
-Same prefix trick as the PoC, and the **same nginx.exe binary** -- no
-separate download/setup script exists under `core/` on purpose, to avoid
-shipping a second copy of a 2.7 MB zip for a config that reuses the exact
-same nginx build:
+All of it runs against the template and the image, on Linux:
 
-```powershell
-poc\nginx\nginx.exe -p <repo>\core -c nginx\nginx.conf
-```
+- **Docker-free:** `sh core/tests/test-template-invariants.sh` plus the hook
+  tests in `core/tests/`. Its exact pins compare directive lines with any
+  trailing comment kept (the marker comments must survive), so a comment
+  added at the end of a pinned directive fails on purpose. `.github/scripts/verify-core-nginx.sh` runs them
+  all first, then renders the template through the real entrypoint chain
+  in the pinned nginx image for every scenario and runs `nginx -t`, the
+  request-guard and Host-allowlist probes and the live offline rigs (CI job
+  `core / nginx -t`; on the dev host `dev.sh test-core`).
+- **Image build:** `core/Dockerfile` re-checks the hooks in the image's own
+  shell and compares their default renders with `core/docker/golden/`
+  byte for byte.
+- **Live stack:** `deploy/tests/verify-stack.sh` (section 1 runs the
+  invariant check and proves it catches an injected change; sections 5 and
+  10 talk to the real Steam CDN and to a fake edge).
 
-All relative paths in `nginx.conf` (`root cache`, `logs/access.log`, the
-temp paths) resolve against the `-p` prefix, so this creates/uses
-`core/cache/`, `core/logs/` -- entirely separate from `poc/cache/`,
-`poc/logs/`. `core/tests/test-core.ps1` does exactly this (see below).
+`test-template-invariants.sh` replaced `core/docker/check-config-drift.sh`.
+It keeps every check that check made about the template, the hooks and
+the goldens, under the same step numbers (1b, 2-2f, plus the Dockerfile
+marker counts), and adds step 2g: exact directive lists for every map the
+cache path and the event log key on, for the port-80 server's own
+directives and location list and for each of its locations, plus the total
+`access_log` count (12) -- the blocks whose behaviour the retired native rig
+`core/tests/test-core.ps1` proved against the real CDN (WP 1.1, 3.10).
+Where each of its 15 groups lives now:
 
-**Port 443 (WP CORE-FIX-3):** the native config also runs the HTTPS
-passthrough (`stream {}` block, see "HTTPS passthrough on port 443"), so
-natively port 443 must be free as well; nginx refuses to start otherwise.
+| Native rig group | Now covered by |
+|---|---|
+| 1 heartbeat | verify-stack 5b; verify-core-nginx guard probe; 2g heartbeat block |
+| 2 MISS -> store -> HIT, byte-identical | verify-stack 5e (real CDN, sha256 of MISS, HIT and the stored file) |
+| 3 Range stripped upstream | 2g `@miss` list (`Range ""`); no live test |
+| 4 `?nocache=1` bypass | verify-stack 5f; 2g nocache map |
+| 5 Host allowlist reject | verify-stack 5d; verify-core-nginx SEC-FIX-1 Host matrix; 2g allowlist maps |
+| 6 Host pass-through to its own edge | verify-stack 10c/10d (legacy per-name mode) and 10g (edge mode, the default) |
+| 7 retried `502, 200` still stored | 2g store-guard map; no live test |
+| 8 gzip not stored raw | 2g `@miss` list (`Accept-Encoding ""`); no live test |
+| 9 temp files not web-reachable | verify-stack 5c; 2g `/tmp/` block, `proxy_temp_path` pin |
+| 10 event log MISS line | verify-stack 5i (9 fields, v1, MISS, 200) |
+| 11 nocache typed BYPASS | 2g event-status map; no live test |
+| 12 heartbeat writes no event line | 2g heartbeat block, server-level directive list and total `access_log` count (no event log it could inherit); no live test |
+| 13 hostile URI stays one 9-field line | 1b literal tabs, 2g `escape=default` and the `(?s)` URI map; vault-api's sweeper defends the parse too |
+| 14 event log off: no file, `nginx -t` green | verify-core-nginx "cache-event log OFF" render; the shipped stack runs with it off |
+| 15 rate-cap prerequisites of the native binary | not applicable to the image; verify-core-nginx's live offline rate rig evaluates `$vault_upstream_rate` in the pinned image |
 
-**Port 80 contention:** only one nginx can listen on port 80 at a time.
-The PoC's own nginx may already be running (a live Steam client can be
-using it as its cache right now). `test-core.ps1` handles this automatically:
-stops whatever is running, runs vault-core's config for the test window,
-then stops it again and restarts the PoC's nginx via `poc/start.ps1` --
-the machine is left exactly as it was found. `poc/` itself is never
-modified.
-
-## Running the test suite
-
-```powershell
-core\tests\test-core.ps1
-```
-
-Runs against the real Steam CDN (known-good test object: depot `70403`,
-chunk `773d10050d99b2544665873ec2125b3bf273e8b2`, the same one used
-throughout `poc/`). Exit code 0 = pass, 1 = fail. As of the review-fix pass,
-the suite has 15 test groups: health, heartbeat, smoke MISS/HIT,
-Range-strip guard, nocache bypass, Host allowlist reject + pass-through,
-three regressions added for the WP 1.1 review findings -- B1 retry-list
-storage (own local fixture, `core/tests/fixtures/retry-regression.conf`),
-S2 Accept-Encoding/gzip MISS+HIT byte-identity, and S3 `/tmp/proxy/...`
-returning 404 -- plus five cache-event-log groups (WP 3.10: MISS/HIT
-lines, nocache BYPASS, no heartbeat line, hostile URI escaping, feature OFF
-via `core/tests/fixtures/eventlog-off.conf`). CI only parse-checks this
-suite (it needs the real CDN); the pre-freeze request guards below are
-exercised live, offline, by `.github/scripts/verify-core-nginx.sh`.
-
-**Every `/depot/` request in the suite sends an explicit `Host` header**
-naming a real Steam CDN hostname. This isn't incidental: it mirrors how
-this server is actually used in production (a DNS- or hosts-file-redirected
-Steam client always connects with a genuine `*.steamcontent.com` /
-`*.steamserver.net` Host). `curl`/`Invoke-WebRequest`'s own default Host
-(`127.0.0.1`) is exactly the kind of Host the allowlist guard (requirement
-4) is designed to reject -- so it cannot be used for the suite's
-positive-path tests, by design, not by oversight.
+The "no live test" rows were proven once on the native rig and are now
+held by exact config pins only; a live offline rig for them is roadmap
+item CORE-LIVE-PARITY-1.
 
 ## Store guard: what nginx does on its own, and what the map actually adds
 
@@ -147,10 +141,11 @@ isolated two-backend rig (one always-502, one always-200, `upstream {}` +
 `proxy_next_upstream`) during the review-fix pass: the buggy map (bare
 `200` only) left the object uncached after a successful retry; the fixed
 map (bare `200` plus `"~, 200$"`, matching "last attempt in the list was
-200") stored it correctly. `core/tests/test-core.ps1` test 7 encodes this
-exact regression against a checked-in fixture
-(`core/tests/fixtures/retry-regression.conf`), not just the real CDN
-(which cannot be made to fail on demand).
+200") stored it correctly. The retired native rig (`core/tests/test-core.ps1`
+test 7, NGINX-DUP-1) encoded this exact regression against a checked-in
+two-backend fixture, not just the real CDN (which cannot be made to fail on
+demand). Today `core/tests/test-template-invariants.sh` step 2g pins the map
+as an exact directive list; a live rig is roadmap item CORE-LIVE-PARITY-1.
 
 **2. Redirect bodies (301/302).** Own follow-up finding, not yet
 independently reproduced against a real Steam CDN redirect (none was
@@ -174,14 +169,14 @@ one part of this guarantee that's actually ours to keep correct -- which is
 exactly what the B1 bug (point 1) was: an *our-own-code* bug, not an nginx
 behavior surprise.
 
-`core/tests/test-core.ps1`'s Range-strip guard test (cold object + a real
-`Range: bytes=0-1023` header against the real Steam CDN) still asserts the
+The retired native rig's Range-strip guard test (cold object + a real
+`Range: bytes=0-1023` header against the real Steam CDN) asserted the
 stored file is the complete object, but as noted before, the real CDN
 (like nginx's own unguarded behavior) never actually answers with a 206
 once Range is stripped -- so that test alone proves the *Range-strip*, not
 the *store-path map*, is doing the work for that particular scenario. The
-retry-rig regression (point 1) is what actually exercises the map's own
-behavior end-to-end.
+retry-rig regression (point 1) is what exercised the map's own behavior
+end-to-end.
 
 **What the client receives for a Range request on a cold object:** with
 Range stripped upstream, the upstream always answers 200 (full body) --
@@ -231,9 +226,11 @@ to always answer identity (uncompressed), so the stored bytes and the
 served bytes always agree. `If-Range` is stripped alongside it for the
 same reason `Range` already was: a conditional-range header only makes
 sense paired with a `Range` request, and `Range` is already gone.
-`core/tests/test-core.ps1` test 8 sends `Accept-Encoding: gzip` on both a
-cold and a warm request against the real Steam CDN and asserts both
-bodies are byte-identical to ground truth.
+The retired native rig's test 8 sent `Accept-Encoding: gzip` on both a
+cold and a warm request against the real Steam CDN and asserted both
+bodies byte-identical to ground truth; today the three stripped headers
+are pinned in the exact `@miss` list of
+`core/tests/test-template-invariants.sh`.
 
 ## Temp files must never be web-reachable (S3 fix)
 
@@ -251,8 +248,8 @@ maps onto them at all -- moving the problem out of existence rather than
 trying to block it after the fact. A second, independent layer
 (`location ^~ /tmp/ { return 404; }`) is kept anyway as defense-in-depth,
 in case a future edit ever reintroduces a temp dir under `cache/` again.
-`core/tests/test-core.ps1` test 9 asserts `GET /tmp/proxy/whatever` returns
-404.
+`deploy/tests/verify-stack.sh` step 5c asserts `GET /tmp/proxy/anything`
+returns 404.
 
 **Catch-all (SEC-HARDEN-1, audit S-6):** `root cache;` used to serve any
 file under `cache/` to a request that no location took, so a stray file
@@ -450,8 +447,8 @@ an upstream 502/503/504. On Linux, with `proxy_connect_timeout 3s`, a
 black-holed IP is a `timeout` (3s per attempt, so it cannot spin). The
 Phase 0 dead-IP stalls on Windows were logged as 502 `error`s instead,
 because the OS connect timeout of about 21s fired before nginx's; that does
-not apply in the container. Pinned by `core/docker/check-config-drift.sh`
-step 2c as the exact line, in `@miss`, in both config files, with no second
+not apply in the container. Pinned by `core/tests/test-template-invariants.sh`
+step 2c as the exact line, in `@miss`, with no second
 `proxy_next_upstream*` line anywhere else.
 
 What this work package did **not** independently re-verify: whether
@@ -477,8 +474,8 @@ for WHY it exists (feeding WP 3.11's miss-triggered prefill completion and
 per-client bypass detection without making vault-core's serving path depend
 on vault-api being alive) -- this section documents the format and the
 decisions pinned by evidence gathered for this work package. The reasoning
-also lives as comments at the implementation site in `core/nginx/nginx.conf`
-/ `core/docker/nginx.conf.template` (search for "WP 3.10").
+also lives as comments at the implementation site in
+`core/docker/nginx.conf.template` (search for "WP 3.10").
 
 ### Format
 
@@ -527,10 +524,12 @@ log line, **not** as a real tab or newline. The only real tab bytes on the
 line are the ones the `log_format` string itself inserts between fields, so
 a naive tab-split in WP 3.11's sweeper always gets exactly 9 fields.
 
-**Pinned empirically** (`core/tests/test-core.ps1`, WP 3.10 test group):
-a request whose path contains `%09%22%0A%C3%A9` (encoded tab, quote,
-newline, and a non-ASCII UTF-8 character) still produces an event-log line
-that splits into exactly 9 tab-separated fields with field 1 == `v1`.
+**Pinned empirically** (the retired native rig `core/tests/test-core.ps1`,
+WP 3.10 test group): a request whose path contains `%09%22%0A%C3%A9`
+(encoded tab, quote, newline, and a non-ASCII UTF-8 character) produced an
+event-log line that split into exactly 9 tab-separated fields with field 1
+== `v1`. Since NGINX-DUP-1 `core/tests/test-template-invariants.sh` holds
+the config side (`escape=default`, the literal tabs, the `(?s)` URI map).
 
 ### Cache-status truth: not `$upstream_status`, not `$upstream_cache_status`
 
@@ -596,7 +595,7 @@ stored in the shared database first
 (`api/vault_api/runner_identity.py`); a LAN host requesting the path
 changes nothing. Older vault-api builds skip the line (`bad-cache-status`).
 It is the third `vault_event` directive, so the event-log ON render has
-three (`.github/scripts/verify-core-nginx.sh`, `check-config-drift.sh`),
+three (`.github/scripts/verify-core-nginx.sh`, `core/tests/test-template-invariants.sh`),
 and the CI script checks the 204, the header and the logged line live.
 
 ### Performance: `buffer=64k flush=5s`
@@ -608,10 +607,10 @@ or 5 seconds have elapsed since the last flush, whichever comes first.
 for up to 5 seconds after the request that produced it. The sweeper's
 cadence (WP 3.5, coarser than seconds) already tolerates this trivially --
 but a same-second "did the sweeper see this MISS yet" test or expectation
-would be flaky against a live server; don't write one. (`test-core.ps1`'s
-event-log tests read the file directly after the request completes and are
-therefore unaffected -- flush latency only matters for a process reading
-the file concurrently with traffic, which is exactly WP 3.11's situation.)
+would be flaky against a live server; don't write one. (Any test that
+reads the file right after its own request must wait for the line, as
+`deploy/tests/verify-stack.sh` step 5i does with a bounded poll; see
+`docs/learnings/testing.md`.)
 
 ### Rotation and the USR1 contract
 
@@ -759,12 +758,10 @@ a small additional entrypoint hook,
   hard-linked file on its name is refused (it can only have been planted
   before the volume was migrated).
 
-`core/docker/check-config-drift.sh` was extended with a 6th recognized
-delta for the two event-log lines (native: hardcoded ON at
-`logs/event.log`, since native dev mode has no runtime env-var mechanism
-and is never the deployed target anyway; container: the `${VAULT_EVENT_LOG}`
-placeholder) -- everything else about the two lines must stay
-byte-identical, same contract as the other five deltas.
+The event-log lines carry the `${VAULT_EVENT_LOG}` placeholder and the
+marker comment; `core/tests/test-template-invariants.sh` pins their exact
+form and count (three since WP D15-RUNNER). (Until NGINX-DUP-1 the retired
+drift check treated them as its 6th native-vs-container delta.)
 
 **Since closed:** `.github/scripts/verify-core-nginx.sh` (CI, and locally
 via the dev wrapper) now renders the real image for both states, asserts
@@ -780,7 +777,7 @@ work package's environment had no Docker and could not run the actual
 image end-to-end. The `25-vault-eventlog.sh` sed/validation logic was
 verified directly against synthetic rendered-config fixtures under
 `sh` (both the empty and non-empty paths, plus rejecting a relative path
-and an injection attempt), and `check-config-drift.sh` was verified to both
+and an injection attempt), and the then drift check was verified to both
 pass on the real files and fail on an injected mismatch -- but the full
 `envsubst` render -> `25-vault-eventlog.sh` -> `40-vault-preflight.sh` ->
 `nginx -t` chain inside the real Alpine image was not independently
@@ -810,13 +807,6 @@ limits are tunable per deployment (`VAULT_LOG_MAX_SIZE` /
 ("Logs and rotation"). Verified applied to the running containers in
 `deploy/VERIFICATION-*.md` (step 5h).
 
-**Windows-native (dev):** no logrotate equivalent is set up for local
-development -- logs simply accumulate under `core/logs/`. Since this mode
-is for development/testing only (never the deployed target), delete
-`core/logs/access.log`/`error.log` manually if they grow inconveniently
-large; they are gitignored and carry no state that needs to survive a
-restart.
-
 ## The Docker image (WP 1.9 -- implemented)
 
 ```
@@ -832,27 +822,24 @@ core/
     ├── 29-vault-build-version.sh    # version file for vault-api's GET /v1/about
     ├── 40-vault-preflight.sh        # boot-time guards (see below)
     ├── 45-vault-eventlog-rotate.sh  # rotates the event log at 64 MiB (D15-ROT)
-    └── check-config-drift.sh        # keeps the template honest
+    └── golden/                      # default renders of the hooks (compared at build time)
 ```
 
-**The container does NOT run `core/nginx/nginx.conf`.** Seven kinds of
-directive line cannot be shared with the native dev config -- the log
-destinations (HTTP and, since WP CORE-FIX-3, the stream log), the pid path,
-an explicit worker user, the resolver becoming an env placeholder (in
-`http {}` and in `stream {}`), and the two cache-event-log lines becoming a
-`${VAULT_EVENT_LOG}` placeholder -- so `core/docker/nginx.conf.template` is
-a near-verbatim copy carrying exactly those deltas (the authoritative list,
-with expected counts, is in `check-config-drift.sh`). Everything else (every map, the store
-guard, the Host allowlist, the Range/Accept-Encoding stripping, the nocache
-bypass, the log format) is byte-identical, and that is **machine-checked**
-by `core/docker/check-config-drift.sh`: it normalises both files, un-applies
-the enumerated deltas, and diffs. 146 normalised directive lines (as of
-CORE-FIX-3), verified identical; it also asserts that the
-`vault_event` log_format line keeps all 8 of its LITERAL tabs in both files
-(review P7) -- the normaliser would otherwise hide a tab -> space edit that
-breaks vault-api's tab-split parser -- and verified to actually catch an injected difference (a
-negative test in `deploy/tests/verify-stack.sh`, step 1b). Run it after
-touching either file.
+**`core/docker/nginx.conf.template` is the one config** (NGINX-DUP-1).
+Until rc23 it was a near-verbatim copy of a native Windows config
+(`core/nginx/nginx.conf`) carrying only the container plumbing lines (log
+destinations, pid path, worker user, the resolver and event-log
+placeholders), and `core/docker/check-config-drift.sh` diffed the two.
+Both are retired; `core/tests/test-template-invariants.sh` now pins the
+template itself: the plumbing lines with their counts, the literal tabs of
+the `vault_event` log_format (review P7 -- a normaliser would otherwise
+hide a tab -> space edit that breaks vault-api's tab-split parser), the
+store guard, the Host allowlist, the Range/Accept-Encoding stripping, the
+nocache bypass and the whole `@miss` and `/depot/` blocks as exact
+directive lists, the stream block, the worker budget and the hooks'
+default renders against `core/docker/golden/`. It is proven to catch an
+injected difference (a negative test in `deploy/tests/verify-stack.sh`,
+step 1b). Run it after touching the template or a hook.
 
 - `-p /vault` is the prefix, so `root cache` -> `/vault/cache` and
   `proxy_temp_path tmp/proxy` -> `/vault/tmp/proxy`, path-faithful layout
@@ -935,7 +922,7 @@ version started last, not that nginx runs now.
 - **Not served.** `/vault/logs/` is outside `root cache;`, and there is no
   `location = /vault-version`: every LAN client could read it without a key,
   while this server deliberately sends a bare `Server: nginx`. Because the
-  config is unchanged, `check-config-drift.sh` and the preflight's exact
+  config is unchanged, `core/tests/test-template-invariants.sh` and the preflight's exact
   pins need nothing new; `verify-core-nginx.sh` asserts the rendered config
   never mentions the file and probes `/vault-version` and
   `/logs/vault-core-version.json` live (404).
@@ -1091,7 +1078,7 @@ response headers arrive (TH-0b section 1.1). It only acts on buffered
 responses, so `proxy_buffering on;` is explicit in `@miss` and the upstream
 cannot switch it off with `X-Accel-Buffering: no` (`proxy_ignore_headers`;
 a reasoned guard, not measured against an upstream that sends the header).
-Both lines and `proxy_limit_rate` are pinned by `check-config-drift.sh`
+Both lines and `proxy_limit_rate` are pinned by `core/tests/test-template-invariants.sh`
 and the CI gate, by count AND by position inside the `location @miss`
 block (a named location inherits nothing from `/depot/`).
 
@@ -1120,7 +1107,7 @@ while `_active` fell to 0.496x, because `_active` counts idle keep-alives.
   `worker_processes 1` and `worker_connections 1024`, so
   `$connections_writing` can never exceed 1024 and every live count has
   its own exact bucket; no count falls through to the default.
-  `check-config-drift.sh` asserts BUCKETS >= worker_processes x
+  `core/tests/test-template-invariants.sh` asserts BUCKETS >= worker_processes x
   worker_connections, so raising either without raising BUCKETS in
   `27-vault-upstream-rate.sh` fails CI.
 - **The LAN client that triggers a MISS is capped too.** The chunk streams
@@ -1155,13 +1142,12 @@ deliberate divergence from vault-api's parser: Python's `strip()` also
 removes non-ASCII whitespace, this script only ASCII whitespace -- such a
 value stops vault-core's boot instead of being reinterpreted.
 
-**Native rig.** `core/nginx/nginx.conf` carries the identical `include`
-and `@miss` lines; its `core/nginx/vault-upstream-rate.conf` is the static
-cap-off form (`check-config-drift.sh` asserts it equals the script's
-cap-off render). The divisor map needs the stub_status module
-(`--with-http_stub_status_module` -- confirmed in the container image's
-`nginx -V`) and nginx >= 1.27.0; for the native Windows binary both are
-unverified here and checked by `test-core.ps1` test 15 when it runs.
+**Golden.** The cap-off render is committed as
+`core/docker/golden/vault-upstream-rate.conf` (`core/tests/test-template-invariants.sh` asserts it equals the
+script's cap-off render, comments aside). The divisor map needs the
+stub_status module (`--with-http_stub_status_module` -- confirmed in the
+container image's `nginx -V`) and nginx >= 1.27.0. (The retired native
+Windows rig carried a static copy of this include; NGINX-DUP-1.)
 
 **Tests.** `.github/scripts/verify-core-nginx.sh` renders cap off, cap on
 without a window and cap on with a midnight-wrapping window (22:30-06:15)
@@ -1221,7 +1207,7 @@ or one of the container's own addresses. If a rewrite appears after boot,
 arrives from one address) and 256 in total (each session holds two of the
 1024 `worker_connections`, so the HTTP cache keeps half; that half also
 holds the upstream keepalive pool's at most 32 idle connections, ADR-0017,
-leaving at least 480 for live HTTP requests. `check-config-drift.sh` step 2f
+leaving at least 480 for live HTTP requests. `core/tests/test-template-invariants.sh` step 2f
 pins `worker_processes 1`, `worker_connections 1024` and this arithmetic).
 
 **Tuning the caps (WP CORE-FIX-4d, ADR-0021 addendum 2026-10-09).** Both
@@ -1246,12 +1232,11 @@ counts the cap refusals. Above the default
 total of 256 the passthrough eats into the HTTP cache's half of the 1024
 worker connections: at the ceiling of 400 (800 connections) the HTTP side
 keeps 224; minus the upstream cap's 2C (at most 128) and the pool's 32 idle
-connections that leaves 64 for live HTTP requests (`check-config-drift.sh`
-step 2f requires at least 64). Natively (`core/nginx/nginx.conf`)
-the defaults are literal; edit the two lines by hand there.
+connections that leaves 64 for live HTTP requests (`core/tests/test-template-invariants.sh`
+step 2f requires at least 64).
 
 **Log.** One line per connection, in the container on stdout next to the
-HTTP log (`docker compose logs vault-core`), natively in `logs/tls.log`:
+HTTP log (`docker compose logs vault-core`):
 
 ```
 02/Oct/2026:18:45:01 +0000 tls client=10.0.0.20 sni="cache2-ams1.steamcontent.com" target="cache2-ams1.steamcontent.com:443" upstream=155.133.248.13:443 status=200 bytes_sent=5321 bytes_received=812 session_time=0.412
@@ -1275,10 +1260,9 @@ reviewed two entries; and nowhere an `ssl_certificate`, `proxy_ssl*` or
 `load_module` line; `core/Dockerfile` and the CI gate fail if that changes.
 
 **Tests.**
-- `check-config-drift.sh` step 2e: the stream pins in both files, the whole
-  stream block equal to an exact directive list (the same list
-  `40-vault-preflight.sh` checks the rendered config against at boot; the
-  drift check keeps the two copies identical), the map
+- `core/tests/test-template-invariants.sh` step 2e: the whole stream block equal to an exact directive list
+  (the same list `40-vault-preflight.sh` checks the rendered config
+  against at boot; the test keeps the two copies identical), so the map
   has exactly its two entries, `http {}` listens on 80 only, no TLS
   termination anywhere, and the template's markers enclose exactly the
   stream block (deleting them leaves the http block byte-identical).
@@ -1422,7 +1406,7 @@ pooling requires. Each group re-resolves its name through the http-level
 keeps one CGNAT connect failure from parking a peer for 10 s of `no live
 upstreams`. The groups carry **no `resolver` of their own**, so
 `VAULT_RESOLVER` stays the single DNS address in the image; the hook's
-self-check and `check-config-drift.sh` step 2d both refuse a render that
+self-check and `core/tests/test-template-invariants.sh` step 2d both refuse a render that
 contains one. `keepalive_timeout 50s` sits below the >= 60 s idle timeout
 measured on the edges on 2026-10-02, so nginx closes idle connections
 first.
@@ -1523,10 +1507,9 @@ end-of-line must learn every appended field: these two, then
 `upstream_host`, `host`, `limit_conn` (ADR-0021) and `client` (WP D15a)
 ("Known gap" above).
 
-**Native rig.** `core/nginx/nginx.conf` carries the identical
-`include vault-upstream-pool.conf;` line; its
-`core/nginx/vault-upstream-pool.conf` is the hook's empty render byte for
-byte (`check-config-drift.sh` step 2d asserts it with `cmp`, and the
+**Golden.** `core/docker/golden/vault-upstream-pool.conf` is the hook's
+empty render byte for byte (`core/tests/test-template-invariants.sh` step 2d and
+`core/tests/test-upstream-pool-hook.sh` assert it with `cmp`, and the
 Dockerfile proves the same at build time, plus a 4-edge render and two
 refusals, in the image's own shell).
 
@@ -1773,8 +1756,9 @@ rm -rf /vault/logs/throughput-debug
 - Miss-triggered prefill completion (Phase 3, hybrid decision in ADR-0001)
 - Manifest-based garbage collection (Phase 3)
 - Per-client bypass detection (Phase 3, requirement A12)
-- Changes to `poc/` (frozen as Phase-0 evidence; its nginx is only
-  stopped/started by `test-core.ps1`, never its config or code)
+- Changes to `poc/` (frozen as Phase-0 evidence; its nginx was only
+  stopped/started by the native rig `test-core.ps1`, retired by
+  NGINX-DUP-1, never its config or code)
 
 **WP 3.10 (cache-event log, ADR-0008) additionally does NOT cover**, by
 explicit scope boundary (this work package touches `core/` only):

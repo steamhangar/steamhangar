@@ -65,7 +65,8 @@
 #      access_log lines) ends in the marker comment `# VAULT_DEBUG_TP_LINE`,
 #      so the OFF render is byte-identical to the template without the
 #      feature; the ON render strips the marker. Same mechanism as
-#      25-vault-eventlog.sh and check-config-drift.sh delta 8);
+#      25-vault-eventlog.sh; core/tests/test-template-invariants.sh counts
+#      the marked access_log lines);
 #   2. creates the directory (a plain mkdir; `nginx -t` opens the log too);
 #   3. on a real server start only: appends ONE `# start ...` line to the log
 #      with the rendered settings that matter for throughput (worker_processes,

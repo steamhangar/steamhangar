@@ -676,3 +676,16 @@ says "until `v0.1.0`". User decision 2026-11-21:
   2026-11-20: findings" (e.g. CI-CLOCK-1, NGINX-DUP-1, SEC-HARDEN-1,
   NITS-AUDIT-API-1, CLOCK-SEAM-1). Each still runs through coder and
   reviewer; no other new features in frozen paths before `v0.1.0`.
+
+## Addendum 2026-11-21 — audit exception used: one nginx config (NGINX-DUP-1)
+
+Under the audit exception above (finding C-1, operator decision Weg B):
+`core/nginx/nginx.conf`, `core/docker/check-config-drift.sh` and the
+Windows rigs (`core/tests/test-core.ps1`, `core/tests/mvp/run-mvp.ps1`,
+`dns/tests/test-dnsmasq-config.ps1`) are removed; the template is the one
+config source. No directive of the template changes (comments only); the
+hooks change in comments and in the header comment of the pool and cap
+renders; the static includes move to `core/docker/golden/` and the image
+copies them to `/opt/vault/golden/`. The pins this ADR's addenda cite as
+"drift step 2c/2d/2e/2f" live on under the same numbers in
+`core/tests/test-template-invariants.sh` (ADR-0001 addendum 2026-11-21).

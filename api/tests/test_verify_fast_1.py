@@ -287,7 +287,7 @@ def test_v7_section_1_only_end_to_end(tmp_path: Path) -> None:
     assert [line for line in out if line.startswith("skip ")] == [
         f"skip {n}" for n in range(2, 12)
     ]
-    assert "## 1. Config drift: the container nginx.conf is the reviewed one" in out
+    assert "## 1. Config invariants: the one nginx config source keeps its pins" in out
     assert not [line for line in out if re.match(r"## ([2-9]|1[01])\. ", line)]
     assert "## Cleanup" in out
     times = [line for line in out if line.startswith("[time] ")]

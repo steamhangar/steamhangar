@@ -63,8 +63,8 @@ DNS_PORT=15353
 TLS_PORT=8143
 
 # The known-good Phase-0 test object: depot 70403, used from poc/ through
-# core/tests/test-core.ps1. Small, stable, and already proven to be a real
-# cacheable chunk.
+# the WP 1.1 native rig (retired by NGINX-DUP-1). Small, stable, and already
+# proven to be a real cacheable chunk.
 DEPOT=70403
 CHUNK=773d10050d99b2544665873ec2125b3bf273e8b2
 CDN_HOST=cache2-ams1.steamcontent.com
@@ -409,56 +409,47 @@ say "                 image builds: $VS_NEED_IMAGES, stack start: $VS_NEED_STACK
 
 if vs_section 1; then
 # =============================================================================
-section "1. Config drift: the container nginx.conf is the reviewed one"
+section "1. Config invariants: the one nginx config source keeps its pins"
 # =============================================================================
-say 'core/docker/nginx.conf.template must stay identical to the reviewed, CDN-tested'
-say 'core/nginx/nginx.conf apart from five container-plumbing lines.'
-step "1a. Positive: the checked-in pair is in sync"
-run "sh '$repo_root/core/docker/check-config-drift.sh'"
-if sh "$repo_root/core/docker/check-config-drift.sh" >/dev/null 2>&1; then
-    ok "check-config-drift.sh reports the two configs in sync"
+say 'core/docker/nginx.conf.template is the only nginx config (NGINX-DUP-1: the'
+say 'native core/nginx/nginx.conf and its drift check are retired).'
+say 'core/tests/test-template-invariants.sh pins its plumbing lines, the store /'
+say 'Range / allowlist / retry / cap directives, the exact stream block, the'
+say 'worker budget and the committed default renders in core/docker/golden/.'
+step "1a. Positive: the checked-in template holds every invariant"
+run "sh '$repo_root/core/tests/test-template-invariants.sh'"
+if sh "$repo_root/core/tests/test-template-invariants.sh" >/dev/null 2>&1; then
+    ok "test-template-invariants.sh reports every invariant held"
 else
-    bad "check-config-drift.sh reports drift"
+    bad "test-template-invariants.sh reports a broken invariant"
 fi
 
 step "1b. Negative: an injected difference is actually caught"
-say 'Without this, a green drift check would prove nothing. A copy of the pair is'
-say 'mutated (proxy_connect_timeout 3s -> 30s in the container template only) and'
-say 'the same script is re-run against the copy.'
-mkdir -p "$work/drift/nginx" "$work/drift/docker"
-cp "$repo_root/core/nginx/nginx.conf" "$work/drift/nginx/nginx.conf"
-cp "$repo_root/core/docker/nginx.conf.template" "$work/drift/docker/nginx.conf.template"
-cp "$repo_root/core/docker/check-config-drift.sh" "$work/drift/docker/check-config-drift.sh"
-# TH-1a: the drift script also reads these two (resolved from its own dir/..).
-cp "$repo_root/core/docker/27-vault-upstream-rate.sh" "$work/drift/docker/27-vault-upstream-rate.sh"
-cp "$repo_root/core/nginx/vault-upstream-rate.conf" "$work/drift/nginx/vault-upstream-rate.conf"
-# CORE-FIX-3: step 2e also compares its expected stream block with the copy in
-# 40-vault-preflight.sh.
-cp "$repo_root/core/docker/40-vault-preflight.sh" "$work/drift/docker/40-vault-preflight.sh"
-# WP CORE-FEAT-1b/1c: step 2d of the drift script reads the pool hook and
-# cmp's the native empty render against it, resolved the same way.
-cp "$repo_root/core/docker/28-vault-upstream-pool.sh" "$work/drift/docker/28-vault-upstream-pool.sh"
-cp "$repo_root/core/nginx/vault-upstream-pool.conf" "$work/drift/nginx/vault-upstream-pool.conf"
-# WP CORE-FIX-4a: and the native cap file (ADR-0021).
-cp "$repo_root/core/nginx/vault-upstream-cap.conf" "$work/drift/nginx/vault-upstream-cap.conf"
-# CORE-FIX-4d: step 2f reads the passthrough caps' defaults and ceilings
-# from 26-vault-tls-passthrough.sh.
-cp "$repo_root/core/docker/26-vault-tls-passthrough.sh" "$work/drift/docker/26-vault-tls-passthrough.sh"
+say 'Without this, a green check would prove nothing. A copy of the files the'
+say 'check reads (core/Dockerfile, core/docker/, core/tests/) is mutated'
+say '(proxy_connect_timeout 3s -> 30s in the template) and the same script is'
+say 're-run against the copy.'
+# Only those three inputs, never core/ wholesale: a stale native-run cache/
+# in an old checkout would otherwise be copied too (megabytes of chunks).
+mkdir -p "$work/inv/core"
+cp "$repo_root/core/Dockerfile" "$work/inv/core/Dockerfile"
+cp -R "$repo_root/core/docker" "$work/inv/core/docker"
+cp -R "$repo_root/core/tests" "$work/inv/core/tests"
 # The unmutated copy must pass first, else a later FAIL could stem from an
 # incomplete copy rather than from the injected difference.
-if sh "$work/drift/docker/check-config-drift.sh" >/dev/null 2>&1; then
-    ok "unmutated drift copy passes (the copy is complete)"
+if sh "$work/inv/core/tests/test-template-invariants.sh" >/dev/null 2>&1; then
+    ok "unmutated copy passes (the copy is complete)"
 else
-    bad "unmutated drift copy already fails (copy incomplete?)"
+    bad "unmutated copy already fails (copy incomplete?)"
 fi
-sed -i 's/proxy_connect_timeout      3s;/proxy_connect_timeout      30s;/' "$work/drift/docker/nginx.conf.template"
-run "sh '$work/drift/docker/check-config-drift.sh' 2>&1 | tail -12"
-if drift_out=$(sh "$work/drift/docker/check-config-drift.sh" 2>&1); then
-    bad "drift check did NOT catch an injected difference"
-elif printf '%s\n' "$drift_out" | grep -q 'proxy_connect_timeout'; then
-    ok "drift check catches the injected difference (exit non-zero, names proxy_connect_timeout)"
+sed -i 's/proxy_connect_timeout      3s;/proxy_connect_timeout      30s;/' "$work/inv/core/docker/nginx.conf.template"
+run "sh '$work/inv/core/tests/test-template-invariants.sh' 2>&1 | tail -12"
+if inv_out=$(sh "$work/inv/core/tests/test-template-invariants.sh" 2>&1); then
+    bad "the invariant check did NOT catch an injected difference"
+elif printf '%s\n' "$inv_out" | grep -q 'proxy_connect_timeout'; then
+    ok "the invariant check catches the injected difference (exit non-zero, names proxy_connect_timeout)"
 else
-    bad "drift check failed but did not name proxy_connect_timeout (wrong failure reason)"
+    bad "the invariant check failed but did not name proxy_connect_timeout (wrong failure reason)"
 fi
 
 vs_end
@@ -712,7 +703,7 @@ assert_contains "$noKey" "VAULT_API_KEY" "compose refuses to render without VAUL
 # RN-1's run of this script counted 185 checks total; deploy/README.md
 # carries that measured figure.) The 4 failures were ALL in step 5i below,
 # and were a genuine PRE-EXISTING bug unrelated to this package: nginx's
-# cache-event `access_log` uses `buffer=64k flush=5s` (core/nginx/nginx.conf),
+# cache-event `access_log` uses `buffer=64k flush=5s` (core/docker/nginx.conf.template),
 # and step 5i's grep ran immediately after the triggering request with no
 # wait for that flush -- an isolated repro (fresh `docker run` of vault-core alone,
 # one real MISS, checking the file at increasing delays) showed the correct
@@ -1627,7 +1618,7 @@ if vs_step 5i; then
 #
 # WP 4g fix -- the timing bug (docs/LEARNINGS.md "Testing discipline",
 # flush=5s entry): nginx buffers this access_log with `buffer=64k
-# flush=5s` (core/nginx/nginx.conf), and grepping the file immediately
+# flush=5s` (core/docker/nginx.conf.template), and grepping the file immediately
 # after the triggering request is never raceless -- measured 0 lines at
 # t~0s and t~2s, the correct 9-field line at t~7s, on an untouched
 # baseline. Below, the grep is wrapped in a BOUNDED wait-for-line loop
