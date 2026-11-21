@@ -268,3 +268,12 @@ at the end, under a dated heading, one entry each with the WP that proved it.
   full text in `persistedOutputPath`; a trimming hook must read that file
   back or it trims the cut. Node 24's `node --test` prints the `spec`
   reporter even when output is redirected (no TAP unless asked for).
+- Briefs never ask a coder to run `dev.sh verify`: verify takes the shared
+  dev instance down and rebuilds the `:dev` images from the coder's branch
+  (happened in PROXY-VERSION-1). Coders run `test-*` under the shared
+  `flock /tmp/steamhangar-devsh.lock`; the orchestrator runs verify once
+  per integration branch.
+- Auto mode refuses mutation runs that edit a scratch worktree and run
+  `dev.sh test-api` against it, for the reviewer and for the coder
+  ("Undermining Oversight", 2026-11-21). Until the operator decides a
+  path, reviewers judge guards by reading and name the unpinned ones.
