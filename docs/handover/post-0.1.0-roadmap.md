@@ -2130,6 +2130,14 @@ and VERIFY-COLD-1 is prose in the Sunday-test box of the rc19.3 block.
   `loading_sources`, swept figures labelled "as of the last log read N min
   ago" or hidden while loading; Weg C shorter prod sweep interval
   (`VAULT_EVENT_SWEEP_INTERVAL_MINUTES=1`, Antrag), combinable.
+  **Decided (operator, 2026-11-21): Weg A, in rc23** as **APP-DL-STATS-1b**
+  (api + web/Android follow-ups, api freeze exception with an ADR-0016
+  addendum, ADR-0025 note that summary tiles and job figures now include
+  the unswept ring span). APP-DL-STATS-1 counts as done for RC23-HOLD only
+  with 1b on `main`.
+- **APP-EXPERT-SWITCH-1 placement decided (operator, 2026-11-21): Weg A**,
+  the switch stays on the About tab (before the disclaimer), like the web's
+  narrow layout.
 - **OUTPUT-TRIM-TAP-1 (dev tooling, found 2026-11-01):** the DEV-MODS-1
   output-trim mod omitted only 596 of 13,520 lines of `dev.sh test-web`
   (node TAP) and gave no file hint, so the harness still persisted 528 KB.
