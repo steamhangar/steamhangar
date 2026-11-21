@@ -26,19 +26,12 @@ poc/linux-client-test/wsl-env
 poc/linux-client-test/_testkit_tmp/
 poc/linux-client-test/_testkit_tmp_detect/
 
-# vault-core (core/) — runtime artifacts of running nginx natively for dev/
-# test (WP 1.1). The nginx binary itself is reused from poc/nginx/ (already
-# gitignored above), never duplicated here.
+# vault-core (core/) -- runtime state a native nginx run (WP 1.1, retired by
+# NGINX-DUP-1) left under core/; kept ignored so stale directories in an old
+# checkout are never committed (core/.dockerignore keeps them out of the image).
 core/cache/
 core/logs/
 core/tmp/
-core/*.pid
-core/_testcore_tmp/
-
-# WP 1.7 MVP end-to-end test -- throwaway DB + uvicorn stdout/stderr logs for
-# each run; RESULTS-*.md next to it IS committed evidence, this is not.
-core/tests/mvp/_run_tmp/
-
 
 # Claude Code harness artifacts
 .claude/scheduled_tasks.lock
@@ -53,10 +46,6 @@ __pycache__/
 *.db-wal
 *.db-shm
 .pytest_cache/
-
-# vault-dns (dns/) — rendered test config, created and cleaned up by
-# dns/tests/test-dnsmasq-config.ps1 (WP 1.8); only survives a crashed run.
-dns/tests/_tmp/
 
 # vault-agent Go port (agent/go/, WP 2.1b, ADR-0005) — cross-compiled agent
 # binaries are build output, never committed; only agent/go/go.mod,

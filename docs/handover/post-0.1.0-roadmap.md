@@ -2288,7 +2288,19 @@ decision was taken from are in git history (`03f5b19`).
   Windows rigs that need `poc/` (`core/tests/test-core.ps1`,
   `core/tests/mvp/run-mvp.ps1`, `dns/tests/test-dnsmasq-config.ps1`);
   the image template becomes the only source. Recheck U-2 (subprocess
-  default) in the same package. L, core freeze exception.
+  default) in the same package. L, core freeze exception. Implemented on
+  `wp/nginx-dup-1` (ADR-0001 addendum 2026-11-21): the drift checks live
+  on in `core/tests/test-template-invariants.sh`, the static includes are
+  goldens in `core/docker/golden/`. Follow-up:
+  - **CORE-LIVE-PARITY-1** (core/ci; S-M; from NGINX-DUP-1): six behaviours
+    the native rig proved live against the CDN are now held by exact
+    config pins only (core/README.md "Testing", rows marked "no live
+    test"): Range stripped upstream, a retried `502, 200` still stored,
+    gzip never stored raw, `?nocache=1` typed BYPASS in the event log, no
+    event line for the heartbeat, a hostile URI staying one 9-field line.
+    Add a live offline rig for them to `.github/scripts/verify-core-nginx.sh`
+    (local fake upstream that answers 502 then 200, gzip on request, and a
+    Range-honouring 206, in the pinned image), so CI proves them again.
 - **UPDATE-TONE-1 + UPDATE-WORD-1** (D-1): orange and "Update available"
   everywhere (pill, vocabulary, Android twin); folds into PILL-TONE-1,
   which is no longer blocked.
@@ -2504,7 +2516,11 @@ Uncertain or deliberate (U-items):
 - U-2 `VAULT_PREFILL_MODE=subprocess` is the code default
   (`api/vault_api/config.py:1219-1220`), compose always ships `queue`
   (`deploy/compose.yaml:504`, `:1013`); deliberate (ADR-0012 §6):
-  recheck if NGINX-DUP-1 retires the native rigs.
+  recheck if NGINX-DUP-1 retires the native rigs. Rechecked in NGINX-DUP-1:
+  `run-mvp.ps1` was not the only consumer. The default still serves the
+  bare-metal vault-api dev path (`api/README.md` Quickstart,
+  `api/.env.example` sets `subprocess`) and the prefill/worker test suites
+  ADR-0012 §6 names; no change.
 - U-3 legacy upstream pool (`VAULT_UPSTREAM_EDGE=off`,
   `settings_store.py:370-381`, `core/docker/28-vault-upstream-pool.sh:298-370`),
   deliberate rollback switch (ADR-0021:260-297): recheck after stable edge

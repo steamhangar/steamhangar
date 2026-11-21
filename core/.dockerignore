@@ -1,26 +1,13 @@
-# Build context for core/Dockerfile. Only docker/ is actually COPYed; everything
-# below is either runtime state from running nginx natively for development
-# (gitignored, and megabytes of real depot chunks) or documentation/tests that
-# have no business inside the image.
+# Build context for core/Dockerfile. Only docker/ is actually COPYed (the
+# template, the hooks and the committed default renders in docker/golden/);
+# .github/scripts/verify-core-nginx.sh fails when a COPY reaches outside
+# docker/ or a pattern here could match a file under it. Tests and docs have
+# no business inside the image.
+tests/
+README.md
+# Runtime state a native nginx run left under core/ before NGINX-DUP-1
+# retired it (megabytes of real depot chunks in cache/). Kept excluded so a
+# stale checkout never ships it in the build context.
 cache/
 logs/
 tmp/
-*.pid
-_testcore_tmp/
-tests/
-README.md
-
-# The reviewed native config is deliberately NOT copied into the image -- the
-# container runs core/docker/nginx.conf.template, and
-# core/docker/check-config-drift.sh is what keeps the two in sync in the repo.
-# Excluding it from the context makes "which config is in this image?"
-# unambiguous.
-nginx/
-# Exception (WP CORE-FEAT-1b, ADR-0017): the native EMPTY pool include is
-# copied to /opt/vault/vault-upstream-pool.native.conf so the build-time
-# check can cmp the hook's empty render against it. It is not a config
-# nginx reads; nginx.conf itself stays excluded.
-!nginx/vault-upstream-pool.conf
-!nginx/vault-upstream-cap.conf
-# D16c: the native generation-0 include, cmp-ed against the library's render.
-!nginx/vault-settings-generation.conf

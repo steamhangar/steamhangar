@@ -478,7 +478,9 @@ their open boxes (items 2, 7 and 11) are in section 12. Item 13 stays here.
       README-KEYS-1; wave 2 PILL-TONE-1, FONT-FLOOR-1, ACTIVE-STATUS-1;
       wave 3 (decided 2026-11-21) NGINX-DUP-1 Weg B, NEUTRAL-RAMP-1 Weg B,
       OLD-SERVER-FALLBACK-1, AGENT-RC8-COMPAT-1, VERIFY-ALL-LABEL-1,
-      TM-CROSS-SITE-1, DESIGN-MD-1; nit packages SEC-HARDEN-1,
+      TM-CROSS-SITE-1, DESIGN-MD-1; candidate CORE-LIVE-PARITY-1 (live
+      offline rig for the behaviours NGINX-DUP-1 left as config pins);
+      nit packages SEC-HARDEN-1,
       DESIGN-NITS-1, NITS-AUDIT-WEB-1, NITS-AUDIT-APP-1, NITS-AUDIT-API-1,
       NITS-AUDIT-OPS-1 (operator 2026-11-21: fix every finding, nits
       included; audit exception to the api/core/dns freeze, ADR-0016); all in
@@ -673,7 +675,7 @@ their open boxes (items 2, 7 and 11) are in section 12. Item 13 stays here.
         `web/tests/release-split-1c.test.js`, `ReleaseSplit1cAboutTest.kt`.
       - [ ] **VERIFY-FAST-1** (deploy/tests + devbox, decided 2026-10-18,
         Weg A) `verify-stack.sh` gets section selection (`VERIFY_SECTIONS`);
-        `dev.sh verify` defaults to a lean set (1 config drift, 3 compose
+        `dev.sh verify` defaults to a lean set (1 config invariants, 3 compose
         rendering, 8 fail-fast guards, one stack start with 5a-5d and
         6a-6e, no CDN steps), `verify full` runs everything and stays the
         gate for release tags and the nightly CI. Per-section timestamps
@@ -982,8 +984,9 @@ is done, tick it HERE, not in the archive.
       human-readable per-request log with HIT/MISS/BYPASS already is — a
       file-tailing log viewer is what the TSV would need, and no popular
       Docker log viewer does that. Cost side: doubles the line volume inside
-      the json-file ring buffer, and the config-drift check's pinned
-      `access_log` counts must be updated in the same change. Off by default
+      the json-file ring buffer, and the pinned `access_log` counts in
+      `core/tests/test-template-invariants.sh` (the config-drift check's
+      successor, NGINX-DUP-1) must be updated in the same change. Off by default
 - [ ] (origin: Phase 6) Named, scoped API keys — the direct consequence of inviting external
       systems in (user question 2026-08-10). Today there is exactly ONE
       key: `auth.require_api_key` compares against `VAULT_API_KEY` for every

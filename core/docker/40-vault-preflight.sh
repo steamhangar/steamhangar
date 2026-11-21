@@ -71,7 +71,7 @@ esac
 # support while rejecting exactly those brackets), space (nginx accepts
 # several addresses) and '-'. Hostnames are deliberately NOT accepted --
 # nginx would have to resolve them with the OS resolver at config-parse
-# time, which is exactly the dependency core/nginx.conf's loop-safety note
+# time, which is exactly the dependency nginx.conf.template's loop-safety note
 # avoids. Spaces only (D16c, the shared fixture table) are refused too: they
 # would render an empty `resolver` directive.
 RESOLVER="${VAULT_RESOLVER:-}"
@@ -257,7 +257,7 @@ log "upstream resolver (ADR-0001 req 4): $RESOLVER"
 # nothing else is there either (an added `set`, a server-level `resolver`,
 # `proxy_protocol on;` ...). The rendered block, comments dropped and
 # whitespace collapsed, must equal this list with VAULT_RESOLVER filled in.
-# core/docker/check-config-drift.sh keeps this copy identical to its own.
+# core/tests/test-template-invariants.sh keeps this copy identical to its own.
 # CORE-FIX-4d: the two limit_conn values are filled in from
 # VAULT_TLS_CLIENT_MAX_CONNS / VAULT_TLS_MAX_CONNS (empty = 64 / 256), which
 # 26-vault-tls-passthrough.sh validated and rendered; a rendered value that

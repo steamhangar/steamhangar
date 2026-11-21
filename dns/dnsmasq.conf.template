@@ -22,8 +22,8 @@
 #     interface/port gets published); this file only controls what the
 #     daemon does *inside* the container.
 #
-# Validated by dns/tests/test-dnsmasq-config.ps1 (`dnsmasq --test`, plus an
-# optional live A/AAAA functional check) against dnsmasq 2.92.
+# Validated live by deploy/tests/verify-stack.sh section 7 (A, wildcard,
+# AAAA NODATA, forwarding) in the built image.
 
 # --- AAAA / IPv6-bypass guard (ADR-0001 req 6) -- READ THIS FIRST -----------
 # THE SINGLE MOST IMPORTANT LINE PAIR IN THIS FILE.
@@ -67,9 +67,9 @@ local=/steamcontent.com/
 # can point at a resolver that itself forwards back into this container's
 # own Docker network -- relying on it risks a resolution loop, the same
 # category of problem poc/linux-client-test/scenario-b.sh had to guard
-# against on the WSL2 side, and that core/nginx/nginx.conf's own
-# `resolver` directive had to guard against for vault-core (see
-# core/README.md's loop-safety note). The explicit server= lines below
+# against on the WSL2 side, and that vault-core's own `resolver`
+# directive had to guard against (see the loop-safety reasoning at the top
+# of core/docker/nginx.conf.template). The explicit server= lines below
 # are the ONLY upstream this daemon will ever use.
 #
 # ${UPSTREAM_DNS_1} / ${UPSTREAM_DNS_2}: substituted at container start.

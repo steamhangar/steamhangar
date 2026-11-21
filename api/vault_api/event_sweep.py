@@ -37,8 +37,9 @@ Tab-separated, ``escape=default``, exactly **9** fields, version-prefixed::
 percent-encoded tab or newline therefore arrives here as the literal text
 ``\\x09``/``\\x0A``, never as a real tab or newline — so the only tab bytes on a
 line are the separators nginx itself wrote, and a plain ``split("\\t")`` always
-sees exactly 9 fields. That guarantee is pinned empirically on the producing
-side (``core/tests/test-core.ps1``) and defended on this side anyway: a line
+sees exactly 9 fields. That guarantee was pinned empirically on the producing
+side (the WP 3.10 native rig, retired by NGINX-DUP-1; the config side is held
+by ``core/tests/test-template-invariants.sh``) and defended on this side anyway: a line
 that does not split into 9 fields is counted and skipped, never guessed at.
 
 **Unknown versions are skipped, never misparsed.** Field 1 must be exactly

@@ -6,7 +6,7 @@ failed with ``HttpRequestException ... while downloading manifests``:
 SteamPrefill fetches depot manifests over HTTPS from the CDN host, which then
 resolved to vault-core, which only listened on port 80. vault-core now runs
 an nginx ``stream`` SNI passthrough on 443 (``core/``, pinned by
-``core/docker/check-config-drift.sh`` and ``.github/scripts/verify-core-nginx.sh``).
+``core/tests/test-template-invariants.sh`` and ``.github/scripts/verify-core-nginx.sh``).
 
 This file pins the deployment half, one test (group) per guarantee:
 

@@ -49,12 +49,13 @@ RUN set -eu; \
 
 # --- Config -------------------------------------------------------------------
 # The config is baked into the image, not mounted: it is reviewed code, not a
-# knob (tests: core/tests/, the drift check below, CI's `core / nginx -t`).
+# knob (tests: core/tests/, the build checks below, CI's `core / nginx -t`).
 # Deployment-specific values come from env at start: the template's
 # ${VAULT_RESOLVER} and ${VAULT_EVENT_LOG} placeholders (envsubst, see
 # core/docker/nginx.conf.template's header) and the hooks below, which render
-# the rate, pool, cap and TLS-passthrough includes. check-config-drift.sh is
-# the contract that keeps this template in sync with core/nginx/nginx.conf.
+# the rate, pool, cap and TLS-passthrough includes. The template is the one
+# config source (NGINX-DUP-1); core/tests/test-template-invariants.sh pins
+# its invariants.
 COPY docker/nginx.conf.template /etc/nginx/templates/nginx.conf.template
 # WP SEC-FIX-5: makes /vault, cache/, tmp/ and logs/ root:root 0755 at every
 # start (migrating a volume from an earlier image) and refuses to start when
@@ -67,7 +68,7 @@ COPY docker/nginx.conf.template /etc/nginx/templates/nginx.conf.template
 COPY docker/vault-settings-lib.sh /opt/vault/vault-settings-lib.sh
 COPY docker/15-vault-settings.envsh /docker-entrypoint.d/15-vault-settings.envsh
 COPY docker/47-vault-settings-watch.sh /docker-entrypoint.d/47-vault-settings-watch.sh
-COPY nginx/vault-settings-generation.conf /opt/vault/vault-settings-generation.native.conf
+COPY docker/golden/vault-settings-generation.conf /opt/vault/golden/vault-settings-generation.conf
 COPY docker/21-vault-volume-ownership.sh /docker-entrypoint.d/21-vault-volume-ownership.sh
 COPY docker/25-vault-eventlog.sh /docker-entrypoint.d/25-vault-eventlog.sh
 COPY docker/26-vault-tls-passthrough.sh /docker-entrypoint.d/26-vault-tls-passthrough.sh
@@ -87,24 +88,19 @@ COPY docker/40-vault-preflight.sh /docker-entrypoint.d/40-vault-preflight.sh
 # VAULT_EVENT_LOG is empty.
 COPY docker/45-vault-eventlog-rotate.sh /docker-entrypoint.d/45-vault-eventlog-rotate.sh
 
-# Shipped for auditability: the running image can prove its own config matches
-# the reviewed native one (`docker run --rm --entrypoint sh <image> -c
-# 'sh /opt/vault/check-config-drift.sh'` needs core/nginx/nginx.conf mounted, so
-# this is primarily a repo-side tool -- it is included so the check travels with
-# the artifact rather than only existing in a checkout).
-COPY docker/check-config-drift.sh /opt/vault/check-config-drift.sh
-# WP CORE-FEAT-1b (ADR-0017): the native (empty) pool include travels with the
-# image for the same reason -- the build-time check below proves the hook's
-# empty render is byte-identical to it, and a running image can re-prove it.
-# nginx never reads this copy; the hook renders /etc/nginx/vault-upstream-pool.conf.
-COPY nginx/vault-upstream-pool.conf /opt/vault/vault-upstream-pool.native.conf
-# WP CORE-FIX-4a (ADR-0021): likewise the native (default, C=16) cap include.
-COPY nginx/vault-upstream-cap.conf /opt/vault/vault-upstream-cap.native.conf
+# WP CORE-FEAT-1b (ADR-0017): the committed empty pool render travels with the
+# image -- the build-time check below proves the hook's empty render is
+# byte-identical to it, and a running image can re-prove it. nginx never reads
+# these copies; the hooks render /etc/nginx/vault-upstream-*.conf. (The native
+# twins they were first compared with are retired, NGINX-DUP-1.)
+COPY docker/golden/vault-upstream-pool.conf /opt/vault/golden/vault-upstream-pool.conf
+# WP CORE-FIX-4a (ADR-0021): likewise the default (C=16) cap include.
+COPY docker/golden/vault-upstream-cap.conf /opt/vault/golden/vault-upstream-cap.conf
 
 RUN set -eux; \
     chmod 0755 /docker-entrypoint.d/15-vault-settings.envsh /docker-entrypoint.d/47-vault-settings-watch.sh; \
     chmod 0644 /opt/vault/vault-settings-lib.sh; \
-    chmod 0755 /docker-entrypoint.d/21-vault-volume-ownership.sh /docker-entrypoint.d/25-vault-eventlog.sh /docker-entrypoint.d/26-vault-tls-passthrough.sh /docker-entrypoint.d/27-vault-upstream-rate.sh /docker-entrypoint.d/28-vault-upstream-pool.sh /docker-entrypoint.d/29-vault-build-version.sh /docker-entrypoint.d/40-vault-preflight.sh /docker-entrypoint.d/45-vault-eventlog-rotate.sh /docker-entrypoint.d/31-vault-debug-throughput.sh /opt/vault/check-config-drift.sh; \
+    chmod 0755 /docker-entrypoint.d/21-vault-volume-ownership.sh /docker-entrypoint.d/25-vault-eventlog.sh /docker-entrypoint.d/26-vault-tls-passthrough.sh /docker-entrypoint.d/27-vault-upstream-rate.sh /docker-entrypoint.d/28-vault-upstream-pool.sh /docker-entrypoint.d/29-vault-build-version.sh /docker-entrypoint.d/40-vault-preflight.sh /docker-entrypoint.d/45-vault-eventlog-rotate.sh /docker-entrypoint.d/31-vault-debug-throughput.sh; \
     # The stock image's demo vhost would otherwise be rendered pointless anyway
     # (our nginx.conf does not include conf.d/*), but removing it keeps the
     # image honest about what it serves.
@@ -143,9 +139,9 @@ RUN set -eux; \
     grep -q '\${VAULT_RESOLVER}' /etc/nginx/templates/nginx.conf.template; \
     # Same for the WP 3.10 event-log placeholder -- it must appear exactly
     # three times (location /depot/, location @miss and the WP D15-RUNNER
-    # marker location, see core/docker/check-config-drift.sh "delta 6"),
-    # each carrying the trailing marker comment 25-vault-eventlog.sh depends
-    # on to find it. check-config-drift.sh cross-checks this number.
+    # marker location), each carrying the trailing marker comment
+    # 25-vault-eventlog.sh depends on to find it.
+    # core/tests/test-template-invariants.sh cross-checks this number.
     grep -q '\${VAULT_EVENT_LOG}' /etc/nginx/templates/nginx.conf.template; \
     [ "$(grep -c '# VAULT_EVENT_LOG_LINE' /etc/nginx/templates/nginx.conf.template)" = "3" ]; \
     # WP THROUGHPUT-DEBUG-1: the opt-in debug log's two access_log lines carry
@@ -201,7 +197,7 @@ RUN set -eux; \
     done; \
     rm -f "$tls_check"; \
     # WP CORE-FEAT-1b (ADR-0017): the keepalive pool include is wired in
-    # exactly once; the hook's empty render equals the shipped native file
+    # exactly once; the hook's empty render equals the committed golden
     # byte for byte; a full list (the ceiling, 4 edges) renders 4 groups with
     # no resolver of their own; a 5th edge and a name outside the allowlist
     # families are refused -- all in this image's own shell, so an image
@@ -210,14 +206,14 @@ RUN set -eux; \
     pool_check=/tmp/vault-upstream-pool.build-check.conf; \
     VAULT_UPSTREAM_EDGE= VAULT_UPSTREAM_POOL_HOSTS= VAULT_UPSTREAM_MAX_CONNS= VAULT_PREFILL_MAX_THREADS= \
         sh /docker-entrypoint.d/28-vault-upstream-pool.sh "$pool_check"; \
-    cmp "$pool_check" /opt/vault/vault-upstream-pool.native.conf; \
-    cmp "$(dirname "$pool_check")/vault-upstream-cap.conf" /opt/vault/vault-upstream-cap.native.conf; \
+    cmp "$pool_check" /opt/vault/golden/vault-upstream-pool.conf; \
+    cmp "$(dirname "$pool_check")/vault-upstream-cap.conf" /opt/vault/golden/vault-upstream-cap.conf; \
     rm -f "$(dirname "$pool_check")/vault-upstream-cap.conf"; \
     # D16c (Q7): EDGE=off is the legacy per-name mode and POOL_HOSTS=off is
     # "no pool hosts" -- together the same empty render as blank.
     VAULT_UPSTREAM_EDGE=off VAULT_UPSTREAM_POOL_HOSTS=' off ' VAULT_UPSTREAM_MAX_CONNS= VAULT_PREFILL_MAX_THREADS= \
         sh /docker-entrypoint.d/28-vault-upstream-pool.sh "$pool_check"; \
-    cmp "$pool_check" /opt/vault/vault-upstream-pool.native.conf; \
+    cmp "$pool_check" /opt/vault/golden/vault-upstream-pool.conf; \
     rm -f "$pool_check" "$(dirname "$pool_check")/vault-upstream-cap.conf"; \
     for bad in 'VAULT_UPSTREAM_EDGE=OFF' 'VAULT_UPSTREAM_EDGE=off dist-fra1.discovery.steamserver.net' 'VAULT_UPSTREAM_POOL_HOSTS=off cache1-fra2.steamcontent.com'; do \
         if env VAULT_UPSTREAM_EDGE=off "$bad" sh /docker-entrypoint.d/28-vault-upstream-pool.sh "$pool_check" >/dev/null 2>&1; then \
@@ -289,7 +285,7 @@ RUN set -eux; \
     # D16c: the core settings library in this image's own shell -- a file as
     # vault-api writes it parses, an unknown key and a missing header are
     # refused (the whole file), env beats file beats default, and the
-    # generation-0 include equals the native core/nginx file byte for byte.
+    # generation-0 include equals the committed golden byte for byte.
     sh -c 'set -eu; . /opt/vault/vault-settings-lib.sh; \
         VAULT_UPSTREAM_RATE=4m; vs_capture_env; \
         vs_parse "$(printf "%s\n" "$VS_FILE_HEADER" GENERATION=7 VAULT_UPSTREAM_RATE=800k VAULT_UPSTREAM_EDGE=off)"; \
@@ -301,7 +297,7 @@ RUN set -eux; \
         if vs_parse "$(printf "%s\n" GENERATION=8 VAULT_UPSTREAM_RATE=1m)"; then exit 1; fi; \
         [ "$(vs_shown "[2606:4700::1111]:53 \"x\"")" = "[2606:4700::1111]:53 ?x?" ]; \
         vs_write_generation_conf /tmp/vault-settings-generation.check.conf 0; \
-        cmp /tmp/vault-settings-generation.check.conf /opt/vault/vault-settings-generation.native.conf; \
+        cmp /tmp/vault-settings-generation.check.conf /opt/vault/golden/vault-settings-generation.conf; \
         rm -f /tmp/vault-settings-generation.check.conf'; \
     [ "$(VAULT_RESOLVER='   ' sh /docker-entrypoint.d/40-vault-preflight.sh --grammar >/dev/null 2>&1; echo $?)" = 1 ]; \
     [ "$(VAULT_EVENT_LOG_ROTATE_BYTES=0001048576 sh /docker-entrypoint.d/45-vault-eventlog-rotate.sh --grammar)" = 1048576 ]

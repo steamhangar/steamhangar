@@ -4,13 +4,13 @@
 # CRLF (which breaks `#!/usr/bin/env bash` shebangs and confuses bash).
 poc/linux-client-test/*.sh eol=lf
 
-# Same rationale, extended to vault-dns (WP 1.8): functional-check.sh runs
-# INSIDE WSL2/Linux (shebang breaks under CRLF same as above), and
-# dnsmasq.conf.template is envsubst'd verbatim inside a Linux container
-# (WP 1.9) -- a CRLF checkout would bake a trailing \r into every
-# substituted line (e.g. address=.../CACHE_IP\r), which dnsmasq's parser
-# does not tolerate and would fail to start on, not just a cosmetic issue.
-dns/tests/*.sh eol=lf
+# Same rationale, extended to vault-dns (WP 1.8): dnsmasq.conf.template is
+# envsubst'd verbatim inside a Linux container (WP 1.9) -- a CRLF checkout
+# would bake a trailing \r into every substituted line (e.g.
+# address=.../CACHE_IP\r), which dnsmasq's parser does not tolerate and
+# would fail to start on, not just a cosmetic issue. (The WSL2 helper
+# dns/tests/functional-check.sh that shared this rule was retired by
+# NGINX-DUP-1.)
 dns/*.template eol=lf
 
 # WP 1.9 (Docker packaging). Everything below is read by a Linux container
@@ -26,6 +26,9 @@ dns/*.template eol=lf
 #     the rendered nginx.conf; nginx treats it as part of the directive value.
 core/docker/*.sh eol=lf
 core/docker/*.template eol=lf
+# NGINX-DUP-1: the hooks' default renders, compared byte for byte (cmp) with
+# what the hooks write inside the Linux image.
+core/docker/golden/*.conf eol=lf
 dns/*.sh eol=lf
 deploy/tests/*.sh eol=lf
 **/Dockerfile eol=lf

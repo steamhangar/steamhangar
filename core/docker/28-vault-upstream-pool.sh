@@ -90,7 +90,7 @@
 #   - NO DNS directive inside any group (ADR-0017 (c)): a group without its
 #     own takes the http-level one including `ipv6=off valid=30s`, so
 #     ${VAULT_RESOLVER} stays the single place that names a DNS server
-#     (check-config-drift.sh delta 4). The self-check refuses a render that
+#     (core/tests/test-template-invariants.sh). The self-check refuses a render that
 #     contains that directive name anywhere.
 #   - `keepalive 8` idle connections per group per worker (worker_processes 1)
 #     and a render-time ceiling of 32 idle connections in total, i.e. at most
@@ -137,16 +137,16 @@
 #   - the rendered file is re-read and its shape asserted before nginx ever
 #     sees it (block count == host count, one sized zone, no DNS directive).
 #
-# With no list configured the file is the header comment only, so the
-# directive in nginx.conf is always present and the native core/nginx/
-# nginx.conf carries the identical include line (its static core/nginx/
-# vault-upstream-pool.conf is byte-for-byte this script's empty render --
-# check-config-drift.sh asserts that with cmp).
+# With no list configured the file is the header comment and the legacy
+# target map only, so the include directive in nginx.conf is always present.
+# That empty render is committed as core/docker/golden/vault-upstream-pool.conf
+# and compared with cmp by the image build, core/tests/test-upstream-pool-hook.sh
+# and core/tests/test-template-invariants.sh.
 #
 # Usage: 28-vault-upstream-pool.sh [output-file]
-#   (no argument when run by docker-entrypoint.sh; the drift check, the
-#   Dockerfile build check and core/tests/test-upstream-pool-hook.sh pass a
-#   temp path)
+#   (no argument when run by docker-entrypoint.sh; the template invariant
+#   test, the Dockerfile build check and core/tests/test-upstream-pool-hook.sh
+#   pass a temp path)
 #
 # POSIX sh (busybox ash in the image, dash in CI); no bashisms.
 
@@ -160,7 +160,7 @@ die()  { echo "$ME: FATAL: $*" >&2; exit 1; }
 OUT="${1:-/etc/nginx/vault-upstream-pool.conf}"
 CAP_OUT="${2:-$(dirname "$OUT")/vault-upstream-cap.conf}"
 
-# ADR-0017 decision 3A. check-config-drift.sh pins both numbers.
+# ADR-0017 decision 3A. core/tests/test-template-invariants.sh pins both numbers.
 KEEPALIVE_PER_GROUP=8
 MAX_IDLE_TOTAL=32
 MAX_HOSTS=$((MAX_IDLE_TOTAL / KEEPALIVE_PER_GROUP))
@@ -358,9 +358,9 @@ set +f
 
 # --- render ------------------------------------------------------------------
 # The legacy header and map are the ENTIRE empty render and must stay
-# byte-identical to core/nginx/vault-upstream-pool.conf (check-config-drift.sh
-# step 2d, cmp); the cap render with the default C likewise equals
-# core/nginx/vault-upstream-cap.conf. Rendered text must not contain the DNS
+# byte-identical to core/docker/golden/vault-upstream-pool.conf (cmp in the
+# image build and core/tests/); the cap render with the default C likewise
+# equals core/docker/golden/vault-upstream-cap.conf. Rendered text must not contain the DNS
 # directive's name anywhere (the self-check greps the whole file, comments
 # included).
 tmp="$OUT.tmp.$$"
@@ -370,8 +370,8 @@ trap 'rm -f "$tmp" "$cap_tmp"' EXIT INT TERM
     echo "# SteamHangar vault-core -- upstream keepalive pool include (ADR-0017, ADR-0021)."
     echo "# Rendered at container start by /docker-entrypoint.d/$ME from"
     echo "# VAULT_UPSTREAM_EDGE and VAULT_UPSTREAM_POOL_HOSTS -- do not edit; see core/README.md"
-    echo "# \"Upstream keepalive pool\". Natively (core/nginx/vault-upstream-pool.conf) this file"
-    echo "# is the empty legacy render, byte for byte (check-config-drift.sh asserts it)."
+    echo "# \"Upstream keepalive pool\". The empty legacy render is kept byte for byte as"
+    echo "# core/docker/golden/vault-upstream-pool.conf (the image build compares them)."
     if [ -n "$EDGE" ]; then
         echo "# Edge mode (ADR-0021): every allowed MISS goes to $EDGE, pooled with"
         echo "# keepalive $CAP (= the connection cap). The Host header the client sent only"
@@ -422,9 +422,9 @@ trap 'rm -f "$tmp" "$cap_tmp"' EXIT INT TERM
     echo "# SteamHangar vault-core -- global upstream connection cap include (ADR-0021)."
     echo "# Rendered at container start by /docker-entrypoint.d/$ME from"
     echo "# VAULT_UPSTREAM_MAX_CONNS -- do not edit; see core/README.md \"Upstream edge and"
-    echo "# connection cap\". Included inside location @miss only. Natively"
-    echo "# (core/nginx/vault-upstream-cap.conf) this file is the default render (16),"
-    echo "# byte for byte (check-config-drift.sh asserts it). Over the cap: 503."
+    echo "# connection cap\". Included inside location @miss only. The default render"
+    echo "# (16) is kept byte for byte as core/docker/golden/vault-upstream-cap.conf"
+    echo "# (the image build compares them). Over the cap: 503."
     echo "limit_conn $CAP_ZONE $CAP;"
 } > "$cap_tmp"
 

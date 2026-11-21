@@ -23,19 +23,16 @@ name: CI
 #      workflow" button) ONLY -- see that job's own `if:` guard -- and
 #      NEVER on push or pull_request.
 #
-# Real-MACHINE tests that need a real Windows box (Task Scheduler, the
-# system hosts file, or a WSL2-hosted dnsmasq instance) -- core/tests/
-# test-core.ps1, agent/packaging/windows/tests/test-install-uninstall.ps1,
-# agent/tests/sandbox/*, dns/tests/test-dnsmasq-config.ps1 -- are a
-# DIFFERENT case from verify-stack above: unlike verify-stack, nothing in
-# this workflow runs them, not even on the nightly schedule; they stay
-# local-only, run-by-hand harnesses, documented at their own doc comments.
-# (core/tests/test-core.ps1 in particular exercises the same real-Steam-CDN
-# nginx behaviour as verify-stack's own section 5, natively on Windows
-# rather than in a Linux container -- verify-stack running nightly does not
-# make this one redundant to keep local-only, since it is the only place
-# that native-Windows-plus-real-CDN combination is exercised at all.) The
-# two PowerShell ones are still parse-checked (never executed) by the
+# Real-MACHINE tests that need a real Windows box (Task Scheduler or the
+# system hosts file) -- agent/packaging/windows/tests/test-install-uninstall.ps1
+# and agent/tests/sandbox/* -- are a DIFFERENT case from verify-stack above:
+# unlike verify-stack, nothing in this workflow runs them, not even on the
+# nightly schedule; they stay local-only, run-by-hand harnesses, documented
+# at their own doc comments. (The native nginx and dnsmasq rigs,
+# core/tests/test-core.ps1 and dns/tests/test-dnsmasq-config.ps1, were
+# retired by NGINX-DUP-1: the image template is the only nginx config, and
+# verify-stack sections 5 and 7 exercise it and vault-dns live.) The
+# PowerShell one is still parse-checked (never executed) by the
 # powershell-syntax job below. That job DOES execute one PowerShell test:
 # agent/packaging/windows/tests/test-packaging-unit.ps1 (WP AGENT-FIX-2),
 # which is hermetic by design (temp directory only, installer under
@@ -182,9 +179,9 @@ jobs:
         # Explicit Windows PowerShell (5.1), not pwsh/PowerShell 7 --
         # agent/packaging/windows's real deployment target only ever has
         # 5.1 available, so the parser check must run under 5.1's own
-        # parser. Also covers core/tests/test-core.ps1 and dns/tests/
-        # test-dnsmasq-config.ps1 (parse-only, never executed -- see the
-        # script's own header).
+        # parser. Also parse-checks the web UI's generated Windows install
+        # command (parse-only, never executed -- see the script's own
+        # header).
         shell: powershell
         run: .\.github\scripts\verify-ps-parse.ps1
       - name: PSUseCompatibleSyntax(5.1) check (pwsh)
@@ -991,24 +988,21 @@ jobs:
         # that deliberately match a literal `${`, and by SC1091 on sourced
         # files -- all reviewed, all intentional, and the two of those files
         # outside this package's footprint could not be annotated in-line.
-        # `-e SC1007`: core/docker/check-config-drift.sh uses the portable
-        # `CDPATH= cd` idiom (a real POSIX idiom, shellcheck's warning is a
-        # false positive) and core/ is not this package's to edit;
-        # deploy/tests/verify-stack.sh's own two occurrences were rewritten
-        # to `CDPATH='' cd`, which shellcheck accepts. Drop the exclusion
-        # once core/'s copy is rewritten the same way.
+        # No `-e SC1007` any more (NGINX-DUP-1): its last users, the
+        # `CDPATH= cd` idiom of the retired core/docker/check-config-drift.sh
+        # and a `VAR= cmd` line in core/tests/test-debug-throughput-hook.sh,
+        # now read `VAR=''`, which shellcheck accepts.
         # Audit 2026-11-20 C-24: the sourced 15-*.envsh hook (no .sh suffix,
         # so the glob missed it), the core/dns/agent test scripts and the
         # CI helpers in .github/scripts/ joined the list (the core job lints
         # the helpers too, at its own levels); they were clean at this
         # severity when added.
         run: |
-          shellcheck --severity=warning -e SC1007 \
+          shellcheck --severity=warning \
             deploy/tests/verify-stack.sh \
             deploy/tests/verify-sections.sh \
             deploy/proxy/*.sh \
             dns/docker-entrypoint.sh \
-            dns/tests/functional-check.sh \
             core/docker/*.sh \
             core/docker/15-vault-settings.envsh \
             core/tests/*.sh \

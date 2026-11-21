@@ -54,7 +54,7 @@ All code, comments, commit messages, and documentation in this repository are
 discussion happens to be filed in.
 
 The table below is honest about what runs where: several component test
-suites need a real network path to the Steam CDN, a Windows nginx binary, or a
+suites need a real network path to the Steam CDN, a real Windows machine, or a
 Docker daemon, and cannot run in an ordinary CI container. Those are marked
 **local-only** — expect to run them yourself before opening a PR that touches
 the component, and describe what you ran in the PR description.
@@ -63,8 +63,8 @@ the component, and describe what you ran in the PR description.
 |---|---|---|---|
 | `api/` | Python 3.12+ (the Docker image pins 3.13), FastAPI, plain `sqlite3` (no ORM) | `cd api && pip install -r requirements.txt -r requirements-dev.txt`, then `pytest` | Runs fully offline, no Docker needed (CI-gated, so `main` is green by construction; the CI run shows the count). This is what CI's `api-tests` job runs (see the CI note below). |
 | `agent/` | Go (module targets windows/amd64, linux/amd64, linux/arm64) | `cd agent/go && go build ./... && go vet ./... && gofmt -l . && go test ./...` | Runs fully offline. Verified for this document: builds and `go test ./...` passes on all six packages. **Windows-checkout caveat, verified while writing this doc:** if your local clone has `core.autocrlf=true` (common on Windows), `gofmt -l .` will list every `.go` file — that's `gofmt`'s LF-normalization disagreeing with your checkout's CRLF line endings, not a real style violation. Judge `gofmt` output from a checkout with `autocrlf=input` or `false` (or run it inside WSL/Linux against a Unix-checked-out copy) if you need a meaningful signal. This is what CI's `agent-go` job runs, on both Linux and Windows (see the CI note below). |
-| `core/` | nginx config (no code, just config + comments) | `core/tests/test-core.ps1` (PowerShell) | **Local-only.** Sends real requests to the live Steam CDN and needs the Windows nginx binary from `poc/` (see `core/README.md`). CI (`core-nginx-config`) only runs `nginx -t` against the rendered config template plus the config-drift check, and parses this script for PowerShell 5.1 syntax — it does not run this suite. |
-| `dns/` | dnsmasq config template | `dns/tests/test-dnsmasq-config.ps1` (PowerShell, drives WSL2) | **Local-only.** Needs PowerShell plus a WSL2 distro with `dnsmasq` installed (see `dns/README.md`). Won't run in CI. |
+| `core/` | nginx config template + POSIX sh start hooks | `sh core/tests/test-template-invariants.sh` (docker-free), then `bash .github/scripts/verify-core-nginx.sh` (needs Docker) | The template `core/docker/nginx.conf.template` is the only nginx config (see `core/README.md` "Testing"). The script runs every docker-free core test first, then renders the template in the pinned nginx image and runs `nginx -t` plus offline probes. This is what CI's `core-nginx-config` job runs. Real Steam CDN behaviour is covered by `deploy/` below. |
+| `dns/` | dnsmasq config template | `deploy/tests/verify-stack.sh` section 7 (`VERIFY_SECTIONS=7`) | No separate suite: the live A/AAAA/forwarding checks run in the stack test (see `dns/README.md`). |
 | `web/` | Plain HTML/CSS/JS, no build step; tests on Node's built-in runner | `node --test "web/tests/*.test.js"` | Runs fully offline, no browser needed (`web/tests/fake-dom.js` is the shared minimal in-memory DOM). Use a current Node — CI pins Node 24 (see `web/tests/README.md` for the quoting caveat). This is what CI's `web-tests` job runs. |
 | `app/` | Kotlin + Jetpack Compose, Gradle | `cd app && ./gradlew test lintDebug` (`gradlew.bat` on Windows; needs an Android SDK) | Runs offline after the first dependency download; JVM unit tests only — nothing here runs on a device or emulator (see `app/README.md`). CI's `android-tests` job runs the same plus `assembleDebug`. |
 | `deploy/` | Docker Compose | `sudo sh deploy/tests/verify-stack.sh` | Builds and runs the whole stack for real, including a real Steam CDN MISS→HIT cycle; needs a working Docker Engine with Compose v2 and root (or a `docker` group membership) on the host. **Not part of the PR gate** — CI runs it only on the nightly schedule and on manual dispatch (see the CI note below). |
@@ -73,9 +73,9 @@ the component, and describe what you ran in the PR description.
 and is intentionally narrower than "everything above". Its PR-gate jobs are
 `api-tests` (pytest), `agent-go` (build/vet/gofmt/test on Linux and
 Windows), `core-nginx-config` (`nginx -t` through the image's real
-entrypoint render path plus the config-drift check), `powershell-syntax`
+entrypoint render path plus the template invariant check), `powershell-syntax`
 (PowerShell 5.1 parser gate for the scripts under `agent/packaging/windows/`,
-plus parse-only checks of `core/tests/` and `dns/tests/`), `web-tests` (`node --test`) and `android-tests`
+plus a parse-only check of the web UI's generated install command), `web-tests` (`node --test`) and `android-tests`
 (`assembleDebug`, both unit-test variants, `lintDebug`), plus
 `deploy-static` (shellcheck over the shipped shell scripts and a
 `docker compose config` render of `deploy/compose.yaml`; no containers
@@ -85,7 +85,7 @@ pushed, so a broken Dockerfile or `.dockerignore` fails the PR rather
 than the release tag). No container is ever started on a PR: the live-stack
 job, `verify-stack`, runs on a nightly cron and on manual dispatch only,
 so a PR is never blocked on a running stack or the Steam CDN. Anything
-that needs the live Steam CDN or a Windows nginx binary stays local-only —
+that needs the live Steam CDN or a real Windows machine stays local-only —
 see the table above, and don't be surprised if a CI-green PR still needs
 one of the local-only suites run by hand before a component maintainer
 approves it. `publish.yml` (images, signed APK, agent binaries) runs only

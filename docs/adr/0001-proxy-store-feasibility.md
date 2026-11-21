@@ -90,3 +90,35 @@ shipped platform-neutral in Phase 2 (`agent/README.md`, "The Linux-client
 finding"). Read "hosts-file mode remains Windows-only in docs" as
 superseded: the mode is for a single gaming PC, Windows or Linux/SteamOS;
 DNS mode stays the recommended path for multi-device LANs.
+
+## Addendum (2026-11-21): one nginx config source (NGINX-DUP-1)
+
+The Consequences above say the production config "derives from
+`poc/conf/nginx.conf` plus requirements 1-4". WP 1.1 wrote that config as
+`core/nginx/nginx.conf`, run natively on Windows with the PoC's nginx
+binary by `core/tests/test-core.ps1` against the real Steam CDN. WP 1.9
+added the container copy `core/docker/nginx.conf.template` and
+`core/docker/check-config-drift.sh`, which allowed only the container
+plumbing lines to differ. The 2026-11-20 audit (C-1) found the price: 12
+double changes since 2026-10-01, while the native rig (and the WP 1.7 MVP
+script and the WP 1.8 dnsmasq rig, all needing `poc/`) had not run since
+then. Operator decision 2026-11-21, Weg B:
+
+- The template is the only nginx config. The native file, the drift
+  checker (and its CI step), `core/tests/test-core.ps1` with its two
+  fixtures, `core/tests/mvp/run-mvp.ps1` and `dns/tests/test-dnsmasq-config.ps1`
+  with its WSL2 helper are removed. The WP 1.7 `RESULTS-*.md` stay as
+  evidence (`core/tests/mvp/README.md`).
+- The native static includes become goldens of the hooks' default renders
+  in `core/docker/golden/`, still compared byte for byte by the image build
+  and `core/tests/`.
+- `core/tests/test-template-invariants.sh` keeps every check the drift
+  checker made about the template, the hooks and the goldens, under the
+  same step numbers (so "drift step 2c/2d/2e/2f" in ADR-0016, ADR-0017,
+  ADR-0020 and ADR-0021 now means that script), and adds exact directive
+  lists (step 2g) for the blocks whose behaviour the native rig proved.
+  core/README.md "Testing" maps each rig group to its coverage today.
+- What is lost: the native rig's live checks of Range stripping, the
+  retried `502, 200` store, gzip, BYPASS typing, the heartbeat's missing
+  event line and the hostile-URI line are now held by config pins only.
+  A live offline rig for them is roadmap item CORE-LIVE-PARITY-1.

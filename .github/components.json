@@ -10,7 +10,6 @@
       "paths": [
         "core/Dockerfile",
         "core/docker/",
-        "core/nginx/",
         "dns/Dockerfile",
         "dns/dnsmasq.conf.template",
         "dns/docker-entrypoint.sh",
