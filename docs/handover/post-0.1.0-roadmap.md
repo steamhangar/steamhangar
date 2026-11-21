@@ -2159,9 +2159,9 @@ AUDIT-DECISIONS-1, GO-LINE-1 (with ROLLOUT-DOC-1, README-KEYS-1),
 APP-AUDIT-1 (PERSONA-LOAD-1, BACKOFF-DEAD-1), CONTRAST-1 (LINE-CONTRAST-1,
 GLYPH-CONTRAST-1), ACTIVE-STATUS-1, NITS-AUDIT-API-1 (with CLOCK-SEAM-1),
 AGENT-RC8-COMPAT-1, NITS-AUDIT-OPS-1, SEC-HARDEN-1, PILL-TONE-1,
-FONT-FLOOR-1, TM-CROSS-SITE-1. Finishing on their branches:
-NITS-AUDIT-APP-1 with VERIFY-ALL-LABEL-1 (`wp/nits-audit-app-1`, review
-passed, goldens round) and NGINX-DUP-1 (`wp/nginx-dup-1`, review fixes).
+FONT-FLOOR-1, TM-CROSS-SITE-1, NGINX-DUP-1 (follow-up
+CORE-LIVE-PARITY-1), NITS-AUDIT-APP-1 with VERIFY-ALL-LABEL-1,
+AUDIT-STATUS-1 (all on `main` at `f98da86`, CI green).
 Not started: DESIGN-NITS-1, then NEUTRAL-RAMP-1, then DESIGN-MD-1 (in this
 order, each with one goldens round); OLD-SERVER-FALLBACK-1;
 NITS-AUDIT-WEB-1; moving the StatusIconLogic arrow helpers to the test
