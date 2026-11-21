@@ -425,8 +425,10 @@ fun bucketShort(bucketSeconds: Int?): String {
  * WP APP-DL-STATS-1 (web `highestBucketSeconds`): the period the highest
  * point averages over: a live point's own [SeriesPointOut.bucket_seconds]
  * (the live series mixes 5, 15 and 60 s points, [liveSeries] keeps each
- * one's length), else the series' bucket. The first highest point counts;
- * `null` without points.
+ * one's length), else the series' bucket. That is the bucket's LENGTH: the
+ * newest (still running) bucket may cover less, and the server then divides
+ * by the seconds elapsed in it. On a tie the FIRST (oldest) highest point
+ * counts (`>`, not `>=`), as for the graph's maximum. `null` without points.
  */
 fun highestBucketSeconds(series: SeriesOut): Int? {
     var best: SeriesPointOut? = null
@@ -449,6 +451,20 @@ fun highestSuffix(series: SeriesOut): String {
     val word = bucketShort(highestBucketSeconds(series))
     return if (word.isNotEmpty()) " ($word avg)" else ""
 }
+
+/** WP APP-DL-STATS-1 review (web `highestPeriodText`): the period for
+ * TalkBack (the axis captions are decoration), or "" when unknown. */
+fun highestPeriodText(series: SeriesOut): String {
+    val word = bucketShort(highestBucketSeconds(series))
+    return if (word.isNotEmpty()) "The highest point is an average over $word." else ""
+}
+
+/** WP APP-DL-STATS-1 (web `graphLabel`): the graph's content description:
+ * [seriesLabel], the highest point's period, then [HIGHEST_NOTE]. */
+fun graphLabel(series: SeriesOut, maxBytesPerSecond: Double): String =
+    listOf(seriesLabel(series, maxBytesPerSecond), highestPeriodText(series), HIGHEST_NOTE)
+        .filter { it.isNotEmpty() }
+        .joinToString(" ")
 
 /** The graph's right-edge caption. */
 const val SERIES_END_TEXT = "now"

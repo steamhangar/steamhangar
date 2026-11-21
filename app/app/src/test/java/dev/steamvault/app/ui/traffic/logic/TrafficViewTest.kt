@@ -275,6 +275,16 @@ class TrafficViewTest {
         assertEquals(" (15 s avg)", highestSuffix(live))
         val fine = liveSeries(LiveOut(event_feed = feed("ok"), points = listOf(livePoint("a", 60, 1.0), livePoint("b", 5, 7.0))))
         assertEquals(" (5 s avg)", highestSuffix(fine))
+        // A tie: the first (oldest) highest point counts.
+        val tie = liveSeries(LiveOut(event_feed = feed("ok"), points = listOf(livePoint("a", 60, 7.0), livePoint("b", 5, 7.0))))
+        assertEquals(" (1 min avg)", highestSuffix(tie))
+        // TalkBack hears the period too, between the label and the note.
+        assertEquals("The highest point is an average over 15 s.", highestPeriodText(live))
+        assertEquals("", highestPeriodText(SeriesOut(range = "24h", bucket_seconds = 300, points = emptyList())))
+        assertEquals(
+            "Average speed per 5 minutes in the last 24 hours. Highest: < 1 KB/s. The highest point is an average over 5 min. $HIGHEST_NOTE",
+            graphLabel(persisted, 9.0),
+        )
         assertNull(highestBucketSeconds(SeriesOut(range = "24h", bucket_seconds = 300, points = emptyList())))
         assertEquals("", highestSuffix(SeriesOut(range = "24h", bucket_seconds = 300, points = emptyList())))
         // Literal (cross-frontend contract): TrafficWebTwinTest pins it against the web.

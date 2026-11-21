@@ -91,18 +91,26 @@ class AndroidDl1WiringTest {
         assertCalledFrom(stats, "clearAndSetSemantics { contentDescription = status.text }", "StatusPill")
     }
 
-    /** WP APP-DL-STATS-1: the middle caption names the period of the highest point. */
+    /** WP APP-DL-STATS-1: the middle caption names the period of the highest
+     * point; the edge captions keep one line, the middle one takes the rest
+     * (review must-fix: "now" was squeezed at 360dp / font 1.3). */
     @Test
     fun `MUTATION PIN -- the graph highest caption carries the averaging period`() {
         val graph = body(stats, "ThroughputGraph")
         assertTrue(
             "ThroughputGraph no longer appends highestSuffix(shown) to the highest caption",
-            graph.contains("seriesHighestText(geo.maxBytesPerSecond) + highestSuffix(shown)"),
+            graph.contains("middle = seriesHighestText(geo.maxBytesPerSecond) + highestSuffix(shown),"),
         )
+        assertTrue("ThroughputGraph no longer draws GraphAxisCaptions", graph.contains("GraphAxisCaptions("))
         assertTrue(
-            "ThroughputGraph's content description lost HIGHEST_NOTE",
-            graph.contains("contentDescription = \"\$label \$HIGHEST_NOTE\""),
+            "the axis captions must stay decoration (cleared semantics)",
+            graph.contains("modifier = Modifier.fillMaxWidth().clearAndSetSemantics {},"),
         )
+        assertTrue("ThroughputGraph's content description is no longer graphLabel", graph.contains("val label = graphLabel(shown, geo.maxBytesPerSecond)"))
+        assertCalledFrom(stats, "Text(start, style = captionStyle, color = captionColor, maxLines = 1, softWrap = false)", "GraphAxisCaptions")
+        assertCalledFrom(stats, "Text(end, style = captionStyle, color = captionColor, maxLines = 1, softWrap = false,", "GraphAxisCaptions")
+        assertCalledFrom(stats, "modifier = Modifier.weight(1f).testTag(GRAPH_HIGHEST_TAG),", "GraphAxisCaptions")
+        assertCalledFrom(stats, "textAlign = TextAlign.Center,", "GraphAxisCaptions")
     }
 
     @Test

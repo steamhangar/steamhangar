@@ -160,7 +160,7 @@ test("WP APP-DL-STATS-1: graphModel names the highest point's period, explains i
   const g = graphModel(live, "live");
   assert.equal(g.axis[1], "highest 19.0 MB/s (5 s avg)");
   assert.equal(g.axisTitle, HIGHEST_NOTE);
-  assert.ok(g.label.endsWith(` ${HIGHEST_NOTE}`), "the svg's name carries the note (the captions are aria-hidden)");
+  assert.ok(g.label.endsWith(` The highest point is an average over 5 s. ${HIGHEST_NOTE}`), "the svg's name carries the period and the note (the captions are aria-hidden)");
   assert.ok(g.label.startsWith("Average speed per 5 seconds in the last hour. Highest: 19.0 MB/s."), "the pinned label stays first");
   const hero = createDownloadsHero({ range: "live", onRangeChange() {} });
   hero.paint({ throughput: { ...throughput(), range: "live" }, series: live, range: "live", rateCap: null, error: null, noFigures: false });
@@ -400,4 +400,10 @@ test("paintHistoryPanel: generic failure keeps the log unfolded; a done job show
   paintHistoryPanel(panel, { display: selectExcerptDisplay({ expanded: false }) });
   assert.equal(panel.hidden, true);
   assert.equal(panel.children.length, 0);
+});
+
+test("WP APP-DL-STATS-1 (review): the middle axis caption centres when it wraps (kit.css; Android GraphAxisCaptions)", async () => {
+  const { readFileSync } = await import("node:fs");
+  const css = readFileSync(new URL("../css/kit.css", import.meta.url), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+  assert.match(css, /\.kit \.graph \.ax span:nth-child\(2\):not\(:last-child\)\{\s*text-align:\s*center;\s*\}/);
 });

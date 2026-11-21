@@ -125,13 +125,18 @@ class TrafficWebTwinTest {
                 "return word ? ` (\${word} avg)` : \"\";",
                 // The highest point's own length first (live points), else the series'.
                 "if (own !== null) return own;",
+                // Ties: the first (oldest) highest point, like the Kotlin `v > bestValue`.
+                "if (best === null || v > best.v) best = { v, p };",
+                // The period for screen readers, and the graph's accessible name.
+                "return word ? `The highest point is an average over \${word}.` : \"\";",
+                "return [seriesLabel(series, maxBytesPerSecond), highestPeriodText(series), HIGHEST_NOTE].filter(Boolean).join(\" \");",
             ),
         )
         assertFragments(
             "components/downloads-hero.js",
             listOf(
                 "`highest \${formatSpeed(geo.maxBytesPerSecond) || \"0 MB/s\"}` + highestSuffix(shown)",
-                "label: `\${seriesLabel(series, geo.maxBytesPerSecond)} \${HIGHEST_NOTE}`,",
+                "label: graphLabel(shown, geo.maxBytesPerSecond),",
             ),
         )
     }

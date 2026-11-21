@@ -35,6 +35,8 @@ import {
   bucketShort,
   highestBucketSeconds,
   highestSuffix,
+  highestPeriodText,
+  graphLabel,
   liveSeries,
 } from "../js/lib/traffic-view.js";
 
@@ -250,6 +252,16 @@ test("WP APP-DL-STATS-1: the graph's 'highest' names the period its point averag
   assert.equal(highestSuffix(live), " (15 s avg)");
   const fine = liveSeries({ event_feed: { state: "ok" }, range_start: null, points: [{ t: "a", bucket_seconds: 60, bytes_per_second: 1 }, { t: "b", bucket_seconds: 5, bytes_per_second: 7 }] });
   assert.equal(highestSuffix(fine), " (5 s avg)");
+  // A tie: the first (oldest) highest point counts (Android twin: the same case).
+  const tie = liveSeries({ event_feed: { state: "ok" }, range_start: null, points: [{ t: "a", bucket_seconds: 60, bytes_per_second: 7 }, { t: "b", bucket_seconds: 5, bytes_per_second: 7 }] });
+  assert.equal(highestSuffix(tie), " (1 min avg)");
+  // Screen readers hear the period too, between the label and the note.
+  assert.equal(highestPeriodText(live), "The highest point is an average over 15 s.");
+  assert.equal(highestPeriodText({ bucket_seconds: 300, points: [] }), "");
+  assert.equal(
+    graphLabel(persisted, 9),
+    `Average speed per 5 minutes in the last 24 hours. Highest: < 1 KB/s. The highest point is an average over 5 min. ${HIGHEST_NOTE}`,
+  );
   assert.equal(highestBucketSeconds({ bucket_seconds: 300, points: [] }), null);
   assert.equal(highestSuffix({ bucket_seconds: 300, points: [] }), "");
   // The words (Android twin: TrafficView.kt HIGHEST_NOTE, TrafficWebTwinTest).

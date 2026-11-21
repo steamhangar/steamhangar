@@ -49,13 +49,13 @@ import {
   feedState,
   formatSpeed,
   formatTrafficBytes,
+  graphLabel,
   HIGHEST_NOTE,
   headerTiles,
   highestSuffix,
   joinNotes,
   refreshFailedText,
   seriesGeometry,
-  seriesLabel,
   seriesStartText,
   trimSeries,
 } from "../lib/traffic-view.js";
@@ -465,9 +465,10 @@ export function graphModel(series, range, { nowMs = Date.now() } = {}) {
     // WP WEB-FIX-20.2: served-from-cache under from-the-internet, or null
     // (no hit/miss split in the points: the single total line).
     split: split ? { served: split.served, internet: split.internet } : null,
-    // WP APP-DL-STATS-1: the name also says why "highest" can be above the
-    // upstream limit (HIGHEST_NOTE), the axis caption's tooltip too.
-    label: `${seriesLabel(series, geo.maxBytesPerSecond)} ${HIGHEST_NOTE}`,
+    // WP APP-DL-STATS-1: the name also says the highest point's period and
+    // why "highest" can be above the upstream limit (HIGHEST_NOTE, the axis
+    // captions' tooltip too).
+    label: graphLabel(shown, geo.maxBytesPerSecond),
     // The axis keeps the established "highest" wording (the Android app
     // says the same, pinned by TrafficWebTwinTest); the mini line's "Peak"
     // is a separate figure. WP APP-DL-STATS-1: the period the point

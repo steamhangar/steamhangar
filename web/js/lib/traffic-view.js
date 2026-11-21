@@ -570,7 +570,10 @@ export function bucketShort(bucketSeconds) {
 /**
  * WP APP-DL-STATS-1: the period the graph's highest point averages over: a
  * live point's own `bucket_seconds` (the live series mixes 5, 15 and 60 s
- * points), else the series' bucket. `null` without points.
+ * points), else the series' bucket. That is the bucket's LENGTH: the newest
+ * (still running) bucket may cover less, and the server then divides by the
+ * seconds elapsed in it. On a tie the FIRST (oldest) highest point counts
+ * (`>`, not `>=`), as for the graph's maximum. `null` without points.
  * @param {{bucket_seconds?: number, points?: Array<{bytes_per_second?: number, bucket_seconds?: number}>}} series
  * @returns {number | null}
  */
@@ -596,6 +599,29 @@ export function highestBucketSeconds(series) {
 export function highestSuffix(series) {
   const word = bucketShort(highestBucketSeconds(series));
   return word ? ` (${word} avg)` : "";
+}
+
+/**
+ * WP APP-DL-STATS-1 (review): the period for screen readers (the axis
+ * captions are decoration): "The highest point is an average over 5 s.",
+ * or "" when unknown.
+ * @param {object} series
+ * @returns {string}
+ */
+export function highestPeriodText(series) {
+  const word = bucketShort(highestBucketSeconds(series));
+  return word ? `The highest point is an average over ${word}.` : "";
+}
+
+/**
+ * WP APP-DL-STATS-1: the graph's accessible name: `seriesLabel`, the
+ * highest point's period, then `HIGHEST_NOTE` (Android twin `graphLabel`).
+ * @param {object} series
+ * @param {number} maxBytesPerSecond
+ * @returns {string}
+ */
+export function graphLabel(series, maxBytesPerSecond) {
+  return [seriesLabel(series, maxBytesPerSecond), highestPeriodText(series), HIGHEST_NOTE].filter(Boolean).join(" ");
 }
 
 /**

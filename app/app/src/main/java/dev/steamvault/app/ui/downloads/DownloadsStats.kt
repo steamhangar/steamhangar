@@ -33,6 +33,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
@@ -47,6 +48,7 @@ import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -70,7 +72,6 @@ import dev.steamvault.app.ui.traffic.logic.DEFAULT_STATS_RANGE
 import dev.steamvault.app.ui.traffic.logic.EtaSmoother
 import dev.steamvault.app.ui.traffic.logic.FeedState
 import dev.steamvault.app.ui.traffic.logic.HERO_LABEL
-import dev.steamvault.app.ui.traffic.logic.HIGHEST_NOTE
 import dev.steamvault.app.ui.traffic.logic.HISTORY_LIMIT
 import dev.steamvault.app.ui.traffic.logic.HeroFigures
 import dev.steamvault.app.ui.traffic.logic.HeroMini
@@ -88,6 +89,7 @@ import dev.steamvault.app.ui.traffic.logic.SERIES_END_TEXT
 import dev.steamvault.app.ui.traffic.logic.STATS_RANGES
 import dev.steamvault.app.ui.traffic.logic.feedState
 import dev.steamvault.app.ui.traffic.logic.graphGeometryToShow
+import dev.steamvault.app.ui.traffic.logic.graphLabel
 import dev.steamvault.app.ui.traffic.logic.headerTiles
 import dev.steamvault.app.ui.traffic.logic.heroFigures
 import dev.steamvault.app.ui.traffic.logic.highestSuffix
@@ -101,7 +103,6 @@ import dev.steamvault.app.ui.traffic.logic.mergeLive
 import dev.steamvault.app.ui.traffic.logic.mergeNow
 import dev.steamvault.app.ui.traffic.logic.pollNote
 import dev.steamvault.app.ui.traffic.logic.seriesHighestText
-import dev.steamvault.app.ui.traffic.logic.seriesLabel
 import dev.steamvault.app.ui.traffic.logic.seriesStartText
 import dev.steamvault.app.ui.traffic.logic.splitGeometry
 import dev.steamvault.app.ui.traffic.logic.trimSeries
@@ -571,7 +572,7 @@ private const val GRAPH_H = 60f
 /**
  * The throughput graph (web `paintGraph`): a filled line over the range,
  * oldest left. Shown only when [graphGeometryToShow] says so. The canvas
- * is an image named by [seriesLabel]; the captions under it are
+ * is an image named by [graphLabel]; the captions under it are
  * decoration (web `aria-hidden`), the label already says the same.
  *
  * WP ANDROID-DL-1 (web WEB-FIX-20.2 + RUNNER-SPLIT-1): two stacked bands,
@@ -583,7 +584,8 @@ private fun ThroughputGraph(series: SeriesOut?, selectedRange: String, unsupport
     // WP GRAPH-ZOOM: only the span that has data; the axis caption follows it.
     val shown = series?.let { it.copy(points = trimSeries(it.points)) } ?: return
     val geo = graphGeometryToShow(shown, selectedRange, unsupported, GRAPH_W, GRAPH_H) ?: return
-    val label = seriesLabel(shown, geo.maxBytesPerSecond)
+    // WP APP-DL-STATS-1: label, the highest point's period and HIGHEST_NOTE.
+    val label = graphLabel(shown, geo.maxBytesPerSecond)
     val split = splitGeometry(shown.points, GRAPH_W, GRAPH_H)
     Column(modifier = Modifier.fillMaxWidth()) {
         Canvas(
@@ -591,8 +593,7 @@ private fun ThroughputGraph(series: SeriesOut?, selectedRange: String, unsupport
                 .fillMaxWidth()
                 .height(88.dp)
                 .semantics {
-                    // WP APP-DL-STATS-1: why "highest" can be above the limit (web: the svg's name).
-                    contentDescription = "$label $HIGHEST_NOTE"
+                    contentDescription = label
                     role = Role.Image
                 },
         ) {
@@ -642,14 +643,42 @@ private fun ThroughputGraph(series: SeriesOut?, selectedRange: String, unsupport
                 drawPath(servedLine, color = VaultColors.StatusOk, style = stroke)
             }
         }
-        Row(
+        GraphAxisCaptions(
+            start = seriesStartText(shown, nowMs()),
+            middle = seriesHighestText(geo.maxBytesPerSecond) + highestSuffix(shown),
+            end = SERIES_END_TEXT,
             modifier = Modifier.fillMaxWidth().clearAndSetSemantics {},
-            horizontalArrangement = Arrangement.SpaceBetween,
-        ) {
-            for (text in listOf(seriesStartText(shown, nowMs()), seriesHighestText(geo.maxBytesPerSecond) + highestSuffix(shown), SERIES_END_TEXT)) {
-                Text(text, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-        }
+        )
         if (split != null) GraphLegend()
+    }
+}
+
+/** Test tags of [GraphAxisCaptions]' middle and end captions. */
+internal const val GRAPH_HIGHEST_TAG = "graph-axis-highest"
+internal const val GRAPH_END_TAG = "graph-axis-end"
+
+/**
+ * The graph's axis captions under the canvas (web `.graph .ax`): [start] and
+ * [end] keep one line at their own width; [middle] ("highest 19.0 MB/s
+ * (1 day avg)") takes the rest, centred, and may wrap to a second centred
+ * line. WP APP-DL-STATS-1 review: with three plain Texts in a SpaceBetween
+ * row, "since 2026-09-01" plus the longer middle caption squeezed "now" at
+ * 360dp / font 1.3. The caller passes the semantics ([ThroughputGraph]
+ * clears them: decoration, the canvas' name already says it).
+ */
+@Composable
+internal fun GraphAxisCaptions(start: String, middle: String, end: String, modifier: Modifier = Modifier) {
+    val captionStyle = MaterialTheme.typography.labelSmall
+    val captionColor = MaterialTheme.colorScheme.onSurfaceVariant
+    Row(modifier = modifier, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(start, style = captionStyle, color = captionColor, maxLines = 1, softWrap = false)
+        Text(
+            middle,
+            style = captionStyle,
+            color = captionColor,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.weight(1f).testTag(GRAPH_HIGHEST_TAG),
+        )
+        Text(end, style = captionStyle, color = captionColor, maxLines = 1, softWrap = false, modifier = Modifier.testTag(GRAPH_END_TAG))
     }
 }

@@ -523,6 +523,8 @@
 .kit .graph .glegend i{ width:8px; height:8px; border-radius:50%; background:var(--accent); flex:none; }
 .kit .graph .glegend .srv i{ background:var(--ok); }
 .kit .graph .ax{ display:flex; justify-content:space-between; gap:var(--sp-2); font:var(--fs-1) var(--mono); color:var(--dim); margin-top:var(--sp-1); }
+/* WP APP-DL-STATS-1: the middle caption ("highest ... (1 day avg)") centres when it wraps (Android twin: GraphAxisCaptions). */
+.kit .graph .ax span:nth-child(2):not(:last-child){ text-align:center; }
 .kit .mini{
   grid-column:1; display:flex; gap:var(--sp-2) var(--sp-5); flex-wrap:wrap; font-size:var(--fs-2); color:var(--dim);
   border-top:1px solid var(--line-soft); padding-top:var(--sp-3);
