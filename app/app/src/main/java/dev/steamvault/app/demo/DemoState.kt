@@ -44,7 +44,6 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonPrimitive
 import java.time.Instant
-import java.time.temporal.ChronoUnit
 
 /**
  * Demo mode's in-memory fixture data (WP APP-DEMO brief). The whole point of
@@ -498,7 +497,7 @@ class DemoState private constructor(
      */
     @Synchronized
     fun clientPriority(): ClientPriorityOut {
-        val now = Instant.now().truncatedTo(ChronoUnit.SECONDS)
+        val now = Instant.ofEpochSecond(Instant.now().epochSecond) // whole seconds, like the API
         return ClientPriorityOut(
             enabled = true,
             holding = true,
