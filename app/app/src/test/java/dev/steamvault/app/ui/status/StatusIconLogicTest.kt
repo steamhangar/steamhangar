@@ -135,11 +135,11 @@ class StatusIconLogicTest {
         assertEquals(VaultColors.Raised2, pillGroundColor(StatusTone.NEUTRAL))
         // Web `color-mix(in srgb, var(--T) 14%, var(--surface))`, rounded to #RRGGBB.
         val web = mapOf(
-            StatusTone.OK to 0x1B3732,
-            StatusTone.RUN to 0x31352C,
-            StatusTone.STALE to 0x302925,
-            StatusTone.DANGER to 0x32282F,
-            StatusTone.NONE to 0x212D36,
+            StatusTone.OK to 0x1B382F,
+            StatusTone.RUN to 0x313628,
+            StatusTone.STALE to 0x302A22,
+            StatusTone.DANGER to 0x32282B,
+            StatusTone.NONE to 0x212E32,
         )
         for ((tone, rgb) in web) {
             val ground = pillGroundColor(tone)
@@ -169,15 +169,21 @@ class StatusIconLogicTest {
 
     @Test
     fun `every pill word is 4 point 5 to 1 or more on its own ground, whatever the parent (PILL-TONE-1)`() {
-        // Web twin: css-contrast.test.js (ok 7.39, run 8.21, stale 5.16,
-        // danger 5.24, none 4.60, neutral 5.05).
+        // Web twin: css-contrast.test.js (ok 7.33, run 8.14, stale 5.12,
+        // danger 5.26, none 4.58, neutral 5.06; NEUTRAL-RAMP-1). These are the
+        // Android values: Compose stores an sRGB Color as 8-bit ARGB, so
+        // `copy(alpha = 0.14f)` is 36/255 (0.141) and the composite is rounded
+        // to 8 bits again. That puts the danger ground at #33292B where the web
+        // `color-mix(... 14% ...)` gives #32282B (within the 1-per-channel
+        // tolerance of the ground test above), so the danger word is 5.20:1
+        // here against 5.26:1 on the web; the other tones agree to 0.01.
         val expected = mapOf(
-            StatusTone.OK to 7.39,
-            StatusTone.RUN to 8.21,
-            StatusTone.STALE to 5.16,
-            StatusTone.DANGER to 5.24,
-            StatusTone.NONE to 4.60,
-            StatusTone.NEUTRAL to 5.05,
+            StatusTone.OK to 7.33,
+            StatusTone.RUN to 8.14,
+            StatusTone.STALE to 5.12,
+            StatusTone.DANGER to 5.20,
+            StatusTone.NONE to 4.58,
+            StatusTone.NEUTRAL to 5.06,
         )
         assertEquals(StatusTone.entries.toSet(), expected.keys)
         for (tone in StatusTone.entries) {
@@ -197,7 +203,7 @@ class StatusIconLogicTest {
                 assertTrue("card word $word on $ground is ${"%.2f".format(r)}:1", r >= 4.5)
             }
         }
-        assertEquals(5.65, contrast(VaultColors.StatusNone, VaultColors.Surface), 0.01)
+        assertEquals(5.63, contrast(VaultColors.StatusNone, VaultColors.Surface), 0.01)
         assertEquals(6.25, contrast(VaultColors.StatusNone, VaultColors.Bg), 0.01)
     }
 

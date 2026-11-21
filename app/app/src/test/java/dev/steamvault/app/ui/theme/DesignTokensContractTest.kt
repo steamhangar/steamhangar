@@ -108,14 +108,14 @@ class DesignTokensContractTest {
     }
 
     @Test
-    fun `Dim2 is the lifted 7A91A0 (UI-KIT-1, literal pin)`() {
-        assertEquals("#7A91A0", rgbHex(VaultColors.Dim2))
+    fun `Dim2 is 7C9298, the lifted 7A91A0 turned by NEUTRAL-RAMP-1 (UI-KIT-1, literal pin)`() {
+        assertEquals("#7C9298", rgbHex(VaultColors.Dim2))
     }
 
     @Test
-    fun `LineStrong is 5F727E and Line stays 24363F (CONTRAST-1, literal pin)`() {
-        assertEquals("#5F727E", rgbHex(VaultColors.LineStrong))
-        assertEquals("#24363F", rgbHex(VaultColors.Line))
+    fun `LineStrong is 5F7379 and Line 26363B (CONTRAST-1, NEUTRAL-RAMP-1, literal pin)`() {
+        assertEquals("#5F7379", rgbHex(VaultColors.LineStrong))
+        assertEquals("#26363B", rgbHex(VaultColors.Line))
     }
 
     @Test

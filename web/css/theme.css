@@ -9,27 +9,33 @@
    ============================================================ */
 
 :root{
-  --bg:#0A1016;
-  --surface:#111C24;
-  --raised:#17252F;
-  --raised-2:#1D303C;
-  --line:#24363F;
-  --line-soft:#1B2A33;
+  /* WP NEUTRAL-RAMP-1 (audit D-7, Weg B): the neutral ramp below, --none
+     included, turned from OKLCH hue 230-249 toward the accent (hue ~218):
+     lightness kept, chroma 0.014 for --bg up to 0.026 for the mid tones.
+     Every contrast pair is recomputed in web/tests/css-contrast.test.js. */
+  --bg:#081113;
+  --surface:#111D20;
+  --raised:#18262A;
+  --raised-2:#213035;
+  --line:#26363B;
+  --line-soft:#1D2A2E;
   /* WP CONTRAST-1 (LINE-CONTRAST-1, audit 2026-11-20): the border of a
      control that is identified by its border (text input, select, the
      fused sort box, the icon segmented switch). --line is only 1.52:1 on
-     --bg; WCAG 1.4.11 asks 3:1. #5F727E is 3.82:1 on --bg, 3.45:1 on
-     --surface, 3.13:1 on --raised. --line stays for separators and cards. */
-  --line-strong:#5F727E;
-  --text:#E4EFF3;
-  --dim:#8AA1AD;
+     --bg; WCAG 1.4.11 asks 3:1. --line-strong is 3.83:1 on --bg, 3.45:1 on
+     --surface, 3.12:1 on --raised (#5F727E until NEUTRAL-RAMP-1, same
+     lightness). --line stays for separators and cards. */
+  --line-strong:#5F7379;
+  --text:#E6EFF1;
+  --dim:#8DA1A7;
   /* WP UI-KIT-1: lifted from #63798A (3.8:1 on --surface, fails WCAG AA for
-     11px captions) to #7A91A0 (5.0:1). Tertiary text and grips only. The
+     11px captions) to #7A91A0 (5.0:1; #7C9298 since NEUTRAL-RAMP-1, 5.26:1).
+     Tertiary text and grips only. The
      Android twin's Color.kt followed in WP TOKENS-SYNC-1; both are checked
      against docs/design/tokens.json. WP CONTRAST-1 adds two non-text
      uses that need 3:1 on --raised-2: control borders on the --raised-2
-     popover and the selected-segment ring (4.15:1). */
-  --dim-2:#7A91A0;
+     popover and the selected-segment ring (4.17:1). */
+  --dim-2:#7C9298;
 
   --accent:#2ED9CE;
   --accent-deep:#12A79F;
@@ -39,14 +45,14 @@
   /* Status set — hues chosen for deuteranopia/protanopia separation
      (mockup round 5): the three "coloured" states differ in LIGHTNESS as
      well as hue, because red-green colour-blindness collapses them onto a
-     light-dark axis; grey ("none") is fully desaturated so it always
-     reads as neutral. Colour is only the THIRD cue here — the status-icon
-     glyph shape is first, the status word second (see the .sic rules
-     below and js/components/status-icon.js). */
+     light-dark axis; grey ("none") is a low-chroma member of the neutral
+     ramp (NEUTRAL-RAMP-1) so it always reads as neutral. Colour is only
+     the THIRD cue here — the status-icon glyph shape is first, the status
+     word second (see the .sic rules below and js/components/status-icon.js). */
   --ok:#57DD8A;
   --run:#F2CE5B;
   --stale:#F07B2E;
-  --none:#8296A6;
+  --none:#82979E;
   --danger:#FF6F6F;
 
   --ui: "Roboto","Segoe UI Variable Text","Segoe UI",system-ui,-apple-system,"Helvetica Neue",sans-serif;
@@ -378,8 +384,9 @@ a{ color:var(--accent); }
 .sic.k-error   { background:var(--danger); }
 .sic.k-warn    { background:var(--stale); }
 /* WP CONTRAST-1 (GLYPH-CONTRAST-1, audit 2026-11-20): the grey --dim-2
-   discs below keep the shared dark ink too (5.79:1). They used --text
-   until then, 2.81:1, under the 3:1 a glyph needs (WCAG 1.4.11). */
+   discs below keep the shared dark ink too (5.79:1 then, 5.82:1 on today's
+   ramp). They used --text until then, 2.81:1 then (2.80:1 on today's
+   ramp), under the 3:1 a glyph needs (WCAG 1.4.11). */
 /* Added WP 4a.5: a stopped-on-purpose job is neither a failure (--danger)
    nor a success (--ok) — the muted, desaturated tone already used for
    "not cached"/dim text reads as deliberately neutral, matching job
