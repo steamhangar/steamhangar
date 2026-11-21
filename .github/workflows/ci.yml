@@ -104,7 +104,13 @@ jobs:
         working-directory: api
         # -ra: a compact summary line per skip/xfail at the end, so a skip
         # is visible in the log instead of only showing up as a bare count.
-        run: python -m pytest -v -ra
+        run: |
+          set -o pipefail
+          python -m pytest -v -ra 2>&1 | tee /tmp/pt.log && rc=0 || rc=$?
+          grep -E '^(FAILED|ERROR) ' /tmp/pt.log | head -n 20 | cut -c1-400 | sed 's/^/::error::/' || true
+          grep -n -E '^E  ' /tmp/pt.log | head -n 25 | cut -c1-300 | sed 's/^/::error::E /' || true
+          tail -n 3 /tmp/pt.log | sed 's/^/::warning::/'
+          exit $rc
 
   agent-go:
     name: agent / go (${{ matrix.os }})
