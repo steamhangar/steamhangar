@@ -302,3 +302,11 @@ at the end, under a dated heading, one entry each with the WP that proved it.
   (`StorageBalanceWebTwinTest`, `JobSizeWebTwinTest`,
   `CacheRepairWebTwinTest`). A shared helper would change shown values and
   break those twin pins.
+
+### 2026-11-21 OLD-SERVER-FALLBACK-1
+
+- Test harnesses that answer 404 for routes they do not mock silently
+  relied on "a 404 stops the poll". Removing a stop-on-error branch made
+  12 Downloads harnesses hang instead of fail; find them by running test
+  files one at a time with a timeout, and serve a minimal real fixture
+  (`web/tests/throughput-fixture.js`) instead of an error path.

@@ -241,3 +241,18 @@ at the end, under a dated heading, one entry each with the WP that proved it.
   is read via the jobs/steps API: skipped `*-build` plus green `*-reuse`
   proves the reuse path; `Record build (dispatch -- nothing pushed)` and
   skipped release steps prove nothing was published.
+
+## 2026-11-21 — rc23 audit fix run, second session
+
+- Parallel agents share one scratch directory: each agent works only in
+  its own uniquely named subfolder, or one agent's mutation copy lands in
+  another's folder (happened in the DESIGN-NITS-1 review).
+- A package that changes pixels and a package that pins against it (a
+  twin pin reading the other side's new text) never go to `main` alone:
+  build one integration branch, run its `-goldens` round, and judge CI
+  there. A reviewed commit that needs follow-up fixes after it was merged
+  into a pushed integration branch gets a small follow-up package instead
+  of an amend (no force push).
+- Simulations of Android colour maths must model Compose's 8-bit ARGB
+  storage: `copy(alpha = 0.14f)` is 36/255, and each composite rounds to
+  8 bits; a float-only model missed the danger pill pin by 0.065.

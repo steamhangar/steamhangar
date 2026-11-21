@@ -483,8 +483,12 @@ their open boxes (items 2, 7 and 11) are in section 12. Item 13 stays here.
       nit packages SEC-HARDEN-1,
       DESIGN-NITS-1, NITS-AUDIT-WEB-1, NITS-AUDIT-APP-1, NITS-AUDIT-API-1,
       NITS-AUDIT-OPS-1 (operator 2026-11-21: fix every finding, nits
-      included; audit exception to the api/core/dns freeze, ADR-0016); all in
-      the roadmap section "Audit 2026-11-20: findings"
+      included; audit exception to the api/core/dns freeze, ADR-0016); added
+      2026-11-21: CI-NIGHTLY-1, ANDROID-INSTALLED-WORDING-1 (+ -NITS-1),
+      STATUS-ICON-TEST-HELPERS-1, WEIGHTS-1, ANDROID-SHEET-BG-1 (exact web
+      twins), DOC-LINES-CHECK-1, RC23-RELEASE-NOTES-1; operator item
+      TALKBACK-CHECK-1; all in the roadmap section "Audit 2026-11-20:
+      findings"
     - v0.2.0 rename: D18 incl. logo, LAUNCHER-PREP-1
     - v0.3.0 privacy: D22 then LIBRARY-META-1d
     - v0.4.0 agents and devices: Weg B for agents with the installer (D6
