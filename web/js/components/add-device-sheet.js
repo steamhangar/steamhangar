@@ -862,10 +862,5 @@ export function openAddDeviceSheet({ tab = "phone" } = {}) {
   dialog.open();
 }
 
-/** For tests and callers that need to know. */
-export function isAddDeviceSheetOpen() {
-  return dialog.isOpen();
-}
-
 // Navigation closes transient surfaces (same rule as clients-sheet.js).
 onViewChange(() => dialog.close());

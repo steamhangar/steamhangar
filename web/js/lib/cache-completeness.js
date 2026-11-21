@@ -170,12 +170,6 @@ export function cardDisplay(row, kind, labels) {
 export const VERIFY_LABEL = "Verify";
 export const VERIFY_HINT =
   "Re-checks every chunk of the current build against the cache and downloads what is missing.";
-/** A row short only of wrong-size chunks (see module header). WP
- * CACHE-REPAIR-UI-1: the web no longer shows it (lib/cache-repair.js
- * `repairNoteFor` replaces it next to "Repair"); it stays until the Android
- * part of that package retires its twin (CacheCompletenessWebTwinTest.kt
- * pins this literal). */
-export const DAMAGED_NOTE = "Damaged chunks — SteamHangar can't repair these yet.";
 export const UNKNOWN_LINE = "Completeness unknown — not measured for the current build.";
 
 /**

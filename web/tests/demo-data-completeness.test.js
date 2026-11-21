@@ -3,7 +3,7 @@
  * one partially cached game (Aurora Cascade, chunk files missing -> "Complete
  * now"), one game short only of wrong-size chunks (Starfall Legion -> no
  * "Complete now"), and an unknown figure (Emberreach, an announced build);
- * every other cached game is measured complete. The two new routes mirror
+ * every other cached game is measured complete. The verify route mirrors
  * the API (`needs_force` first, then the one enqueue), and a finished demo
  * prefill re-measures like the worker does. The six fields are pinned
  * against `GameSummary` in api/vault_api/routers/games.py (twin pin, text
@@ -131,14 +131,4 @@ test("verify validation mirrors POST /v1/prefill (non-empty, ids >= 1, nothing q
   const before = (await demoRequest("GET", "/v1/jobs", { params: { range: "all", limit: 200 } })).length;
   await assert.rejects(demoRequest("POST", "/v1/prefill/verify", { body: { appids: [AURORA, 0] } }), /invalid appid/);
   assert.equal((await demoRequest("GET", "/v1/jobs", { params: { range: "all", limit: 200 } })).length, before);
-});
-
-test("MUTATION TARGET -- POST /v1/prefill/incomplete: completable games only (never the damaged-only one), body ignored", async () => {
-  const refs = await demoRequest("POST", "/v1/prefill/incomplete", { body: { appids: [STARFALL] } });
-  const ids = refs.map((r) => r.appid);
-  assert.ok(ids.includes(AURORA));
-  assert.ok(!ids.includes(STARFALL), "a forced run cannot fix wrong-size chunks");
-  assert.ok(ids.includes(DRIFTWOOD), "the server's selection ignores jobs: dedupes onto the running one");
-  assert.equal(refs.find((r) => r.appid === DRIFTWOOD).deduplicated, true);
-  assert.equal((await byId(AURORA)).needs_force, true);
 });

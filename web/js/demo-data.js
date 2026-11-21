@@ -2023,15 +2023,11 @@ function demoCompletenessFields(g) {
   };
 }
 
-/** The server's `is_incomplete` (known, below 100) and `is_completable`
- * (at least one chunk file missing) against the demo figure. */
+/** The server's `is_incomplete` (known, below 100) against the demo
+ * figure. */
 function demoIsIncomplete(g) {
   const f = demoOwnFigure(g);
   return !!f && f.pct < 100;
-}
-function demoIsCompletable(g) {
-  const f = demoOwnFigure(g);
-  return !!f && f.pct < 100 && f.missing > 0;
 }
 
 function gameSummary(g) {
@@ -2870,8 +2866,9 @@ export async function demoRequest(method, path, { body, params } = {}) {
     return selectCachedAppids().map(enqueuePrefillForAppid);
   }
 
-  // WP CACHE-COMPLETE-1c: "Verify" / "Complete now" (POST
-  // /v1/prefill/verify) and "Complete all" (POST /v1/prefill/incomplete),
+  // WP CACHE-COMPLETE-1c: "Verify", "Complete now" and "Verify all" (all
+  // POST /v1/prefill/verify; the web never sends POST
+  // /v1/prefill/incomplete, so the demo has no handler for it),
   // api/README.md "Verify and complete": flag `needs_force` first, then the
   // one enqueue (same dedupe as POST /v1/prefill). The demo job runs
   // forced and re-measures on success (advanceJob).
@@ -2886,15 +2883,6 @@ export async function demoRequest(method, path, { body, params } = {}) {
       if (game) game.needs_force = true;
     }
     return appids.map(enqueuePrefillForAppid);
-  }
-  if (method === "POST" && path === "/v1/prefill/incomplete") {
-    // No body read, like /v1/prefill/cached: the server selects.
-    const selected = games
-      .filter(demoIsCompletable)
-      .map((g) => g.appid)
-      .sort((a, b) => a - b);
-    for (const appid of selected) findGame(appid).needs_force = true;
-    return selected.map(enqueuePrefillForAppid);
   }
 
   if (method === "DELETE" && (m = path.match(JOB_ID_RE))) {

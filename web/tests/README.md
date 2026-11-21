@@ -3809,6 +3809,9 @@ Demo: Aurora Cascade 86% (completable), Starfall Legion 99% damaged-only
 (group card "Partially cached 99%"), Emberreach unknown (announced build),
 Driftwood Signal mid-download; the two routes and `?incomplete=true`;
 a finished demo prefill re-measures (wrong-size chunks stay).
+NITS-AUDIT-WEB-1 (audit C-7, rc23) removed the demo's
+`POST /v1/prefill/incomplete` handler and its test: the web never sends
+that route, so `demo-data-completeness.test.js` has 8 tests since.
 
 Tests: `cache-completeness.test.js` 18, `game-card-completeness.test.js`
 11, `game-detail-sheet-completeness.test.js` 11,
