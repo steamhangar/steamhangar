@@ -290,6 +290,42 @@ def test_a_pending_manual_pause_survives_a_holding_tick(settings, conn) -> None:
     assert row["pause_reason"] == jobs.PAUSE_REASON_MANUAL
     raw = conn.execute("SELECT pause_reason FROM jobs WHERE id = ?", (job_id,)).fetchone()
     assert raw[0] == jobs.PAUSE_REASON_MANUAL
+    # The release withdraws only a client pause, never the operator's.
+    clock.advance(GAP)
+    assert controller.tick(conn).holding is False
+    row = job(conn, job_id)
+    assert row["stop_request"] == jobs.STOP_REQUEST_PAUSE
+    assert row["pause_reason"] == jobs.PAUSE_REASON_MANUAL
+
+
+def test_a_running_gc_job_gets_no_client_pause(settings, conn) -> None:
+    known_runner(conn)
+    gc, _ = jobs.enqueue_gc(conn, 440, execute=False)
+    claimed = jobs.claim_next_job(conn)
+    assert claimed is not None and claimed["id"] == gc["id"]
+    clock = Clock(NOW)
+    controller, _tier = make_controller(settings, clock)
+    miss(settings, clock, BIG)
+    assert controller.tick(conn).holding is True
+    row = job(conn, int(gc["id"]))  # type: ignore[arg-type]
+    assert row["status"] == jobs.STATUS_RUNNING
+    assert row["stop_request"] is None and row["pause_reason"] is None
+
+
+def test_a_running_job_with_a_withdrawn_tag_is_not_client_paused(settings, conn) -> None:
+    known_runner(conn)
+    job_id = running_job(conn)
+    clock = Clock(NOW)
+    controller, _tier = make_controller(settings, clock)
+    miss(settings, clock, BIG)
+    controller.tick(conn)
+    clock.advance(GAP)
+    controller.tick(conn)  # withdrawn: running, tag kept
+    raw = conn.execute("SELECT status, pause_reason FROM jobs WHERE id = ?", (job_id,)).fetchone()
+    assert tuple(raw) == (jobs.STATUS_RUNNING, jobs.PAUSE_REASON_CLIENT)
+    assert jobs.client_paused_ids(conn) == []
+    assert jobs.resume_client_paused(conn) == []
+    assert job(conn, job_id)["status"] == jobs.STATUS_RUNNING
 
 
 def test_pause_on_a_client_paused_job_makes_it_a_manual_pause(settings, conn) -> None:

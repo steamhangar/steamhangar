@@ -2102,7 +2102,10 @@ instead of ~150. Operator decision (Weg A): **the PC goes first.**
   despite the hold and the controller never pauses it for the device; it
   runs alongside the device by the operator's choice. The override ends when
   the job ends (done, error, cancelled, not owned, crash recovery) or is
-  paused manually again. A Resume while nothing is held sets no override.
+  paused manually again, so it covers the job's whole run, also across later
+  holds. An explicit Resume wins for every job type: a paused GC job the
+  operator resumes during a hold gets the override too and runs. A Resume
+  while nothing is held sets no override.
 - **Where to see it.** `pause_reason` and `client_override` on
   `GET /v1/jobs[/{id}]`, and `GET /v1/client-priority` (devices, since when,
   `resume_at`, client-paused and overridden job ids).
