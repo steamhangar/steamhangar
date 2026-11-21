@@ -1666,10 +1666,12 @@ docker compose exec vault-proxy grep -i '^allow' /run/tinyproxy/tinyproxy.conf
 
 The lock is IPv4-only by construction, so vault-api must have no IPv6
 address on its two networks (`enable_ipv6: false` in `deploy/compose.yaml`).
-Expect an empty line for each:
+Expect `""` on each line (the `json` keeps that true on newer Docker
+releases, where a plain `{{.GlobalIPv6Address}}` prints `invalid IP` for
+"no address"):
 
 ```bash
-docker inspect steamhangar-vault-api-1 --format '{{range .NetworkSettings.Networks}}{{.GlobalIPv6Address}}{{println}}{{end}}'
+docker inspect steamhangar-vault-api-1 --format '{{range .NetworkSettings.Networks}}{{json .GlobalIPv6Address}}{{println}}{{end}}'
 ```
 
 **2. Watch it with `tcpdump` on the host, not just from inside a container.**
@@ -1680,8 +1682,8 @@ any packet from `vault-api`'s container IP that is NOT going to
 
 ```bash
 # Find vault-api's and vault-proxy's addresses on vault-egress:
-docker inspect steamhangar-vault-api-1 --format '{{.NetworkSettings.Networks.steamhangar_vault-egress.IPAddress}}'
-docker inspect steamhangar-vault-proxy-1 --format '{{.NetworkSettings.Networks.steamhangar_vault-egress.IPAddress}}'
+docker inspect steamhangar-vault-api-1 --format '{{(index .NetworkSettings.Networks "steamhangar_vault-egress").IPAddress}}'
+docker inspect steamhangar-vault-proxy-1 --format '{{(index .NetworkSettings.Networks "steamhangar_vault-egress").IPAddress}}'
 
 # Capture on the host while you trigger some vault-api activity (an API
 # call, a scheduled sweep, whatever you have configured). Replace

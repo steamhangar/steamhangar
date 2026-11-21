@@ -176,3 +176,8 @@ at the end, under a dated heading, one entry each with the WP that proved it.
   and vault-api's 60 s size-cache TTL makes a stand-in seeded late (after
   6c's first scan) invisible. Before making steps selectable, map per step
   the variables, functions and shared on-disk state it reads and writes.
+
+## 2026-11-21 — rc23 audit fix run
+- See also `ci.md` CI-NIGHTLY-1: in `docker inspect --format` templates,
+  render netip-typed fields (`.IPAddress`, `.GlobalIPv6Address`, ...) with
+  `{{json ...}}`; newer Docker prints their zero value as `invalid IP`.

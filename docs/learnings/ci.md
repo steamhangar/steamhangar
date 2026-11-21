@@ -130,3 +130,18 @@ at the end, under a dated heading, one entry each with the WP that proved it.
 - **Poll the GitHub API in one loop for all pending branches, every
   240 s,** not one watcher per branch: the unauthenticated limit is 60
   requests per hour for everything on the host.
+
+### 2026-11-21 CI-NIGHTLY-1
+- **Newer Docker prints netip zero values as `invalid IP` in inspect
+  templates.** The runner image's Docker types `.GlobalIPv6Address`,
+  `.IPAddress`, `.Gateway` and friends as Go's `netip.Addr`; its zero value
+  ("no address") prints `invalid IP` through a plain `{{.Field}}` where the
+  old string field printed nothing. The nightly `verify-stack` went red on an
+  unchanged commit (2 of 656 checks) while older local Docker stayed green.
+  Render such fields with `{{json .Field}}` (`""` for no address on both
+  generations, `netip.Addr.MarshalText`) or test the value explicitly; never
+  rely on an empty plain render meaning "no address".
+- A diag branch that edits `ci.yml` (to run the nightly `verify-stack` on
+  push and echo its `FAIL` lines as annotations) also turns
+  `test_verify_fast_1` red, because the api tests parse `ci.yml`; that is
+  expected, and the branch is never merged.
