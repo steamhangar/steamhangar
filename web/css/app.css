@@ -84,7 +84,7 @@
   padding:6px 2px;
 }
 .nav-btn .nav-lb{
-  font-size:10px; font-weight:600; letter-spacing:.3px;
+  font-size:var(--fs-1); font-weight:600; letter-spacing:.3px;
   /* WP MOBILE-1b: at 200 % text a label ellipsizes instead of pushing
      the four columns apart. */
   max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
@@ -100,10 +100,24 @@
 .nav-pip{
   position:absolute; top:1px; right:calc(50% - 20px);
   min-width:15px; height:15px; padding:0 4px; border-radius:8px;
-  background:var(--run); color:#20180a; font-size:9.5px; font-weight:700;
+  background:var(--run); color:#20180a; font-size:var(--fs-1); font-weight:700;
   display:none; place-items:center; font-family:var(--mono);
 }
 .nav-pip.on{ display:grid; }
+
+/* Bottom-bar geometry is fixed by its own boxes, not by the font, so
+   --nav-h (theme.css) is its real height (FONT-FLOOR-1): before, the icon
+   span took the font's line box (~25px for a 21px icon) and the label the
+   font's normal line height, and the bar rendered 68-70px against a 64px
+   token. 1 (border-top) + 7 + 9 (.nav padding) + 6 + 6 (.nav-btn padding)
+   + 21 (icon) + 3 (gap) + 16 (label line) = 69px = --nav-h; pinned in
+   web/tests/css-layout-foundation.test.js. Below BP-L only: the rail keeps
+   its own rows. */
+@media (max-width:1023px){
+  .nav-ic{ height:21px; }
+  .nav-ic svg{ display:block; }
+  .nav-btn .nav-lb{ line-height:16px; }
+}
 
 /* Rail head/foot (WP 4e.6 — the rail earning its narrowed width: vault name
    at the top, cache used/free space at the bottom). Both are phone-chrome-
@@ -347,7 +361,7 @@
 .bulk .bulkhead{ display:flex; align-items:center; justify-content:space-between; gap:10px; }
 .bulk .count{ font-size:12.5px; color:var(--dim); line-height:1.25; }
 .bulk .count b{ color:var(--text); font-family:var(--mono); }
-.bulk .count .hid{ display:block; font-size:10.5px; color:var(--dim-2); margin-top:1px; }
+.bulk .count .hid{ display:block; font-size:var(--fs-1); color:var(--dim-2); margin-top:1px; }
 .bulk .bulknote{ margin:0; font-size:11.5px; line-height:1.4; color:var(--dim-2); }
 .bulk .bulkbtns{ display:flex; gap:8px; flex-wrap:wrap; }
 .bulk .btn{ white-space:nowrap; }
@@ -435,7 +449,7 @@ body.selecting .view-root{ padding-bottom:var(--bulk-room); }
 .dialog p b.num{ font-family:var(--mono); font-weight:500; font-variant-numeric:tabular-nums; }
 
 .cflabel{
-  margin:0 0 6px; font-size:9.5px; font-weight:700; letter-spacing:.8px;
+  margin:0 0 6px; font-size:var(--fs-1); font-weight:700; letter-spacing:.8px;
   text-transform:uppercase; color:var(--dim-2);
 }
 .cflist{
@@ -454,7 +468,7 @@ body.selecting .view-root{ padding-bottom:var(--bulk-room); }
 .cflist li.free{ border-left-color:rgba(255,111,111,.55); }
 .cflist .did{ font-family:var(--mono); font-size:11.5px; color:var(--text); font-variant-numeric:tabular-nums; }
 .cflist .mk{
-  font-size:8.5px; font-weight:700; letter-spacing:.6px; text-transform:uppercase;
+  font-size:var(--fs-1); font-weight:700; letter-spacing:.6px; text-transform:uppercase;
   border:1px solid currentColor; border-radius:4px; padding:1px 4px;
 }
 .cflist li.keep .mk{ color:var(--dim-2); }
@@ -492,7 +506,7 @@ body.selecting .view-root{ padding-bottom:var(--bulk-room); }
 .dl-sub{ display:block; font-size:11px; font-weight:500; color:var(--dim-2); letter-spacing:.3px; }
 
 h4.sec{
-  margin:18px 0 8px; font-size:10.5px; font-weight:700;
+  margin:18px 0 8px; font-size:var(--fs-1); font-weight:700;
   text-transform:uppercase; letter-spacing:1.1px; color:var(--dim-2);
   display:flex; align-items:center; gap:8px;
 }
@@ -543,7 +557,7 @@ h4.sec[hidden]{ display:none; }
    ============================================================ */
 
 .field{ margin-bottom:11px; }
-.field label{ display:block; font-size:10.5px; text-transform:uppercase; letter-spacing:.8px; color:var(--dim-2); margin-bottom:5px; font-weight:600; }
+.field label{ display:block; font-size:var(--fs-1); text-transform:uppercase; letter-spacing:.8px; color:var(--dim-2); margin-bottom:5px; font-weight:600; }
 .inp{
   display:flex; align-items:center; gap:8px;
   border:1px solid var(--line-strong); background:var(--bg); border-radius:10px; padding:10px 11px;
@@ -590,7 +604,7 @@ input.inp.txt:disabled{ opacity:.55; }
 }
 .opt[aria-checked="true"]{ border-color:rgba(46,217,206,.5); background:linear-gradient(180deg,var(--accent-glow),var(--surface)); }
 .tag{
-  font-size:9px; font-weight:700; letter-spacing:.6px; text-transform:uppercase;
+  font-size:var(--fs-1); font-weight:700; letter-spacing:.6px; text-transform:uppercase;
   padding:2px 6px; border-radius:5px;
 }
 .tag.def{ background:var(--accent-glow); color:var(--accent); }
@@ -649,7 +663,7 @@ body.onboarding .nav{ display:none; }
   box-shadow:inset 0 0 0 1px rgba(46,217,206,.35); color:var(--accent);
 }
 .wordmark{ font-size:15px; font-weight:700; letter-spacing:-.2px; }
-.stepnum{ font-size:10.5px; letter-spacing:.7px; text-transform:uppercase; color:var(--dim-2); font-weight:600; margin-top:2px; }
+.stepnum{ font-size:var(--fs-1); letter-spacing:.7px; text-transform:uppercase; color:var(--dim-2); font-weight:600; margin-top:2px; }
 .track{ flex:none; height:3px; border-radius:2px; background:var(--line-soft); margin:13px 0 16px; overflow:hidden; }
 .track i{ display:block; height:100%; background:var(--accent); transition:width .3s ease; }
 
@@ -713,7 +727,7 @@ body.onboarding .nav{ display:none; }
 .npip{
   position:absolute; top:1px; right:1px;
   min-width:15px; height:15px; padding:0 4px; border-radius:8px;
-  background:var(--stale); color:#20180a; font-size:9.5px; font-weight:700;
+  background:var(--stale); color:#20180a; font-size:var(--fs-1); font-weight:700;
   font-family:var(--mono); display:none; place-items:center;
   box-shadow:0 0 0 2px var(--bg);
 }
@@ -847,9 +861,9 @@ body.onboarding .nav{ display:none; }
 }
 .notif .nbody{ flex:1; min-width:0; }
 .notif .nt{ font-size:13px; font-weight:600; color:var(--text); display:flex; align-items:center; gap:7px; flex-wrap:wrap; }
-.notif .nw{ font-size:9.5px; font-weight:700; text-transform:uppercase; letter-spacing:.5px; }
+.notif .nw{ font-size:var(--fs-1); font-weight:700; text-transform:uppercase; letter-spacing:.5px; }
 .notif .nx{ display:block; font-size:11.5px; line-height:1.5; color:var(--dim); margin-top:3px; }
-.notif .nwhen{ display:block; font-size:10px; color:var(--dim-2); font-family:var(--mono); margin-top:4px; }
+.notif .nwhen{ display:block; font-size:var(--fs-1); color:var(--dim-2); font-family:var(--mono); margin-top:4px; }
 .notif .undot{ width:7px; height:7px; border-radius:50%; background:var(--accent); flex:none; margin-top:6px; opacity:0; }
 .notif.unread .undot{ opacity:1; }
 .notif .ngo{ align-self:center; color:var(--dim-2); flex:none; }
@@ -951,7 +965,7 @@ body.onboarding .nav{ display:none; }
 .about-table .about-status{ grid-column:1 / -1; }
 .about-table td[data-label]::before{
   content:attr(data-label); display:block; margin-bottom:2px;
-  font-size:10px; font-weight:600; letter-spacing:.4px; text-transform:uppercase; color:var(--dim-2);
+  font-size:var(--fs-1); font-weight:600; letter-spacing:.4px; text-transform:uppercase; color:var(--dim-2);
 }
 .about-table .mono{ font-family:var(--mono); font-size:11.5px; overflow-wrap:anywhere; }
 .about-table .about-detail td{ padding:0 0 8px; }
@@ -1030,7 +1044,7 @@ body.onboarding .nav{ display:none; }
 }
 .depot .id{ font-family:var(--mono); font-size:12px; color:var(--text); font-variant-numeric:tabular-nums; }
 .depot .tag{
-  font-size:9.5px; text-transform:uppercase; letter-spacing:.5px; font-weight:600;
+  font-size:var(--fs-1); text-transform:uppercase; letter-spacing:.5px; font-weight:600;
   color:var(--stale); border:1px solid rgba(239,143,60,.4); border-radius:5px; padding:1px 5px;
 }
 .depot .b{ margin-left:auto; font-family:var(--mono); font-size:11.5px; color:var(--dim); font-variant-numeric:tabular-nums; }
@@ -1049,12 +1063,12 @@ body.onboarding .nav{ display:none; }
 
 .owners{ display:none; padding:2px 11px 11px; }
 .depotwrap.open .owners{ display:block; }
-.olabel{ margin:0 0 6px; font-size:9.5px; font-weight:700; letter-spacing:.8px; text-transform:uppercase; color:var(--dim-2); }
+.olabel{ margin:0 0 6px; font-size:var(--fs-1); font-weight:700; letter-spacing:.8px; text-transform:uppercase; color:var(--dim-2); }
 .orow{ display:flex; align-items:center; gap:8px; padding:4px 0; font-size:12px; }
 .orow .on{ color:var(--text); }
-.orow .os{ margin-left:auto; font-size:10px; text-transform:uppercase; letter-spacing:.4px; color:var(--dim-2); }
+.orow .os{ margin-left:auto; font-size:var(--fs-1); text-transform:uppercase; letter-spacing:.4px; color:var(--dim-2); }
 .orow.off .on{ color:var(--dim-2); }
-.ohint{ margin:7px 0 0; font-size:10.5px; line-height:1.5; color:var(--dim-2); }
+.ohint{ margin:7px 0 0; font-size:var(--fs-1); line-height:1.5; color:var(--dim-2); }
 
 /* Installed-on section (WP AG-2) — same row idiom as `.depots`/`.depot`
    directly above (one hairline-separated stack of `--raised` rows), so this
@@ -1072,7 +1086,7 @@ body.onboarding .nav{ display:none; }
 .pkg-row .pkgmain{ display:flex; flex-direction:column; gap:2px; flex:1; min-width:0; }
 .pkg-row .pkgname{ color:var(--text); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .pkg-row .pkgfacts{ font-size:11px; color:var(--dim-2); overflow-wrap:anywhere; }
-.pkg-row .pkgstate{ flex:none; font-size:10px; text-transform:uppercase; letter-spacing:.5px; }
+.pkg-row .pkgstate{ flex:none; font-size:var(--fs-1); text-transform:uppercase; letter-spacing:.5px; }
 .pkg-row .pkgnote{ font-size:11px; color:var(--dim-2); font-style:italic; }
 .pkg-row .btn{ flex:none; }
 
@@ -1083,7 +1097,7 @@ body.onboarding .nav{ display:none; }
 .errline{ margin:8px 0 0; font-size:12px; line-height:1.5; color:var(--danger); }
 
 .detail-log{
-  font-family:var(--mono); font-size:10.5px; line-height:1.65; color:var(--dim);
+  font-family:var(--mono); font-size:var(--fs-1); line-height:1.65; color:var(--dim);
   white-space:pre-wrap; word-break:break-word; margin-top:2px;
 }
 
@@ -1168,7 +1182,7 @@ body.onboarding .nav{ display:none; }
     display:table-cell; padding:8px 10px 8px 0; vertical-align:top; text-align:left;
     border-top:1px solid var(--line-soft);
   }
-  .about-table thead th{ font-size:10px; font-weight:600; letter-spacing:.4px; text-transform:uppercase; color:var(--dim-2); }
+  .about-table thead th{ font-size:var(--fs-1); font-weight:600; letter-spacing:.4px; text-transform:uppercase; color:var(--dim-2); }
   .about-table td[data-label]::before{ content:none; }
   .about-table .about-detail td{ border-top:0; padding:0 0 10px; }
 
@@ -1518,7 +1532,7 @@ body.onboarding .nav{ display:none; }
      pathological value from widening or overrunning the fixed-width rail. */
   .rail-version{
     margin:8px 0 0;
-    font-size:10px;
+    font-size:var(--fs-1);
     color:var(--dim-2);
     font-family:var(--mono);
     white-space:nowrap;
@@ -1938,10 +1952,11 @@ body::before{
 }
 
 /* Decision Q7: a short landscape screen (a phone on its side) puts the
-   nav's icon and label side by side, 48px instead of 64px. Below BP-L
+   nav's icon and label side by side, 48px instead of 69px (1 + 4 + 4 +
+   9 + 9 + the 21px icon, FONT-FLOOR-1: was 50px rendered). Below BP-L
    only: the rail has its own geometry and --nav-h 0px there. */
 @media (orientation:landscape) and (max-height:500px) and (max-width:1023px){
   :root{ --nav-h:48px; }
   .nav{ padding-top:4px; padding-bottom:calc(4px + env(safe-area-inset-bottom, 0px)); }
-  .nav-btn{ flex-direction:row; justify-content:center; gap:var(--sp-2); padding:8px 2px; }
+  .nav-btn{ flex-direction:row; justify-content:center; gap:var(--sp-2); padding:9px 2px; }
 }

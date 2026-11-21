@@ -16,6 +16,8 @@
  *       ("nothing reaches a page that has not opted in", kit.css header).
  *   (f) index.html loads kit.css between theme.css and app.css, and the
  *       pill's disc rule (16px, 60% glyph box) exists.
+ *   (g) no stylesheet sets a px font size below --fs-1 (11px), the floor
+ *       theme.css names "never below this" (FONT-FLOOR-1, audit D-3).
  *
  * Run: node --test "web/tests/*.test.js"   (see web/tests/README.md)
  */
@@ -34,22 +36,131 @@ const kitCss = stripComments(read("css", "kit.css"));
 const appCss = stripComments(read("css", "app.css"));
 const indexHtml = read("index.html").replace(/<!--[\s\S]*?-->/g, "");
 
-/** `font-size:Npx` declarations (whitespace-tolerant). */
-const RAW_FONT_SIZE = /font-size\s*:\s*\d[\d.]*px/g;
+/** `font-size:Npx` declarations (whitespace-tolerant; `.9px` included).
+ * Group 1 is the number. */
+const RAW_FONT_SIZE = /font-size\s*:\s*(\d*\.?\d+)px/g;
 /** A px FONT SIZE inside a `font:` shorthand: optional style/weight/variant
  * keywords or numbers, then `Npx` followed by `/` (line-height) or a space
  * (family). `font:500 var(--fs-1)/16px var(--mono)` does not match: the
  * size token is `var(...)`, and the regex never reaches the line-height. */
-const RAW_FONT_SHORTHAND = /(^|[^-\w])font\s*:\s*(?:[a-z0-9-]+\s+)*\d[\d.]*px(?:\/|\s)/g;
+const RAW_FONT_SHORTHAND = /(^|[^-\w])font\s*:\s*(?:[a-z0-9-]+\s+)*(\d*\.?\d+)px(?:\/|\s)/g;
 
 /**
  * Pinned count of raw `font-size:Npx` declarations in app.css, measured
  * comment-stripped on 2026-10-17 (WP UI-KIT-1: 172; CLIENTS-4: 167;
  * DOWNLOADS-2: 146 after the Downloads rules moved to kit.css; SETTINGS-2:
- * 134). THIS NUMBER ONLY GOES DOWN: lower it in the same package that
- * migrates a page onto the kit's scale tokens; never raise it.
+ * 134; 95 by rc22; FONT-FLOOR-1 2026-11-21: 74 after the 21 sizes below
+ * 11px became var(--fs-1)). THIS NUMBER ONLY GOES DOWN: lower it in the
+ * same package that migrates a page onto the kit's scale tokens; never
+ * raise it.
  */
-const APP_CSS_RAW_FONT_SIZE_PIN = 95;
+const APP_CSS_RAW_FONT_SIZE_PIN = 74;
+
+/** The type floor: --fs-1 (theme.css "never below this"). */
+const FONT_FLOOR_PX = 11;
+
+/** Every raw px font size in `css`, found with the two lint regexes above
+ * (`font-size:Npx` and a `font:` shorthand's size, never its px
+ * line-height). Returns [{px, text}]. */
+function pxFontSizes(css) {
+  return [
+    ...[...css.matchAll(RAW_FONT_SIZE)].map((m) => ({ px: Number(m[1]), text: m[0] })),
+    ...[...css.matchAll(RAW_FONT_SHORTHAND)].map((m) => ({ px: Number(m[2]), text: m[0].trim() })),
+  ];
+}
+
+/** px value of each --fs-N token, read from theme.css. */
+const FS_TOKENS = Object.fromEntries([...themeCss.matchAll(/--fs-(\d)\s*:\s*(\d+)px/g)].map((m) => [m[1], Number(m[2])]));
+const CSS_WIDE = /^(inherit|initial|unset|revert|revert-layer)$/;
+const SHORTHAND_PREFIX = /^(normal|italic|oblique|bold|bolder|lighter|small-caps|condensed|semi-condensed|expanded|semi-expanded|[1-9]\d{0,2}|1000)$/;
+const SHORTHAND_SYSTEM = /^(caption|icon|menu|message-box|small-caption|status-bar)$/;
+
+/** Split `value` at top-level whitespace (or at `sep`), keeping parentheses together. */
+function splitTop(value, sep = /\s/) {
+  const parts = [];
+  let depth = 0;
+  let cur = "";
+  for (const ch of value) {
+    if (ch === "(") depth++;
+    if (ch === ")") depth--;
+    if (depth === 0 && sep.test(ch)) {
+      if (cur) parts.push(cur);
+      cur = "";
+    } else cur += ch;
+  }
+  if (cur) parts.push(cur);
+  return parts;
+}
+
+/** Every font-size value in `css`: each `font-size:` value and each `font:`
+ * shorthand's size token (the token before its `/line-height` or family).
+ * Returns [{value, text}]. */
+function fontSizeValues(css) {
+  const out = [];
+  for (const m of css.matchAll(/(?:^|[^-\w])font-size\s*:\s*([^;}]+)/g)) out.push({ value: m[1].trim(), text: m[0].trim() });
+  for (const m of css.matchAll(/(?:^|[^-\w])font\s*:\s*([^;}]+)/g)) {
+    const tokens = splitTop(m[1].trim());
+    let i = 0;
+    while (i < tokens.length && SHORTHAND_PREFIX.test(tokens[i])) i++;
+    if (i >= tokens.length || CSS_WIDE.test(tokens[i]) || SHORTHAND_SYSTEM.test(tokens[i])) continue;
+    out.push({ value: splitTop(tokens[i], /\//)[0], text: m[0].trim() });
+  }
+  return out;
+}
+
+/** Evaluate an arithmetic expression of numbers, + - * / and parentheses
+ * (a resolved calc() body). Returns NaN for anything else, never runs code. */
+function evalArithmetic(text) {
+  const tokens = text.match(/\d*\.?\d+|[-+*/()]|\S/g) ?? [];
+  let i = 0;
+  const peek = () => tokens[i];
+  const next = () => tokens[i++];
+  function primary() {
+    const t = next();
+    if (t === "(") {
+      const v = sum();
+      return next() === ")" ? v : NaN;
+    }
+    if (t === "-") return -primary();
+    if (t === "+") return primary();
+    return t !== undefined && /^\d*\.?\d+$/.test(t) ? Number(t) : NaN;
+  }
+  function product() {
+    let v = primary();
+    while (peek() === "*" || peek() === "/") v = next() === "*" ? v * primary() : v / primary();
+    return v;
+  }
+  function sum() {
+    let v = product();
+    while (peek() === "+" || peek() === "-") v = next() === "+" ? v + product() : v - product();
+    return v;
+  }
+  const v = sum();
+  return i === tokens.length ? v : NaN;
+}
+
+/**
+ * Why a font-size value breaks the floor, or null when it holds: px below
+ * --fs-1, any em/rem (relative sizes are not on the scale; none exist),
+ * a calc() that resolves below --fs-1 or mixes other units, or anything
+ * this lint does not know (fail closed).
+ */
+function floorViolation(value) {
+  const v = value.replace(/\s*!important$/, "").trim();
+  if (CSS_WIDE.test(v)) return null;
+  if (/\d(r?em)\b/.test(v)) return "em/rem font size (use var(--fs-N))";
+  const tok = /^var\(--fs-(\d)\)$/.exec(v);
+  if (tok) return FS_TOKENS[tok[1]] ? null : `unknown token ${v}`;
+  const px = /^(\d*\.?\d+)px$/.exec(v);
+  if (px) return Number(px[1]) < FONT_FLOOR_PX ? `${v} is below --fs-1` : null;
+  if (/^calc\(/.test(v)) {
+    const expr = v.replace(/var\(--fs-(\d)\)/g, (m, n) => (FS_TOKENS[n] ? String(FS_TOKENS[n]) : "NaN")).replace(/(\d*\.?\d+)px/g, "$1");
+    if (!/^calc\([\d.\s+\-*/()]+\)$/.test(expr)) return `calc() with a unit or term this lint cannot resolve: ${v}`;
+    const px = evalArithmetic(expr.slice(4));
+    return Number.isFinite(px) && px >= FONT_FLOOR_PX ? null : `${v} resolves to ${px}px, below --fs-1`;
+  }
+  return `unrecognised font size ${v}`;
+}
 
 // ---------------------------------------------------------------------
 // (a) scale tokens and --dim-2
@@ -98,6 +209,48 @@ test(`app.css: raw font-size:Npx declarations <= ${APP_CSS_RAW_FONT_SIZE_PIN} (p
     count >= APP_CSS_RAW_FONT_SIZE_PIN - 40,
     `app.css has only ${count} raw font-size:Npx declarations — lower APP_CSS_RAW_FONT_SIZE_PIN to ${count} in this package`,
   );
+});
+
+// ---------------------------------------------------------------------
+// (g) the --fs-1 floor
+// ---------------------------------------------------------------------
+test(`no font size below --fs-1 (${FONT_FLOOR_PX}px) in theme.css, kit.css or app.css: px, calc() or em/rem (FONT-FLOOR-1)`, () => {
+  assert.equal(FS_TOKENS[1], FONT_FLOOR_PX, "the floor constant no longer matches --fs-1");
+  for (const [name, css] of [["theme.css", themeCss], ["kit.css", kitCss], ["app.css", appCss]]) {
+    const below = pxFontSizes(css).filter((s) => s.px < FONT_FLOOR_PX).map((s) => s.text);
+    assert.deepEqual(below, [], `${name} sets a px font size below --fs-1: use var(--fs-1) or larger`);
+    const bad = fontSizeValues(css).map((s) => [s.text, floorViolation(s.value)]).filter(([, why]) => why);
+    assert.deepEqual(bad, [], `${name} has font sizes that break the --fs-1 floor`);
+  }
+  // Not vacuous: the px scanner sees exactly app.css's pinned legacy sizes
+  // (a migration that lowers the count must lower the pin with it), and the
+  // value scanner sees those plus the token sizes.
+  assert.equal(pxFontSizes(appCss).length, APP_CSS_RAW_FONT_SIZE_PIN, `app.css's raw px font sizes no longer equal the pin ${APP_CSS_RAW_FONT_SIZE_PIN}: lower the pin to the new count`);
+  assert.ok(fontSizeValues(appCss).length > APP_CSS_RAW_FONT_SIZE_PIN, "the font-size value scanner misses app.css's token sizes");
+  assert.ok(fontSizeValues(kitCss).length >= 100, "the font-size value scanner barely sees kit.css (font: shorthands)");
+});
+
+test("pxFontSizes: finds font-size (also .9px) and the shorthand size, ignores the shorthand line-height and tokens", () => {
+  const found = pxFontSizes(
+    ".a{font-size:10.5px}.b{font:700 9px/1.4 var(--ui)}.c{font:500 var(--fs-1)/8px var(--mono)}.d{--font: 3px}.e{font-size:var(--fs-1)}.f{font-size:.9px}",
+  ).map((s) => s.px);
+  assert.deepEqual(found, [10.5, 0.9, 9]);
+});
+
+test("floorViolation: px, .Npx, calc() and em/rem below the floor fail; tokens, keywords and calc() at or above it pass", () => {
+  for (const ok of ["11px", "12.5px", "var(--fs-1)", "var(--fs-7)", "inherit", "calc(var(--fs-1) + 1px)", "calc(22px / 2)", "13px !important"]) {
+    assert.equal(floorViolation(ok), null, ok);
+  }
+  for (const bad of ["10px", ".9px", "1em", "0.8rem", "1.2em", "calc(10px + 0px)", "calc(var(--fs-1) - 1px)", "calc(1em + 2px)", "calc(var(--fs-9))", "var(--fs-9)", "small", "80%", "var(--size)"]) {
+    assert.ok(floorViolation(bad), `${bad} should break the floor`);
+  }
+  // The calc() evaluator: precedence, parentheses, unary minus; junk is NaN.
+  assert.equal(evalArithmetic("11 + 2 * 3"), 17);
+  assert.equal(evalArithmetic("(11 + 1) / 2"), 6);
+  assert.equal(evalArithmetic("22 - -1"), 23);
+  for (const junk of ["11 +", "(11", "11)", "1 2", "a", "", "alert(1)"]) assert.ok(Number.isNaN(evalArithmetic(junk)), junk);
+  const values = fontSizeValues(".a{font:600 .9px/1 x}.b{font:500 var(--fs-1)/8px var(--mono)}.c{font:inherit}.d{font:italic 700 1.2em/1 sans}.e{font-size: calc(9px + 1px)}").map((s) => s.value);
+  assert.deepEqual(values, ["calc(9px + 1px)", ".9px", "var(--fs-1)", "1.2em"]);
 });
 
 // ---------------------------------------------------------------------
