@@ -17,7 +17,7 @@ from fastapi.testclient import TestClient
 
 from tests.conftest import TEST_API_KEY
 from tests.test_event_sweep import append_log, event_line, make_settings, write_log
-from vault_api import event_sweep, live_tier, runner_identity
+from vault_api import event_sweep, live_tier, runner_identity, traffic
 from vault_api.db import get_connection, init_db
 from vault_api.live_tier import LiveTier, LiveTotals
 from vault_api.main import create_app
@@ -344,6 +344,35 @@ def test_loading_now_uses_the_clients_page_window_on_every_endpoint(served, tmp_
     # The swept count keeps its 15-minute window for older clients: both
     # machines, one of which has not loaded anything for a minute.
     assert head["active_clients_now"] == 2
+
+
+@pytest.mark.parametrize(
+    "at",
+    [datetime(2001, 3, 1, 12, 0, 7, tzinfo=UTC), datetime(2100, 3, 1, 12, 0, 7, tzinfo=UTC)],
+    ids=["clock-far-past", "clock-far-future"],
+)
+def test_the_overview_listing_window_follows_the_injected_clock(
+    served, tmp_path: Path, at: datetime
+) -> None:
+    """CI-CLOCK-1: the 30-day address listing window of /v1/clients/overview
+    reads the live tier's clock, not the wall clock, so the answer does not
+    depend on the calendar date the suite runs on. With a far-past clock the
+    wall-clock window would list nothing; with a far-future one it would list
+    both addresses."""
+    _settings, client, clock, conn = served
+    clock.now = at
+    write_log(tmp_path / "event.log")
+    for addr, days in (("10.0.0.5", 29), ("10.0.0.6", 31)):
+        bucket = traffic.bucket_iso(at - timedelta(days=days), traffic.TIER_1H)
+        conn.execute(
+            "INSERT INTO client_traffic (tier, bucket_at, client_addr, bytes_served, last_seen) "
+            "VALUES ('1h', ?, ?, 1, ?)",
+            (bucket, addr, bucket),
+        )
+    conn.commit()
+    overview = client.get("/v1/clients/overview", headers=AUTH).json()
+    listed = sorted(a for c in overview["clients"] for a in c["addresses"])
+    assert listed == ["10.0.0.5"]
 
 
 def test_now_is_null_unless_the_feed_is_ok(tmp_path: Path) -> None:

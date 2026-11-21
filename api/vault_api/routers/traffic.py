@@ -1455,7 +1455,11 @@ def get_clients_overview(
 ) -> ClientsOverviewOut:
     """Agent clients merged with every event-log address (D15 Clients page)."""
     settings: Settings = deps.effective_settings(request)
-    now = datetime.now(timezone.utc)
+    # CI-CLOCK-1: one time source per request. The listing window, the swept
+    # ranges and the live ring all read the live tier's clock (the wall clock
+    # in production), like every other traffic endpoint.
+    tier: live_tier.LiveTier = request.app.state.live_tier
+    now = tier.clock()
     minutes = traffic.active_window_minutes(settings.event_sweep_interval_minutes)
     listing_since = traffic.bucket_iso(
         now - timedelta(days=ADDRESS_LISTING_DAYS), traffic.TIER_1H
@@ -1490,7 +1494,7 @@ def get_clients_overview(
             listing_since, feed_on,
         )
         # WP CLIENTS-LIVE-1: the live tier, polled like /v1/throughput/live.
-        ring = _read_ring(request, settings, windows) if feed_on else None
+        ring = _read_ring(tier, settings, windows, now) if feed_on else None
         depots = {
             d
             for side in (side_clients, side_runner)
@@ -1729,13 +1733,14 @@ class _Ring:
 
 
 def _read_ring(
-    request: Request,
+    tier: live_tier.LiveTier,
     settings: Settings,
     windows: tuple[runner_identity.RunnerWindow, ...],
+    now: datetime,
 ) -> _Ring:
-    """Arm and tail the live tier, then read it per address (CLIENTS-LIVE-1)."""
-    tier: live_tier.LiveTier = request.app.state.live_tier
-    now = tier.clock()
+    """Arm and tail the live tier, then read it per address (CLIENTS-LIVE-1).
+
+    ``now`` is the request's instant from ``tier.clock()`` (CI-CLOCK-1)."""
     tier.touch(now)
     tier.refresh(settings.event_log_path, now)
     activity, seconds = tier.addr_activity(now, _runner_test(windows))
