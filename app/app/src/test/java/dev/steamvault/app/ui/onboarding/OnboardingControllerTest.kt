@@ -52,7 +52,6 @@ private class FakeSteamIdentityRepository(
     }
 
     override suspend fun refreshPersonaName(): Boolean = false
-    override suspend fun ownedGamesCountPreview(): Result<Int> = Result.success(0)
     override suspend fun ownedGames(): Result<List<OwnedGame>> = Result.success(emptyList())
     override fun signOut() {
         signOutCalls++

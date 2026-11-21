@@ -281,6 +281,10 @@ class OnboardingController(
                 identityState = identityRepository.state()
                 loginError = null
                 prefillLibraryId()
+                // PERSONA-LOAD-1: best effort through the stored vault
+                // connection (reconnect); on a first run there is none yet,
+                // the call fails silently and Settings loads the name later.
+                if (identityRepository.refreshPersonaName()) identityState = identityRepository.state()
             }
             is SteamLoginResult.Failure -> {
                 identityState = identityRepository.state()

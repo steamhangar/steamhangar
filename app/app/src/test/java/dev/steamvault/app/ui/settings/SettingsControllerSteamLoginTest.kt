@@ -25,7 +25,6 @@ private class SteamLoginRecordingIdentity : SteamIdentityRepository {
     }
     override suspend fun completeLogin(rawCallbackUrl: String): SteamLoginResult = SteamLoginResult.Failure("unused")
     override suspend fun refreshPersonaName(): Boolean = false
-    override suspend fun ownedGamesCountPreview(): Result<Int> = Result.success(0)
     override suspend fun ownedGames(): Result<List<OwnedGame>> = Result.success(emptyList())
     override fun signOut() {}
 }

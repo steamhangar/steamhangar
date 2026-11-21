@@ -11,6 +11,7 @@ import dev.steamvault.app.net.steam.SteamOpenIdReturnUrl
 import dev.steamvault.app.net.steam.SteamOpenIdVerifier
 import dev.steamvault.app.net.steam.VaultRelayLibraryFetcher
 import dev.steamvault.app.storage.CredentialStore
+import kotlinx.coroutines.CancellationException
 
 /**
  * Everything the identity screen needs to render (WP 4b.3 brief: "signed-in
@@ -81,17 +82,14 @@ interface SteamIdentityRepository {
      * Requires a signed-in [state]; returns `false` (without throwing) if
      * not signed in or the call fails for any reason (no vault-api
      * connection, no relay key configured server-side, a network failure),
-     * `true` once the persona name is persisted.
+     * `true` once the persona name is persisted. Called by the Settings and
+     * Onboarding controllers after a successful [completeLogin] and by
+     * Settings' `load()` when a stored SteamID64 has no name yet
+     * (PERSONA-LOAD-1). A name answered for an account that is no longer
+     * the stored one (signed out or switched while the call was in flight)
+     * is dropped, not written.
      */
     suspend fun refreshPersonaName(): Boolean
-
-    /**
-     * `GetOwnedGames`'s game count only — WP brief: "library fetch happens
-     * in 4b.4 — expose the repository, render a count preview only".
-     * Superseded for the actual library grid by [ownedGames] below (WP
-     * 4b.4), which this delegates to so the two never drift.
-     */
-    suspend fun ownedGamesCountPreview(): Result<Int>
 
     /**
      * The full owned-library list (WP 4b.4 brief: "Steam library (owned
@@ -217,15 +215,18 @@ class SteamIdentityRepositoryImpl(
         val steamId64 = credentialStore.getSteamId64() ?: return false
         val persona = try {
             libraryFetcher.getPlayerSummary(steamId64)
+        } catch (e: CancellationException) {
+            // A left screen cancels the call; that is not a failed fetch.
+            throw e
         } catch (_: Exception) {
             null
         } ?: return false
+        // PERSONA-LOAD-1: the call can outlive a sign-out (or a switch to
+        // another account); never attach this name to a different identity.
+        if (credentialStore.getSteamId64() != steamId64) return false
         credentialStore.setSteamPersonaName(persona.personaName)
         return true
     }
-
-    override suspend fun ownedGamesCountPreview(): Result<Int> =
-        ownedGames().map { it.size }
 
     override suspend fun ownedGames(): Result<List<OwnedGame>> {
         val steamId64 = credentialStore.getSteamId64()

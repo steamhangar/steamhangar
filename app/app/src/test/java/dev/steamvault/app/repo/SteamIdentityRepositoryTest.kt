@@ -7,6 +7,7 @@ import dev.steamvault.app.net.steam.SteamOpenIdConfig
 import dev.steamvault.app.net.steam.SteamOpenIdVerifier
 import dev.steamvault.app.storage.InMemoryCredentialStore
 import dev.steamvault.app.storage.ProfileKind
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -78,13 +79,21 @@ private class FakeLibraryFetcher(
     var games: List<OwnedGame> = emptyList(),
     var persona: SteamPersona? = null,
     var throwOnGames: Exception? = null,
+    var throwOnPersona: Exception? = null,
+    /** Runs while the persona call is "in flight" (PERSONA-LOAD-1: a
+     * sign-out racing the call). */
+    var duringPersonaCall: () -> Unit = {},
 ) : SteamLibraryFetcher {
     override suspend fun getOwnedGames(steamId64: String): List<OwnedGame> {
         throwOnGames?.let { throw it }
         return games
     }
 
-    override suspend fun getPlayerSummary(steamId64: String): SteamPersona? = persona
+    override suspend fun getPlayerSummary(steamId64: String): SteamPersona? {
+        duringPersonaCall()
+        throwOnPersona?.let { throw it }
+        return persona
+    }
 }
 
 class SteamIdentityRepositoryTest {
@@ -201,36 +210,7 @@ class SteamIdentityRepositoryTest {
         assertNull(repo.state().steamId64)
     }
 
-    // ---- ownedGamesCountPreview / ownedGames (WP 4h.4: no key precondition anymore) --
-
-    @Test
-    fun `ownedGamesCountPreview fails when not signed in`() = runTest {
-        val (repo, _, _) = repo()
-        val result = repo.ownedGamesCountPreview()
-        assertTrue(result.isFailure)
-    }
-
-    @Test
-    fun `MUTATION PIN -- ownedGamesCountPreview succeeds once signed in, with no Web API key precondition left to check`() = runTest {
-        val store = InMemoryCredentialStore().apply { setSteamId64(VALID_STEAM_ID) }
-        val fetcher = FakeLibraryFetcher(games = listOf(OwnedGame(440, "TF2")))
-        val (repo, _, _) = repo(fetcher = fetcher, store = store)
-
-        val result = repo.ownedGamesCountPreview()
-
-        assertEquals(1, result.getOrNull())
-    }
-
-    @Test
-    fun `ownedGamesCountPreview surfaces a fetcher failure as a Result failure, not an exception`() = runTest {
-        val store = InMemoryCredentialStore().apply { setSteamId64(VALID_STEAM_ID) }
-        val fetcher = FakeLibraryFetcher(throwOnGames = RuntimeException("boom"))
-        val (repo, _, _) = repo(fetcher = fetcher, store = store)
-
-        val result = repo.ownedGamesCountPreview()
-
-        assertTrue(result.isFailure)
-    }
+    // ---- ownedGames (WP 4h.4: no key precondition anymore) ---------------
 
     @Test
     fun `ownedGames fails when not signed in`() = runTest {
@@ -269,15 +249,6 @@ class SteamIdentityRepositoryTest {
         assertTrue(repo.ownedGames().isFailure)
     }
 
-    @Test
-    fun `ownedGamesCountPreview delegates to ownedGames -- the two can never drift`() = runTest {
-        val store = InMemoryCredentialStore().apply { setSteamId64(VALID_STEAM_ID) }
-        val games = listOf(OwnedGame(440, "TF2"), OwnedGame(570, "Dota 2"))
-        val (repo, _, _) = repo(fetcher = FakeLibraryFetcher(games = games), store = store)
-
-        assertEquals(2, repo.ownedGamesCountPreview().getOrNull())
-    }
-
     // ---- refreshPersonaName (WP 4h.4: no key precondition anymore) -------
 
     @Test
@@ -294,6 +265,45 @@ class SteamIdentityRepositoryTest {
 
         assertTrue(repo.refreshPersonaName())
         assertEquals("Example", repo.state().personaName)
+    }
+
+    @Test
+    fun `refreshPersonaName turns a failed relay call into false, never a throw, and stores no name`() = runTest {
+        val store = InMemoryCredentialStore().apply { setSteamId64(VALID_STEAM_ID) }
+        val fetcher = FakeLibraryFetcher(throwOnPersona = IllegalStateException("no vault-api connection configured"))
+        val (repo, _, _) = repo(fetcher = fetcher, store = store)
+
+        assertFalse(repo.refreshPersonaName())
+        assertNull(repo.state().personaName)
+    }
+
+    @Test
+    fun `refreshPersonaName rethrows cancellation instead of reporting a failed fetch`() = runTest {
+        val store = InMemoryCredentialStore().apply { setSteamId64(VALID_STEAM_ID) }
+        val fetcher = FakeLibraryFetcher(throwOnPersona = CancellationException("screen left"))
+        val (repo, _, _) = repo(fetcher = fetcher, store = store)
+
+        val thrown = try {
+            repo.refreshPersonaName()
+            null
+        } catch (e: CancellationException) {
+            e
+        }
+
+        assertEquals("screen left", thrown?.message)
+        assertNull(repo.state().personaName)
+    }
+
+    @Test
+    fun `MUTATION PIN -- refreshPersonaName drops a name that arrives after a sign-out (PERSONA-LOAD-1)`() = runTest {
+        val store = InMemoryCredentialStore().apply { setSteamId64(VALID_STEAM_ID) }
+        val fetcher = FakeLibraryFetcher(persona = SteamPersona(VALID_STEAM_ID, "Example"))
+        val (repo, _, _) = repo(fetcher = fetcher, store = store)
+        fetcher.duringPersonaCall = { repo.signOut() }
+
+        assertFalse(repo.refreshPersonaName())
+        assertNull(repo.state().steamId64)
+        assertNull(repo.state().personaName)
     }
 
     @Test
