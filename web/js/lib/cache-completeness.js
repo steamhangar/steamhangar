@@ -34,7 +34,7 @@
  *      "Not verified"), neutral question glyph `unverified`. The README's
  *      UI contract: null "means 'not known', never 'complete'". Wording
  *      choice: the existing vocabulary describes the cache ("Not cached",
- *      "Installed but not cached"), so the word keeps "Cached" (the bytes
+ *      "Installed, not cached"), so the word keeps "Cached" (the bytes
  *      are real) and adds the one thing that is not known. It is state-only
  *      copy: null has several causes (never measured, oracle off, a new
  *      build nobody fetched yet, the build changed since the check), and

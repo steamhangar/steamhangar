@@ -32,7 +32,9 @@ import dev.steamvault.app.repo.GamesRepository
 import dev.steamvault.app.repo.OffCardInfoRepository
 import dev.steamvault.app.ui.library.OfflineImageLoader
 import dev.steamvault.app.ui.library.ScreenshotGoldens
+import dev.steamvault.app.ui.library.logic.InstalledBadge
 import dev.steamvault.app.ui.library.logic.RepairWording
+import dev.steamvault.app.ui.library.logic.installedBadgeFor
 import dev.steamvault.app.ui.library.logic.isDamagedOnly
 import dev.steamvault.app.ui.library.logic.repairSpokenLabel
 import dev.steamvault.app.ui.theme.SteamVaultTheme
@@ -70,6 +72,13 @@ import org.robolectric.annotation.GraphicsMode
  * the wall clock; every timestamp is replaced by [FIXED_TIME], so each
  * golden is reproducible. Cover art fails offline at once
  * ([OfflineImageLoader]), so the header shows the fallback tile.
+ *
+ * One more Overview golden (ANDROID-INSTALLED-WORDING-1) shows the
+ * installed-but-not-cached state: the demo's Cobalt Isthmus
+ * ([INSTALLED_NOT_CACHED_APPID]), installed on demo-steamdeck with nothing
+ * cached. The line reads "Installed on demo-steamdeck (as of ...)" and the
+ * red note below it "Installed, not cached -- ...", the order of the web
+ * sheet's "Installed on" section.
  */
 @RunWith(RobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
@@ -101,17 +110,28 @@ class DetailSheetScreenshotTest {
     @Test
     fun detail_maintenance_360dp_font130() = shoot("detail_maintenance_360dp_font130", DetailTab.MAINTENANCE)
 
+    @Test
+    fun detail_installed_not_cached_360dp_font130() =
+        shoot("detail_installed_not_cached_360dp_font130", DetailTab.OVERVIEW, INSTALLED_NOT_CACHED_APPID)
+
     @OptIn(ExperimentalMaterial3Api::class)
-    private fun shoot(name: String, tab: DetailTab) {
+    private fun shoot(name: String, tab: DetailTab, appid: Int = DEMO_GROUP_PARENT_APPID) {
         RuntimeEnvironment.setQualifiers("w360dp-h1400dp-night-420dpi")
         RuntimeEnvironment.setFontScale(1.3f)
         composeRule.activityRule.scenario.recreate()
 
         val demo = DemoState.fresh()
         val games = demo.listGameSummaries().map { it.pinned() }
-        val parent = games.single { it.appid == DEMO_GROUP_PARENT_APPID }
-        assertTrue("the demo group's game must be Repair-eligible (damaged chunks only)", isDamagedOnly(parent))
-        assertTrue("the demo group's game must have content packages", games.any { it.parent_appid == DEMO_GROUP_PARENT_APPID })
+        val parent = games.single { it.appid == appid }
+        if (appid == DEMO_GROUP_PARENT_APPID) {
+            assertTrue("the demo group's game must be Repair-eligible (damaged chunks only)", isDamagedOnly(parent))
+            assertTrue("the demo group's game must have content packages", games.any { it.parent_appid == DEMO_GROUP_PARENT_APPID })
+        } else {
+            assertTrue(
+                "demo app $appid must be installed but not cached (DemoFixtures.kt, AG-3 state 2)",
+                installedBadgeFor(parent) is InstalledBadge.InstalledNotCached,
+            )
+        }
 
         composeRule.setContent {
             SteamVaultTheme {
@@ -127,11 +147,11 @@ class DetailSheetScreenshotTest {
                             AndroidDetailStrings(composeRule.activity.resources),
                         )
                     }
-                    LaunchedEffect(controller) { controller.open(scope, DEMO_GROUP_PARENT_APPID, parent.name, isKnownToVault = true) }
+                    LaunchedEffect(controller) { controller.open(scope, appid, parent.name, isKnownToVault = true) }
                     if (controller.openAppid != null) {
                         GameDetailSheetBody(
                             controller = controller,
-                            appid = DEMO_GROUP_PARENT_APPID,
+                            appid = appid,
                             games = games,
                             jobs = emptyList(),
                             scope = scope,
@@ -147,7 +167,24 @@ class DetailSheetScreenshotTest {
 
         ScreenshotGoldens.capture(composeRule.onRoot(), name)
         // After the capture, so a failing check still leaves the image.
-        assertSheet(tab, parent.name.orEmpty())
+        assertSelectedTab(tab)
+        if (appid == DEMO_GROUP_PARENT_APPID) assertSheet(tab, parent.name.orEmpty()) else assertInstalledNotCached()
+    }
+
+    /** The installed-on line names the client without "not cached"; the red
+     * note below it says "Installed, not cached" once. */
+    private fun assertInstalledNotCached() {
+        val res = composeRule.activity.resources
+        val count = { text: String, substring: Boolean ->
+            composeRule.onAllNodes(hasText(text, substring = substring), useUnmergedTree = true).fetchSemanticsNodes().size
+        }
+        assertEquals("the installed-on line", 1, count(res.getString(R.string.library_installed_on, INSTALLED_NOT_CACHED_CLIENT), true))
+        assertEquals("the not-cached note", 1, count(res.getString(R.string.detail_installed_not_cached_warning), false))
+        assertEquals(
+            "the badge wording must not repeat the note in the sheet",
+            0,
+            count(res.getString(R.string.library_installed_not_cached, INSTALLED_NOT_CACHED_CLIENT), true),
+        )
     }
 
     /** The detail answer arrived and the cover flipped to its fallback tile. */
@@ -164,9 +201,10 @@ class DetailSheetScreenshotTest {
         fail("the detail sheet never finished loading within $STABLE_POLL_LIMIT idles")
     }
 
-    private fun assertSheet(tab: DetailTab, title: String) {
+    /** The tab row is there and the requested tab is the selected one (every
+     * shot, ANDROID-INSTALLED-NITS-1). */
+    private fun assertSelectedTab(tab: DetailTab) {
         val res = composeRule.activity.resources
-        // The tab row is there and the requested tab is the selected one.
         val selectedLabel = when (tab) {
             DetailTab.OVERVIEW -> res.getString(R.string.detail_tab_overview)
             DetailTab.DEPOTS -> res.getString(R.string.detail_tab_depots)
@@ -177,6 +215,11 @@ class DetailSheetScreenshotTest {
             .fetchSemanticsNodes()
             .map { node -> node.config.getOrNull(SemanticsProperties.Text).orEmpty().joinToString("") { it.text } }
         assertEquals("selected tab", listOf(selectedLabel), selected)
+    }
+
+    /** The content-package group shots: Repair, and each tab's own content. */
+    private fun assertSheet(tab: DetailTab, title: String) {
+        val res = composeRule.activity.resources
         // Repair in the header on every tab (REDESIGN-1b).
         composeRule.onAllNodes(hasContentDescription(repairSpokenLabel(title))).fetchSemanticsNodes().let {
             assertTrue("no Repair button for '$title'", it.isNotEmpty())
@@ -215,6 +258,11 @@ class DetailSheetScreenshotTest {
 
         /** Prefix of `R.string.library_cover_fallback_description`. */
         const val COVER_FALLBACK_PREFIX = "No cover art available for"
+
+        /** The demo's installed-but-not-cached game, Cobalt Isthmus
+         * (DemoFixtures.kt), and the client it is installed on. */
+        const val INSTALLED_NOT_CACHED_APPID = 4_010_020
+        const val INSTALLED_NOT_CACHED_CLIENT = "demo-steamdeck"
     }
 }
 

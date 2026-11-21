@@ -124,7 +124,7 @@ test("long unbreakable strings break inside the text blocks (overflow-wrap:anywh
 
 test("toast: max-width uses 100% (not 100vw) and its text column may shrink and wrap", () => {
   const body = ruleBody(theme.topLevel, ".toast") ?? "";
-  assert.match(body, /max-width:\s*min\(480px,\s*calc\(100%\s*-\s*32px\)\)/);
+  assert.match(body, /max-width:\s*min\(480px,\s*calc\(100%\s*-\s*var\(--sp-7\)\)\)/); // 100% - 32px (DESIGN-NITS-1: token)
   const text = ruleBody(theme.topLevel, ".toast-text") ?? "";
   assert.match(text, /min-width:\s*0/);
   assert.match(text, /overflow-wrap:\s*anywhere/);
@@ -150,10 +150,12 @@ test("segmented text controls in Settings never wrap a label and scroll instead 
   assert.match(ruleBody(app.topLevel, ".segs button") ?? "", /width:\s*28px/);
 });
 
-test("webhook event checkboxes: `.field label.srow` restores the inline .srow row over `.field label`'s block/uppercase", () => {
+test("webhook event checkboxes: `.field label.srow` restores the inline .srow row over `.field label`'s small block", () => {
   const body = ruleBody(app.topLevel, ".field label.srow") ?? "";
   assert.match(body, /display:\s*flex/);
-  assert.match(body, /text-transform:\s*none/);
+  // DESIGN-NITS-1: `.field label` is sentence case now, so the row needs no
+  // uppercase reset any more; it must not get one back either.
+  assert.doesNotMatch(ruleBody(app.topLevel, ".field label") ?? "", /text-transform/);
   assert.match(body, /font-size:\s*inherit/);
   assert.match(ruleBody(app.topLevel, ".srow") ?? "", /align-items:\s*center/);
 });

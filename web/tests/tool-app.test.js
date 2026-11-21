@@ -12,7 +12,7 @@
  *     never "Failed", even with `status: "error"` left by old failed jobs;
  *   - no download/retry action, on the card or in the sheet;
  *   - a muted card (`.card.tool`), not a hidden one;
- *   - no "installed but not cached" warning;
+ *   - no "installed, not cached" warning;
  *   - the detail sheet's note;
  *   - never a bulk download target (one 422 would fail the whole request).
  *
@@ -122,7 +122,7 @@ test("MUTATION TARGET -- statusAction: no download/retry for a tool app", () => 
   assert.deepEqual(statusAction(game(), undefined, false), { type: "download", title: "Retry download" });
 });
 
-test("MUTATION TARGET -- installedBadgeState: a tool app is never 'installed but not cached'", () => {
+test("MUTATION TARGET -- installedBadgeState: a tool app is never 'installed, not cached'", () => {
   assert.equal(installedBadgeState(redist()), INSTALLED_BADGE.CACHED);
   assert.equal(installedBadgeState(redist({ installed_on: [] })), INSTALLED_BADGE.NONE);
   assert.equal(installedBadgeState(game({ installed_on: redist().installed_on })), INSTALLED_BADGE.NOT_CACHED);
@@ -256,7 +256,7 @@ test("MUTATION TARGET -- sheet: buildToolAppNote renders the neutral note for a 
     assert.equal(buildToolAppNote(game()), null);
   }));
 
-test("sheet: no 'installed but not cached' note for a tool app", () =>
+test("sheet: no 'installed, not cached' note for a tool app", () =>
   withSheet(({ buildInstalledSection }) => {
     const section = buildInstalledSection(redist());
     assert.ok(section);

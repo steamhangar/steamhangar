@@ -33,6 +33,8 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.steamvault.app.R
@@ -169,6 +171,10 @@ fun GameCard(
         // WP AG-3: nothing rendered at all for InstalledBadge.NoSignal --
         // "no fresh signal" is not the same claim as "not installed
         // anywhere" (ui/library/logic/InstalledState.kt's copy rule).
+        // ANDROID-INSTALLED-NITS-1: spoken like web `installedAriaFragment`
+        // (and the list row): every client by name, and no second "not
+        // cached" after a "Not cached" status word. No visual change.
+        val installedSpoken = installedBadgeSpokenText(model.installedBadge, model.kind, model.installedNames)
         installedBadgeText(model.installedBadge)?.let { text ->
             Text(
                 text = text,
@@ -180,7 +186,9 @@ fun GameCard(
                 },
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .semantics { if (installedSpoken != null) contentDescription = installedSpoken },
             )
         }
     }

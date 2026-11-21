@@ -97,12 +97,15 @@
  * `.hint` (the WP 4e.2 note above describes the earlier six-child BP-L
  * grid, which is gone: the row lays itself out with flexbox).
  *
- * **WP LIBRARY-1 (rc20 redesign).** The toolbar row is `.lib-bar`: search and
- * chips (`.lib-filters`) on the left, `.lib-tools` on the right (sort select
- * plus an icon-only direction button, layout segments, the Filters popover
- * holding the metadata filters, and a labelled Select button that replaces
+ * **WP LIBRARY-1 (rc20 redesign).** The toolbar is `.lib-bar`: search and
+ * `.lib-tools` on the first row, the chips in their own row under both
+ * (DESIGN-NITS-1, audit D-15; DOM and tab order search, tools, chips;
+ * before, search and chips sat in a `.lib-filters` box on the left).
+ * `.lib-tools` holds the sort select plus an icon-only direction button,
+ * layout segments, the Filters popover holding the metadata filters, and a
+ * labelled Select button that replaces
  * the old permanent long-press hint; long-press / right-click on a card
- * still select). "Check updates" and "Check & update all cached games" are
+ * still select. "Check updates" and "Check & update all cached games" are
  * one split button in `.lib-head` (the second is the caret menu's only
  * entry; without the primary the caret stays as the sole entry point).
  * `lib/disclosure.js` supplies the menu / popover behaviour.

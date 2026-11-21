@@ -15,7 +15,7 @@
 .topbar{
   position:sticky; top:0; z-index:20;
   display:flex; align-items:center; gap:10px;
-  padding:14px 16px;
+  padding:14px var(--sp-4);
   background:var(--bg);
   border-bottom:1px solid var(--line-soft);
 }
@@ -35,7 +35,7 @@
   width:100%;
   max-width:var(--w-text);
   margin:0 auto;
-  padding:20px 16px 32px;
+  padding:var(--sp-5) var(--sp-4) var(--sp-7);
   /* WP MOBILE-1b: a phone in landscape puts the notch / rounded corners
      on the side; the gutter grows to the inset there (16px elsewhere). */
   padding-left:max(var(--gutter), env(safe-area-inset-left, 0px));
@@ -70,7 +70,7 @@
   order:1;
   display:grid;
   grid-template-columns:repeat(4, 1fr);
-  background:rgba(13,21,27,.96);
+  background:color-mix(in srgb, var(--bg) 96%, transparent);
   border-top:1px solid var(--line-soft);
   padding:7px 6px calc(9px + env(safe-area-inset-bottom));
   /* WP MOBILE-1b: side insets in landscape (BP-L's rail resets padding). */
@@ -99,8 +99,8 @@
    the count is computed from). Ported from the mockup's `.nav .pip`. */
 .nav-pip{
   position:absolute; top:1px; right:calc(50% - 20px);
-  min-width:15px; height:15px; padding:0 4px; border-radius:8px;
-  background:var(--run); color:#20180a; font-size:var(--fs-1); font-weight:700;
+  min-width:15px; height:15px; padding:0 var(--sp-1); border-radius:999px;
+  background:var(--run); color:#08120F; /* sic-ink (tokens.json color_literal) */ font-size:var(--fs-1); font-weight:700;
   display:none; place-items:center; font-family:var(--mono);
 }
 .nav-pip.on{ display:grid; }
@@ -164,10 +164,10 @@
   animation:dialog-fade var(--dur-fade) var(--ease-sheet);
 }
 .pop[hidden]{ display:none; }
-.pop.menu{ min-width:100%; width:max-content; padding:4px; display:flex; flex-direction:column; }
+.pop.menu{ min-width:100%; width:max-content; padding:var(--sp-1); display:flex; flex-direction:column; }
 .pop.menu[hidden]{ display:none; }
 .pop.menu .menuitem{
-  text-align:left; padding:9px 12px; border-radius:var(--r-s); color:var(--text); font-size:12.5px;
+  text-align:left; padding:9px var(--sp-3); border-radius:var(--r-s); color:var(--text); font-size:12.5px;
   background:transparent; border:0; cursor:pointer; white-space:normal;
 }
 .pop.menu .menuitem[hidden]{ display:none; }
@@ -185,9 +185,9 @@
 .linkbtn[aria-disabled="true"]{ opacity:.45; cursor:progress; }
 /* A row of small buttons (Settings' Save / Reset / Preview, WP WEB-FEAT-1):
    wraps instead of overflowing a phone width (WP WEB-FIX-3 rules). */
-.btnrow{ display:flex; flex-wrap:wrap; gap:8px; margin-top:8px; min-width:0; }
+.btnrow{ display:flex; flex-wrap:wrap; gap:var(--sp-2); margin-top:var(--sp-2); min-width:0; }
 .iconbtn{
-  width:32px; height:32px; border-radius:10px;
+  width:32px; height:32px; border-radius:var(--r-s);
   display:grid; place-items:center; color:var(--dim);
   border:1px solid transparent; flex:none;
 }
@@ -205,12 +205,12 @@
 @media (hover:hover) and (pointer:fine){
   .iconbtn:hover{ background:var(--raised); color:var(--text); }
 }
-.iconbtn.on{ background:var(--accent-glow); color:var(--accent); border-color:rgba(46,217,206,.3); }
+.iconbtn.on{ background:var(--accent-glow); color:var(--accent); border-color:color-mix(in srgb, var(--accent) 30%, transparent); }
 
 /* segmented layout switch */
 .segs{
   display:flex; align-self:center; flex:none;
-  border:1px solid var(--line); border-radius:10px; overflow:hidden; background:var(--surface);
+  border:1px solid var(--line); border-radius:var(--r-s); overflow:hidden; background:var(--surface);
 }
 .segs button{ width:28px; height:28px; display:grid; place-items:center; color:var(--dim-2); }
 .segs button + button{ border-left:1px solid var(--line); }
@@ -241,7 +241,7 @@
 .field > .segs{ display:flex; width:max-content; max-width:100%; overflow-x:auto; scrollbar-width:none; }
 .field > .segs button{
   width:auto; height:auto; min-height:32px; flex:none;
-  padding:6px 12px; font-size:12.5px; white-space:nowrap;
+  padding:6px var(--sp-3); font-size:12.5px; white-space:nowrap;
 }
 
 /* ---------- search ---------- */
@@ -264,7 +264,7 @@
   .qx:hover{ color:var(--text); }
 }
 .search.filled .qx{ display:grid; place-items:center; }
-.noresult{ grid-column:1/-1; text-align:center; padding:30px 16px; }
+.noresult{ grid-column:1/-1; text-align:center; padding:30px var(--sp-4); }
 .noresult p{ margin:0 0 14px; font-size:12.5px; line-height:1.6; color:var(--dim-2); }
 .noresult b{ color:var(--text); }
 /* `grid-column:1/-1` (Opus review blocker B1, WP 4e.2 fix round): `.grid`'s
@@ -293,7 +293,7 @@
    loading state, omitted from that earlier count entirely. Both live inside
    plain block containers (Downloads' Active section, Settings' body — never
    `display:grid`), where `grid-column` is simply ignored. */
-.empty{ grid-column:1/-1; text-align:center; padding:30px 16px; color:var(--dim); font-size:12.5px; }
+.empty{ grid-column:1/-1; text-align:center; padding:30px var(--sp-4); color:var(--dim); font-size:12.5px; }
 
 
 .tx-cached{ color:var(--ok); } .tx-none{ color:var(--none); }
@@ -334,11 +334,11 @@
      copies of one number is why a fifth would appear otherwise"). */
   max-width:calc(var(--w-text) - (var(--gutter) * 2));
   margin:0 auto;
-  display:flex; flex-direction:column; gap:8px;
+  display:flex; flex-direction:column; gap:var(--sp-2);
   padding:10px 10px 10px 14px; border-radius:var(--r-l);
-  background:rgba(23,37,47,.97);
+  background:color-mix(in srgb, var(--raised) 97%, transparent);
   border:1px solid var(--raised-2);
-  box-shadow:0 12px 28px -8px rgba(0,0,0,.7);
+  box-shadow:var(--sh-1);
   opacity:0; pointer-events:none; transform:translateY(22px);
   /* `visibility` (Opus review must-fix B2, WP 4e.4): `opacity:0` +
      `pointer-events:none` hide this bar visually and to a mouse, but its
@@ -366,7 +366,7 @@
 .bulk .count b{ color:var(--text); font-family:var(--mono); }
 .bulk .count .hid{ display:block; font-size:var(--fs-1); color:var(--dim-2); margin-top:1px; }
 .bulk .bulknote{ margin:0; font-size:11.5px; line-height:1.4; color:var(--dim-2); }
-.bulk .bulkbtns{ display:flex; gap:8px; flex-wrap:wrap; }
+.bulk .bulkbtns{ display:flex; gap:var(--sp-2); flex-wrap:wrap; }
 .bulk .btn{ white-space:nowrap; }
 
 /* Scroll room while the bulk bar is up (WP WEB-FIX-6). The bar is
@@ -386,7 +386,7 @@ body.selecting .view-root{ padding-bottom:var(--bulk-room); }
 /* ---------- buttons ---------- */
 .btn{
   display:inline-flex; align-items:center; justify-content:center; gap:7px;
-  padding:10px 15px; border-radius:11px;
+  padding:10px 15px; border-radius:var(--r-s);
   font-size:13px; font-weight:600; letter-spacing:.15px;
   border:1px solid var(--line); background:var(--raised); color:var(--text);
   transition:filter .14s, background .14s;
@@ -408,9 +408,9 @@ body.selecting .view-root{ padding-bottom:var(--bulk-room); }
    look. Also after `.btn:hover`, for the same source-order reason. */
 .btn[aria-disabled="true"]{ opacity:.45; cursor:progress; filter:none; }
 .btn.primary{ background:var(--accent); border-color:var(--accent); color:var(--accent-ink); }
-.btn.danger{ background:transparent; border-color:rgba(255,111,111,.45); color:var(--danger); }
+.btn.danger{ background:transparent; border-color:color-mix(in srgb, var(--danger) 45%, transparent); color:var(--danger); }
 .btn.ghost{ background:transparent; }
-.btn.sm{ padding:7px 11px; font-size:12px; border-radius:9px; }
+.btn.sm{ padding:7px 11px; font-size:12px; border-radius:var(--r-s); }
 /* `.btn{ display:inline-flex }` above is an AUTHOR rule and therefore always
    beats the UA `[hidden]{ display:none }` default regardless of selector
    order or specificity (same class of bug this file's `h4.sec[hidden]` rule
@@ -432,7 +432,7 @@ body.selecting .view-root{ padding-bottom:var(--bulk-room); }
    lower z-index here made both confirms genuinely unopenable through the
    sheet, found live rather than by inspection). */
 .dialog-backdrop{
-  position:fixed; inset:0; z-index:45; background:rgba(3,7,10,.62);
+  position:fixed; inset:0; z-index:45; background:color-mix(in srgb, var(--bg) 62%, transparent);
   display:none; align-items:center; justify-content:center; padding:22px;
 }
 .dialog-backdrop.on{ display:flex; animation:dialog-fade var(--dur-fade) var(--ease-sheet); }
@@ -441,8 +441,8 @@ body.selecting .view-root{ padding-bottom:var(--bulk-room); }
 .dialog{
   width:100%; max-width:420px;
   background:var(--raised); border:1px solid var(--line); border-radius:var(--r-l);
-  padding:20px 18px 16px;
-  box-shadow:0 24px 50px -12px rgba(0,0,0,.75);
+  padding:var(--sp-5) 18px var(--sp-4);
+  box-shadow:var(--sh-2);
   animation:dialog-card var(--dur-sheet) var(--ease-sheet); /* runs each time the hidden backdrop is shown */
 }
 .dialog h3{ margin:0 0 9px; font-size:16.5px; letter-spacing:-.2px; }
@@ -452,8 +452,7 @@ body.selecting .view-root{ padding-bottom:var(--bulk-room); }
 .dialog p b.num{ font-family:var(--mono); font-weight:500; font-variant-numeric:tabular-nums; }
 
 .cflabel{
-  margin:0 0 6px; font-size:var(--fs-1); font-weight:700; letter-spacing:.8px;
-  text-transform:uppercase; color:var(--dim-2);
+  margin:0 0 6px; font-size:var(--fs-1); font-weight:700; color:var(--dim-2);
 }
 .cflist{
   list-style:none; margin:0 0 11px; padding:0;
@@ -464,15 +463,15 @@ body.selecting .view-root{ padding-bottom:var(--bulk-room); }
 /* WP CACHE-REPAIR-UI-1: the repair confirm hides an empty depot list. */
 .cflist[hidden]{ display:none; }
 .cflist li{
-  display:flex; flex-wrap:wrap; align-items:baseline; gap:2px 8px;
+  display:flex; flex-wrap:wrap; align-items:baseline; gap:2px var(--sp-2);
   padding:7px 9px; border-radius:var(--r-s);
   background:var(--surface); border-left:2px solid var(--line);
 }
-.cflist li.free{ border-left-color:rgba(255,111,111,.55); }
+.cflist li.free{ border-left-color:color-mix(in srgb, var(--danger) 55%, transparent); }
 .cflist .did{ font-family:var(--mono); font-size:11.5px; color:var(--text); font-variant-numeric:tabular-nums; }
 .cflist .mk{
   font-size:var(--fs-1); font-weight:700; letter-spacing:.6px; text-transform:uppercase;
-  border:1px solid currentColor; border-radius:4px; padding:1px 4px;
+  border:1px solid currentColor; border-radius:calc(var(--r-s) / 2); padding:1px var(--sp-1);
 }
 .cflist li.keep .mk{ color:var(--dim-2); }
 .cflist li.free .mk{ color:var(--danger); }
@@ -508,13 +507,15 @@ body.selecting .view-root{ padding-bottom:var(--bulk-room); }
 .dl-head h1{ margin:0 0 2px; }
 .dl-sub{ display:block; font-size:11px; font-weight:500; color:var(--dim-2); letter-spacing:.3px; }
 
+/* Section labels here and in kit.css are sentence case (DESIGN-NITS-1,
+   audit D-12): no uppercase transform, no tracking. Status tags (.tag,
+   .mk, .pkgstate, .os, .nw) are badges, not labels, and keep theirs. */
 h4.sec{
-  margin:18px 0 8px; font-size:var(--fs-1); font-weight:700;
-  text-transform:uppercase; letter-spacing:1.1px; color:var(--dim-2);
-  display:flex; align-items:center; gap:8px;
+  margin:18px 0 var(--sp-2); font-size:var(--fs-1); font-weight:700; color:var(--dim-2);
+  display:flex; align-items:center; gap:var(--sp-2);
 }
 h4.sec::after{ content:""; flex:1; height:1px; background:var(--line-soft); }
-h4.sec .n{ font-family:var(--mono); font-weight:400; letter-spacing:0; text-transform:none; }
+h4.sec .n{ font-family:var(--mono); font-weight:400; }
 /* `h4.sec{ display:flex }` above has the same specificity as the UA
    `[hidden]{ display:none }` rule and would otherwise win by cascade order
    (this stylesheet loads after the UA sheet) — any `.hidden` toggle on an
@@ -523,9 +524,8 @@ h4.sec[hidden]{ display:none; }
 
 .jobcard{
   background:var(--surface); border:1px solid var(--line-soft);
-  border-radius:var(--r-m); padding:12px; margin-bottom:10px;
+  border-radius:var(--r-m); padding:var(--sp-3); margin-bottom:10px;
 }
-.jobcard.active{ border-color:rgba(237,197,95,.32); background:linear-gradient(180deg,rgba(237,197,95,.07),var(--surface)); }
 .jobcard.held{ border-color:var(--line); background:var(--surface); }
 .jobtop{ display:flex; gap:11px; align-items:flex-start; justify-content:space-between; }
 .jobtop .nm{ font-size:13.5px; font-weight:600; letter-spacing:-.1px; }
@@ -542,7 +542,7 @@ h4.sec[hidden]{ display:none; }
    flex-start pinned it to the top edge of the name, about 7px above the
    block's middle, read on rc9 as "the pause symbol is shifted upward". */
 .jobtop > .badge{ align-self:center; }
-.jobacts{ display:flex; gap:8px; justify-content:flex-end; margin-top:11px; flex-wrap:wrap; }
+.jobacts{ display:flex; gap:var(--sp-2); justify-content:flex-end; margin-top:11px; flex-wrap:wrap; }
 /* WP CACHE-COMPLETE-1c: the detail sheet's Verify explanation, under the
    button (left-aligned like the facts; `.hint` centres). */
 .detail-verify-hint{ text-align:left; margin:6px 0 0; }
@@ -560,10 +560,10 @@ h4.sec[hidden]{ display:none; }
    ============================================================ */
 
 .field{ margin-bottom:11px; }
-.field label{ display:block; font-size:var(--fs-1); text-transform:uppercase; letter-spacing:.8px; color:var(--dim-2); margin-bottom:5px; font-weight:600; }
+.field label{ display:block; font-size:var(--fs-1); color:var(--dim-2); margin-bottom:5px; font-weight:600; }
 .inp{
-  display:flex; align-items:center; gap:8px;
-  border:1px solid var(--line-strong); background:var(--bg); border-radius:10px; padding:10px 11px;
+  display:flex; align-items:center; gap:var(--sp-2);
+  border:1px solid var(--line-strong); background:var(--bg); border-radius:var(--r-s); padding:10px 11px;
   font-family:var(--mono); font-size:12.5px; color:var(--text);
 }
 .inp:focus-within{ border-color:var(--accent); }
@@ -577,14 +577,14 @@ input.inp, .inp input{
   font-family:var(--mono); font-size:16px; color:var(--text);
   background:transparent; border:0; outline:none; width:100%; min-width:0; padding:0;
 }
-input.inp.txt{ background:var(--bg); border:1px solid var(--line-strong); border-radius:10px; padding:10px 11px; width:100%; }
+input.inp.txt{ background:var(--bg); border:1px solid var(--line-strong); border-radius:var(--r-s); padding:10px 11px; width:100%; }
 input.inp.txt:focus{ border-color:var(--accent); }
 input.inp.txt:disabled{ opacity:.55; }
 
 .srow{
-  display:flex; align-items:center; gap:11px; padding:12px;
+  display:flex; align-items:center; gap:11px; padding:var(--sp-3);
   border:1px solid var(--line-soft); background:var(--surface);
-  border-radius:var(--r-m); margin-bottom:8px;
+  border-radius:var(--r-m); margin-bottom:var(--sp-2);
 }
 .srow .ttl{ display:block; font-size:13.5px; font-weight:600; }
 .srow .desc{ display:block; font-size:11.5px; color:var(--dim-2); line-height:1.45; margin-top:3px; }
@@ -592,51 +592,39 @@ input.inp.txt:disabled{ opacity:.55; }
 .srow input[type="checkbox"]{ width:17px; height:17px; flex:none; accent-color:var(--accent); }
 /* WP WEB-FIX-3: the webhook event rows are `<label class="srow">` inside a
    `.field`, so `.field label` (0,1,1) beat `.srow` (0,1,0) and turned the
-   row into an uppercase block with the checkbox ABOVE its label. Restore
+   row into a small dim block with the checkbox ABOVE its label. Restore
    the .srow row: checkbox inline, left of the label, one line. */
 .field label.srow{
-  display:flex; margin-bottom:8px;
-  font-size:inherit; font-weight:inherit; letter-spacing:normal;
-  text-transform:none; color:inherit;
+  display:flex; margin-bottom:var(--sp-2);
+  font-size:inherit; font-weight:inherit; color:inherit;
 }
 
 .opt{
-  display:flex; gap:11px; align-items:flex-start; padding:12px;
+  display:flex; gap:11px; align-items:flex-start; padding:var(--sp-3);
   border:1px solid var(--line-soft); background:var(--surface);
-  border-radius:var(--r-m); margin-bottom:8px; width:100%; text-align:left;
+  border-radius:var(--r-m); margin-bottom:var(--sp-2); width:100%; text-align:left;
 }
-.opt[aria-checked="true"]{ border-color:rgba(46,217,206,.5); background:linear-gradient(180deg,var(--accent-glow),var(--surface)); }
+.opt[aria-checked="true"]{ border-color:color-mix(in srgb, var(--accent) 50%, transparent); background:linear-gradient(180deg,var(--accent-glow),var(--surface)); }
 .tag{
   font-size:var(--fs-1); font-weight:700; letter-spacing:.6px; text-transform:uppercase;
-  padding:2px 6px; border-radius:5px;
+  padding:2px 6px; border-radius:calc(var(--r-s) / 2);
 }
 .tag.def{ background:var(--accent-glow); color:var(--accent); }
 
-.toggle{
-  width:44px; height:25px; border-radius:999px; background:var(--line); flex:none;
-  position:relative; transition:background .18s;
-}
-.toggle::after{
-  content:""; position:absolute; top:3px; left:3px; width:19px; height:19px; border-radius:50%;
-  background:#8FA6B2; transition:transform .18s, background .18s;
-}
-.toggle[aria-checked="true"]{ background:rgba(46,217,206,.32); }
-.toggle[aria-checked="true"]::after{ transform:translateX(19px); background:var(--accent); }
-
 .okline{
-  display:none; align-items:center; gap:8px; margin-top:9px;
+  display:none; align-items:center; gap:var(--sp-2); margin-top:9px;
   font-size:12px; color:var(--ok); font-family:var(--mono); font-variant-numeric:tabular-nums;
 }
 .okline.on{ display:flex; }
-.errline{ margin:8px 0 0; font-size:12px; line-height:1.5; color:var(--danger); }
+.errline{ margin:var(--sp-2) 0 0; font-size:12px; line-height:1.5; color:var(--danger); }
 
 .foot-note{ font-size:11px; line-height:1.5; color:var(--dim-2); margin:6px 0 0; }
 
-.bullets{ margin:0; padding-left:16px; }
+.bullets{ margin:0; padding-left:var(--sp-4); }
 .bullets li{ font-size:12px; line-height:1.55; color:var(--dim); margin-bottom:6px; }
 .bullets b{ color:var(--text); font-weight:600; }
 
-.risky-list{ margin:0 0 12px; }
+.risky-list{ margin:0 0 var(--sp-3); }
 
 /* ---------- Settings save bar (WP WEB-FIX-8; WP SETTINGS-2) ----------
    The bar itself is kit.css's `.kit.view-settings .savebar`, sticky at the
@@ -653,7 +641,7 @@ input.inp.txt:disabled{ opacity:.55; }
 /* ---------- onboarding overlay ---------- */
 .onb{
   position:fixed; inset:0; z-index:50; background:var(--bg);
-  display:flex; flex-direction:column; padding:16px 20px calc(16px + env(safe-area-inset-bottom));
+  display:flex; flex-direction:column; padding:var(--sp-4) var(--sp-5) calc(var(--sp-4) + env(safe-area-inset-bottom));
   transition:opacity .3s, transform .3s;
   max-width:var(--w-text); margin:0 auto;
 }
@@ -661,14 +649,22 @@ input.inp.txt:disabled{ opacity:.55; }
 body.onboarding .nav{ display:none; }
 .onbhead{ display:flex; align-items:center; gap:11px; flex:none; }
 .mark{
-  width:40px; height:40px; border-radius:12px; display:grid; place-items:center; flex:none;
-  background:linear-gradient(150deg,rgba(46,217,206,.22),rgba(46,217,206,.05));
-  box-shadow:inset 0 0 0 1px rgba(46,217,206,.35); color:var(--accent);
+  width:40px; height:40px; border-radius:var(--r-m); display:grid; place-items:center; flex:none;
+  background:linear-gradient(150deg,color-mix(in srgb, var(--accent) 22%, transparent),color-mix(in srgb, var(--accent) 5%, transparent));
+  box-shadow:inset 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent); color:var(--accent);
 }
 .wordmark{ font-size:15px; font-weight:700; letter-spacing:-.2px; }
-.stepnum{ font-size:var(--fs-1); letter-spacing:.7px; text-transform:uppercase; color:var(--dim-2); font-weight:600; margin-top:2px; }
-.track{ flex:none; height:3px; border-radius:2px; background:var(--line-soft); margin:13px 0 16px; overflow:hidden; }
-.track i{ display:block; height:100%; background:var(--accent); transition:width .3s ease; }
+.stepnum{ font-size:var(--fs-1); color:var(--dim-2); font-weight:600; margin-top:2px; }
+/* Onboarding progress (DESIGN-NITS-1, audit D-16): the fill is always
+   full width and onboarding.js scales it with `transform:scaleX(p)` from
+   the left edge, so a step change animates on the compositor instead of
+   re-laying out `width` every frame. Reduced motion: theme.css's global
+   block cuts the transition to .001ms, and the rule below drops it. */
+.track{ flex:none; height:3px; border-radius:999px; background:var(--line-soft); margin:var(--sp-3) 0 var(--sp-4); overflow:hidden; }
+.track i{ display:block; width:100%; height:100%; background:var(--accent); transform-origin:left center; transform:scaleX(0); transition:transform .3s ease; }
+@media (prefers-reduced-motion: reduce){
+  .track i{ transition:none; }
+}
 
 .onb h2{ margin:0 0 6px; font-size:24px; letter-spacing:-.6px; text-wrap:balance; }
 .onb .lede{ margin:0 0 18px; font-size:12.8px; line-height:1.55; color:var(--dim); }
@@ -676,7 +672,7 @@ body.onboarding .nav{ display:none; }
 .onb .rest::-webkit-scrollbar{ display:none; }
 .ostep{ display:none; }
 .ostep.on{ display:block; }
-.onbfoot{ flex:none; padding-top:12px; }
+.onbfoot{ flex:none; padding-top:var(--sp-3); }
 .onbnav{ display:flex; gap:10px; }
 .onbnav .btn{ flex:1; }
 /* Same `[hidden]` cascade bug as `.btn[hidden]` above, on the container this
@@ -700,12 +696,12 @@ body.onboarding .nav{ display:none; }
   padding:13px; display:flex; gap:11px; align-items:center;
 }
 .disclaim{
-  margin-top:14px; padding:10px 12px; border-radius:var(--r-s);
+  margin-top:14px; padding:10px var(--sp-3); border-radius:var(--r-s);
   border:1px solid var(--line-soft); background:var(--surface);
   font-size:11px; line-height:1.55; color:var(--dim-2);
 }
 .summary{ display:flex; flex-direction:column; gap:1px; background:var(--line-soft); border-radius:var(--r-m); overflow:hidden; margin-top:14px; }
-.summary div{ display:flex; gap:10px; padding:11px 12px; background:var(--surface); font-size:12.5px; }
+.summary div{ display:flex; gap:10px; padding:11px var(--sp-3); background:var(--surface); font-size:12.5px; }
 .summary span:first-child{ color:var(--dim-2); width:110px; flex:none; }
 .summary span:last-child{
   color:var(--text); font-family:var(--mono); font-size:11.5px;
@@ -729,8 +725,8 @@ body.onboarding .nav{ display:none; }
 
 .npip{
   position:absolute; top:1px; right:1px;
-  min-width:15px; height:15px; padding:0 4px; border-radius:8px;
-  background:var(--stale); color:#20180a; font-size:var(--fs-1); font-weight:700;
+  min-width:15px; height:15px; padding:0 var(--sp-1); border-radius:999px;
+  background:var(--stale); color:#08120F; /* sic-ink (tokens.json color_literal) */ font-size:var(--fs-1); font-weight:700;
   font-family:var(--mono); display:none; place-items:center;
   box-shadow:0 0 0 2px var(--bg);
 }
@@ -756,24 +752,26 @@ body.onboarding .nav{ display:none; }
    author-`display` bug class (docs/LEARNINGS.md, "Web UI"); the UA default
    `[hidden]{display:none}` already works correctly here precisely because
    no rule below ever overrides it. */
-.banner-wrap{ width:100%; max-width:var(--w-text); margin:0 auto; padding:12px 16px 0; }
+.banner-wrap{ width:100%; max-width:var(--w-text); margin:0 auto; padding:var(--sp-3) var(--sp-4) 0; }
 /* WP WEB-FIX-2: the wrap now holds two [hidden]-toggled `.banner-slot`s
    (connection, bypass — index.html). The only new rule: a gap between two
    slots that are BOTH shown. No `display` on `.banner-slot` (same
    [hidden]-vs-author-display reason as above), no new colour. */
-.banner-slot:not([hidden]) ~ .banner-slot:not([hidden]){ margin-top:8px; }
+.banner-slot:not([hidden]) ~ .banner-slot:not([hidden]){ margin-top:var(--sp-2); }
 .banner{
   display:flex; gap:10px; align-items:flex-start;
-  padding:11px 12px;
+  padding:var(--sp-3);
   border-radius:var(--r-m);
-  background:linear-gradient(180deg,rgba(239,143,60,.16),rgba(239,143,60,.07));
-  border:1px solid rgba(239,143,60,.34);
+  background:linear-gradient(180deg,color-mix(in srgb, var(--stale) 16%, transparent),color-mix(in srgb, var(--stale) 7%, transparent));
+  border:1px solid color-mix(in srgb, var(--stale) 34%, transparent);
 }
 .banner .glyph{ color:var(--stale); flex:none; margin-top:1px; }
-.banner .body{ flex:1; min-width:0; font-size:12.3px; line-height:1.42; color:#F6DCC4; }
-.banner .acts{ display:flex; gap:14px; margin-top:7px; }
-.banner .acts button{ font-size:11.5px; font-weight:600; letter-spacing:.3px; text-transform:uppercase; color:var(--stale); }
-.banner .acts button.mute{ color:rgba(246,220,196,.55); }
+.banner .body{ flex:1; min-width:0; font-size:12.3px; line-height:1.42; color:var(--text); }
+.banner .acts{ display:flex; gap:var(--sp-4); margin-top:var(--sp-2); }
+/* Sentence case (DESIGN-NITS-1, audit D-13): the words are written as
+   they read ("Details", "Dismiss"); no uppercase transform. */
+.banner .acts button{ font-size:var(--fs-2); font-weight:600; color:var(--stale); }
+.banner .acts button.mute{ color:var(--dim); }
 /* New affordance (WP 4e.4): the banner's Details/Mute actions had no hover
    cue at all. `filter`, not `color` — a hover rule setting `color` here
    would be an equal-specificity (0,2,0) sibling of `.banner .acts
@@ -794,7 +792,7 @@ body.onboarding .nav{ display:none; }
 .banner .banner-x{
   flex:none; display:inline-flex; align-items:center; justify-content:center;
   width:32px; height:32px; margin:-7px -6px -7px 0;
-  border-radius:var(--r-m); color:rgba(246,220,196,.7);
+  border-radius:var(--r-m); color:var(--dim);
 }
 @media (hover:hover) and (pointer:fine){
   .banner .banner-x:hover{ filter:brightness(1.25); }
@@ -812,7 +810,7 @@ body.onboarding .nav{ display:none; }
    free for a future WP 4a.4 detail sheet to reuse verbatim. */
 .sheet-backdrop{
   position:fixed; inset:0; z-index:40;
-  background:rgba(3,7,10,.62);
+  background:color-mix(in srgb, var(--bg) 62%, transparent);
   display:none; align-items:flex-end; justify-content:center;
   opacity:0; transition:opacity var(--dur-fade) var(--ease-sheet);
 }
@@ -829,10 +827,10 @@ body.onboarding .nav{ display:none; }
   background:var(--surface);
   border-top-left-radius:var(--r-xl); border-top-right-radius:var(--r-xl);
   border:1px solid var(--line); border-bottom:none;
-  box-shadow:0 -18px 40px -12px rgba(0,0,0,.7);
+  box-shadow:var(--sh-2);
 }
 .sheet-backdrop.shown .sheet{ transform:none; }
-.sheet .grab{ position:relative; width:38px; height:4px; border-radius:2px; background:var(--line); margin:9px auto 2px; flex:none; touch-action:none; }
+.sheet .grab{ position:relative; width:38px; height:4px; border-radius:999px; background:var(--line); margin:9px auto 2px; flex:none; touch-action:none; }
 /* Enlarged invisible hit area (about 30px tall) for the drag-to-close gesture. */
 .sheet .grab::before{ content:""; position:absolute; inset:-20px -60px -6px; }
 .sheet .body{ overflow-y:auto; padding:10px 18px 22px; scrollbar-width:none; }
@@ -841,7 +839,7 @@ body.onboarding .nav{ display:none; }
    Add a device, History row) put it into their own footer (kit.css). */
 .sheet:not(.kit) .body:last-child{ padding-bottom:calc(22px + env(safe-area-inset-bottom, 0px)); }
 .sheet .body::-webkit-scrollbar{ display:none; }
-.sheet h2{ margin:4px 0 4px; font-size:19px; letter-spacing:-.3px; }
+.sheet h2{ margin:var(--sp-1) 0 var(--sp-1); font-size:19px; letter-spacing:-.3px; }
 
 /* ---------- notifications panel rows ---------- */
 .notif{
@@ -856,7 +854,7 @@ body.onboarding .nav{ display:none; }
    specificity, source order breaks the tie — same regression class Opus
    review measured for the other four relocated pairs. */
 @media (hover:hover) and (pointer:fine){
-  .notif:hover{ background:rgba(255,255,255,.045); border-radius:var(--r-s); }
+  .notif:hover{ background:color-mix(in srgb, var(--text) 4.5%, transparent); border-radius:var(--r-s); }
 }
 .notif.unread{
   background:linear-gradient(90deg,var(--accent-glow),transparent 70%);
@@ -866,7 +864,7 @@ body.onboarding .nav{ display:none; }
 .notif .nt{ font-size:13px; font-weight:600; color:var(--text); display:flex; align-items:center; gap:7px; flex-wrap:wrap; }
 .notif .nw{ font-size:var(--fs-1); font-weight:700; text-transform:uppercase; letter-spacing:.5px; }
 .notif .nx{ display:block; font-size:11.5px; line-height:1.5; color:var(--dim); margin-top:3px; }
-.notif .nwhen{ display:block; font-size:var(--fs-1); color:var(--dim-2); font-family:var(--mono); margin-top:4px; }
+.notif .nwhen{ display:block; font-size:var(--fs-1); color:var(--dim-2); font-family:var(--mono); margin-top:var(--sp-1); }
 .notif .undot{ width:7px; height:7px; border-radius:50%; background:var(--accent); flex:none; margin-top:6px; opacity:0; }
 .notif.unread .undot{ opacity:1; }
 .notif .ngo{ align-self:center; color:var(--dim-2); flex:none; }
@@ -876,7 +874,7 @@ body.onboarding .nav{ display:none; }
 .notif .sic{ --sz:16px; }
 
 /* ---------- clients sheet ---------- */
-.jobcard.bypass{ border-color:rgba(239,143,60,.35); background:linear-gradient(180deg,rgba(239,143,60,.07),var(--surface)); }
+.jobcard.bypass{ border-color:color-mix(in srgb, var(--stale) 35%, transparent); background:linear-gradient(180deg,color-mix(in srgb, var(--stale) 7%, transparent),var(--surface)); }
 .jobcard .hint{ text-align:left; margin:9px 0 0; }
 .tx-stale{ color:var(--stale); }
 .tx-warn{ color:var(--stale); }
@@ -909,10 +907,10 @@ body.onboarding .nav{ display:none; }
    on a screen too narrow for all four (the Clients page uses the kit's
    `.seg` instead, WP CLIENTS-4). The Downloads statistics moved to the UI
    kit's hero (css/kit.css, WP DOWNLOADS-2). */
-.segs.rangesegs{ display:flex; width:max-content; max-width:100%; overflow-x:auto; scrollbar-width:none; margin:10px 0 4px; }
+.segs.rangesegs{ display:flex; width:max-content; max-width:100%; overflow-x:auto; scrollbar-width:none; margin:10px 0 var(--sp-1); }
 .segs.rangesegs button{
   width:auto; height:auto; min-height:32px; flex:none;
-  padding:6px 12px; font-size:12.5px; white-space:nowrap;
+  padding:6px var(--sp-3); font-size:12.5px; white-space:nowrap;
 }
 .segs.rangesegs[hidden]{ display:none; }
 .cl-note{ text-align:left; }
@@ -925,7 +923,7 @@ body.onboarding .nav{ display:none; }
 .view-clients.kit > .sechd{ margin-top:var(--sp-2); }
 .view-clients.kit > p{ margin:0; }
 .ccards > .cl-empty{ grid-column:1 / -1; }
-.cl-empty{ display:grid; justify-items:center; gap:10px; padding:22px 16px; border:1px dashed var(--line); border-radius:var(--r-m); background:var(--bg); }
+.cl-empty{ display:grid; justify-items:center; gap:10px; padding:22px var(--sp-4); border:1px dashed var(--line); border-radius:var(--r-m); background:var(--bg); }
 .cl-empty .hint{ margin:0; }
 /* WP D15-NAMES: the rename dialog (its title carries operator-chosen text
    that may be one long word) and the Delete history confirm. `.dialog p`
@@ -961,17 +959,17 @@ body.onboarding .nav{ display:none; }
 }
 .about-table tbody, .about-table tr, .about-table th, .about-table td{ display:block; min-width:0; }
 .about-table .about-row{
-  display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:6px 12px;
-  padding:10px 0 4px; border-top:1px solid var(--line-soft);
+  display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:6px var(--sp-3);
+  padding:10px 0 var(--sp-1); border-top:1px solid var(--line-soft);
 }
 .about-table .about-name{ grid-column:1 / -1; text-align:left; font-weight:600; overflow-wrap:anywhere; }
 .about-table .about-status{ grid-column:1 / -1; }
 .about-table td[data-label]::before{
   content:attr(data-label); display:block; margin-bottom:2px;
-  font-size:var(--fs-1); font-weight:600; letter-spacing:.4px; text-transform:uppercase; color:var(--dim-2);
+  font-size:var(--fs-1); font-weight:600; color:var(--dim-2);
 }
 .about-table .mono{ font-family:var(--mono); font-size:11.5px; overflow-wrap:anywhere; }
-.about-table .about-detail td{ padding:0 0 8px; }
+.about-table .about-detail td{ padding:0 0 var(--sp-2); }
 .about-table .about-detail .foot-note{ margin:2px 0 0; }
 /* WP WEB-FIX-8: the per-row (i) button sits inline after the component
    name (the name cell keeps its own display, so the BP-M table-cell rule
@@ -983,7 +981,7 @@ body.onboarding .nav{ display:none; }
 .about-table .about-name-text{ overflow-wrap:anywhere; }
 .about-info-btn{
   display:inline-flex; align-items:center; justify-content:center;
-  width:28px; height:28px; margin:-4px 0 -4px 4px; vertical-align:middle;
+  width:28px; height:28px; margin:-4px 0 -4px var(--sp-1); vertical-align:middle;
   border-radius:50%; color:var(--dim-2);
 }
 .about-info-btn svg{ width:16px; height:16px; }
@@ -1007,7 +1005,7 @@ body.onboarding .nav{ display:none; }
 .detail-block{ margin-top:14px; }
 /* LIBRARY-DETAIL-1: Overview / Depots / Maintenance tabs of the detail sheet
    (components/tabs.js; same keyboard model as the Add-a-device tabs). */
-.tabs{ display:flex; gap:4px; margin:16px 0 0; border-bottom:1px solid var(--line-soft); }
+.tabs{ display:flex; gap:var(--sp-1); margin:var(--sp-4) 0 0; border-bottom:1px solid var(--line-soft); }
 .tab{
   margin-bottom:-1px; padding:10px 14px; border:0; border-bottom:2px solid transparent; background:none;
   color:var(--dim); font:inherit; font-size:13.5px; cursor:pointer;
@@ -1016,22 +1014,22 @@ body.onboarding .nav{ display:none; }
 .tab:focus-visible{ outline:2px solid var(--accent); outline-offset:-2px; }
 .detail-panel{ display:flex; flex-direction:column; gap:14px; padding-top:14px; }
 .detail-panel[hidden]{ display:none; }
-.detail-box{ display:flex; flex-direction:column; gap:10px; padding:14px 16px; background:var(--raised); border-radius:var(--r-m); }
+.detail-box{ display:flex; flex-direction:column; gap:10px; padding:14px var(--sp-4); background:var(--raised); border-radius:var(--r-m); }
 .detail-box:empty{ display:none; }
 .detail-box > .detail-block{ margin-top:0; }
 .detail-box-title{ margin:0; font-size:14px; font-weight:600; }
-.detail-box-danger{ background:none; border:1px solid rgba(255,111,111,.35); }
+.detail-box-danger{ background:none; border:1px solid color-mix(in srgb, var(--danger) 35%, transparent); }
 .detail-box-danger .detail-block{ align-self:flex-start; }
-.store-desc{ margin:0 0 8px; font-size:12.5px; line-height:1.55; color:var(--text);
+.store-desc{ margin:0 0 var(--sp-2); font-size:12.5px; line-height:1.55; color:var(--text);
   display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; cursor:pointer; }
 .store-desc.expanded{ display:block; overflow:visible; }
-.store-chips{ display:flex; flex-wrap:wrap; gap:6px; margin:0 0 8px; }
+.store-chips{ display:flex; flex-wrap:wrap; gap:6px; margin:0 0 var(--sp-2); }
 .store-chip{ border:1px solid var(--line); border-radius:999px; padding:2px 9px; font-size:11px; color:var(--dim); }
 .store-line{ margin:2px 0 0; font-size:11.5px; color:var(--dim); }
 /* WP CARD-LAYOUT-1: narrow = description, then facts stacked under it;
    wide (>=600px) = facts as a second column beside the description. */
 .store-facts{ min-width:0; }
-.store-details .store-desc{ margin-bottom:8px; }
+.store-details .store-desc{ margin-bottom:var(--sp-2); }
 @media (min-width:600px){
   .store-details:not(.store-nodesc){ display:grid; grid-template-columns:minmax(0,3fr) minmax(0,2fr); column-gap:18px; align-items:start; }
   .store-details:not(.store-nodesc) .store-desc{ margin-bottom:0; }
@@ -1048,7 +1046,7 @@ body.onboarding .nav{ display:none; }
 .depot .id{ font-family:var(--mono); font-size:12px; color:var(--text); font-variant-numeric:tabular-nums; }
 .depot .tag{
   font-size:var(--fs-1); text-transform:uppercase; letter-spacing:.5px; font-weight:600;
-  color:var(--stale); border:1px solid rgba(239,143,60,.4); border-radius:5px; padding:1px 5px;
+  color:var(--stale); border:1px solid color-mix(in srgb, var(--stale) 40%, transparent); border-radius:calc(var(--r-s) / 2); padding:1px 5px;
 }
 .depot .b{ margin-left:auto; font-family:var(--mono); font-size:11.5px; color:var(--dim); font-variant-numeric:tabular-nums; }
 .depot .chev{ color:var(--dim-2); display:grid; place-items:center; transition:transform .18s; }
@@ -1066,8 +1064,8 @@ body.onboarding .nav{ display:none; }
 
 .owners{ display:none; padding:2px 11px 11px; }
 .depotwrap.open .owners{ display:block; }
-.olabel{ margin:0 0 6px; font-size:var(--fs-1); font-weight:700; letter-spacing:.8px; text-transform:uppercase; color:var(--dim-2); }
-.orow{ display:flex; align-items:center; gap:8px; padding:4px 0; font-size:12px; }
+.olabel{ margin:0 0 6px; font-size:var(--fs-1); font-weight:700; color:var(--dim-2); }
+.orow{ display:flex; align-items:center; gap:var(--sp-2); padding:var(--sp-1) 0; font-size:12px; }
 .orow .on{ color:var(--text); }
 .orow .os{ margin-left:auto; font-size:var(--fs-1); text-transform:uppercase; letter-spacing:.4px; color:var(--dim-2); }
 .orow.off .on{ color:var(--dim-2); }
@@ -1096,8 +1094,6 @@ body.onboarding .nav{ display:none; }
 .unknown{ border:1px dashed var(--line); border-radius:var(--r-m); padding:14px 13px; }
 .unknown .u1{ margin:0 0 7px; font-size:13px; font-weight:600; color:var(--text); }
 .unknown .u2{ margin:0; font-size:11.5px; line-height:1.55; color:var(--dim); }
-
-.errline{ margin:8px 0 0; font-size:12px; line-height:1.5; color:var(--danger); }
 
 .detail-log{
   font-family:var(--mono); font-size:var(--fs-1); line-height:1.65; color:var(--dim);
@@ -1182,10 +1178,10 @@ body.onboarding .nav{ display:none; }
   .about-table tbody{ display:table-row-group; }
   .about-table tr, .about-table .about-row{ display:table-row; padding:0; border-top:0; }
   .about-table th, .about-table td{
-    display:table-cell; padding:8px 10px 8px 0; vertical-align:top; text-align:left;
+    display:table-cell; padding:var(--sp-2) 10px var(--sp-2) 0; vertical-align:top; text-align:left;
     border-top:1px solid var(--line-soft);
   }
-  .about-table thead th{ font-size:var(--fs-1); font-weight:600; letter-spacing:.4px; text-transform:uppercase; color:var(--dim-2); }
+  .about-table thead th{ font-size:var(--fs-1); font-weight:600; color:var(--dim-2); }
   .about-table td[data-label]::before{ content:none; }
   .about-table .about-detail td{ border-top:0; padding:0 0 10px; }
 
@@ -1414,7 +1410,7 @@ body.onboarding .nav{ display:none; }
      per row), so icon and label sit side by side instead. */
   .nav-btn{
     flex-direction:row; justify-content:flex-start; align-items:center;
-    gap:12px; width:100%; padding:11px 12px; border-radius:10px;
+    gap:var(--sp-3); width:100%; padding:11px var(--sp-3); border-radius:var(--r-s);
   }
   .nav-btn .nav-lb{ font-size:12.5px; }
   /* Was `position:absolute` pinned to the icon's top-right corner in the
@@ -1461,7 +1457,7 @@ body.onboarding .nav{ display:none; }
      file — css-hygiene.test.js's lint now tracks this pair too). */
   .rail-head{
     display:block;
-    padding:2px 12px 14px;
+    padding:2px var(--sp-3) 14px;
     margin-bottom:6px;
     border-bottom:1px solid var(--line-soft);
   }
@@ -1511,12 +1507,12 @@ body.onboarding .nav{ display:none; }
   .rail-foot{
     display:block;
     margin-top:auto;
-    padding:14px 12px 2px;
+    padding:14px var(--sp-3) 2px;
     border-top:1px solid var(--line-soft);
   }
   .rail-foot[hidden]{ display:none; }
   .rail-cache{
-    display:flex; flex-direction:column; gap:4px;
+    display:flex; flex-direction:column; gap:var(--sp-1);
   }
   .rail-cache-row{
     display:flex; justify-content:space-between; align-items:baseline;
@@ -1534,7 +1530,7 @@ body.onboarding .nav{ display:none; }
      JS-side clamp were ever bypassed, this rule alone still stops a
      pathological value from widening or overrunning the fixed-width rail. */
   .rail-version{
-    margin:8px 0 0;
+    margin:var(--sp-2) 0 0;
     font-size:var(--fs-1);
     color:var(--dim-2);
     font-family:var(--mono);
@@ -1658,7 +1654,8 @@ body.onboarding .nav{ display:none; }
     border-bottom-left-radius:var(--r-xl);
     border-bottom-right-radius:var(--r-xl);
     border-bottom:1px solid var(--line);
-    box-shadow:0 24px 50px -12px rgba(0,0,0,.75);
+    /* no box-shadow: the base .sheet's --sh-2 has no offset and already
+       falls on all four sides (DESIGN-NITS-1, audit D-10) */
   }
   /* No drag-to-dismiss affordance on a card with no edge for that gesture
      to reach toward — same reasoning the drawer variant below applies to
@@ -1712,7 +1709,6 @@ body.onboarding .nav{ display:none; }
     border-right:none;
     border-top-right-radius:0;
     border-bottom-left-radius:var(--r-xl);
-    box-shadow:-18px 0 40px -12px rgba(0,0,0,.7);
   }
   .sheet--drawer .grab{ display:none; }
   /* Opus review N2, WP 4e.3 fix round: with `.grab` hidden, the drawer's
@@ -1960,6 +1956,6 @@ body::before{
    only: the rail has its own geometry and --nav-h 0px there. */
 @media (orientation:landscape) and (max-height:500px) and (max-width:1023px){
   :root{ --nav-h:48px; }
-  .nav{ padding-top:4px; padding-bottom:calc(4px + env(safe-area-inset-bottom, 0px)); }
+  .nav{ padding-top:var(--sp-1); padding-bottom:calc(var(--sp-1) + env(safe-area-inset-bottom, 0px)); }
   .nav-btn{ flex-direction:row; justify-content:center; gap:var(--sp-2); padding:9px 2px; }
 }

@@ -325,7 +325,7 @@ export const INSTALLED_BADGE = Object.freeze({
 export function installedBadgeState(game) {
   const installedOn = Array.isArray(game?.installed_on) ? game.installed_on : [];
   if (installedOn.length === 0) return INSTALLED_BADGE.NONE;
-  // WP API-FIX-4: a tool app is never "installed but not cached" — its
+  // WP API-FIX-4: a tool app is never "installed, not cached" — its
   // depots are cached with the games that use them, so the warning would
   // be false. It reads as the plain "Installed on <pc>".
   if (isToolApp(game)) return INSTALLED_BADGE.CACHED;
@@ -373,7 +373,7 @@ export function installedOnNames(installedOn) {
  */
 export function installedBadgeText(state, summary) {
   if (state === INSTALLED_BADGE.CACHED) return `Installed on ${summary}`;
-  if (state === INSTALLED_BADGE.NOT_CACHED) return `Installed but not cached · ${summary}`;
+  if (state === INSTALLED_BADGE.NOT_CACHED) return `Installed, not cached · ${summary}`;
   return null;
 }
 
