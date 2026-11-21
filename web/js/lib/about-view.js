@@ -115,7 +115,7 @@ export const COMPONENT_NOTES = Object.freeze({
   // web/tests/about-view.test.js).
   "vault-runner": "OK means the runner checked in within the last 90 s.",
   steamprefill: "The SteamPrefill build that prefill jobs run with. SteamPrefill reports a version but no commit id.",
-  "vault-proxy": "The egress proxy does not report a version. Its status is reachability only.",
+  "vault-proxy": "The egress proxy that limits where vault-api may connect. OK means it answered and refused a host that is not on its allowlist.",
   "vault-dns": "Optional component. vault-api does not check it, so there is no status to show.",
 });
 
@@ -137,7 +137,9 @@ export const CORE_NOTES = Object.freeze({
 export const DASH_NOTE = "A dash means the component did not report this value.";
 
 /** Components whose note already explains every dash they show. */
-const NOTE_EXPLAINS_DASH = new Set(["vault-proxy", "steamprefill"]);
+// vault-proxy left this set in WP PROXY-VERSION-1: it reports its version
+// now, so a dash there means an older proxy image and gets the dash note.
+const NOTE_EXPLAINS_DASH = new Set(["steamprefill"]);
 
 /** Shown for an entry without a usable name (never "unknown"). */
 export const UNNAMED_COMPONENT = "Unnamed component";

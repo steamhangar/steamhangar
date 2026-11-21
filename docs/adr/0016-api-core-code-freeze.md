@@ -689,3 +689,37 @@ renders; the static includes move to `core/docker/golden/` and the image
 copies them to `/opt/vault/golden/`. The pins this ADR's addenda cite as
 "drift step 2c/2d/2e/2f" live on under the same numbers in
 `core/tests/test-template-invariants.sh` (ADR-0001 addendum 2026-11-21).
+
+## Addendum 2026-11-21 — freeze exception: proxy version in About (WP PROXY-VERSION-1)
+
+Settings > About listed vault-proxy as "Version — · commit —" although its
+image carries `VAULT_BUILD_VERSION` and the OCI version label (seen on rc22,
+roadmap PROXY-VERSION-1). The VER-2 addendum above kept the proxy at
+reachability only, because a version page of tinyproxy's own would need a
+hole in the egress filter. User decision 2026-11-21 ("Weg A"): report the
+proxy's real version and commit. No new env var, no compose change, no
+allowlist entry. Scope, all in WP PROXY-VERSION-1:
+
+- deploy/proxy/ (not frozen, listed for completeness): `tinyproxy.conf`
+  gets `ErrorFile 403 "/run/tinyproxy/403.html"`; `docker-entrypoint.sh`
+  renders that page at every start with one marker line
+  `<!-- vault-build component=vault-proxy version=<v> commit=<c> -->` from
+  `VAULT_BUILD_VERSION` / `VAULT_BUILD_COMMIT`, checked against the VER-1
+  grammar like vault-core's hook (`invalid` for a bad value, `unknown` for
+  the Dockerfile default commit; a failed write only warns, tinyproxy then
+  sends its built-in page). The page uses no tinyproxy `{variables}`.
+- api/: `vault_api/about.py` only. `probe_proxy` returns `ProxyAnswer`
+  (status code plus the marker values), reads at most 4 KiB and stops at
+  the marker; `proxy_build_from` checks the values again on read; the
+  proxy entry carries version and commit on a `403`. No route, schema or
+  response model change; a proxy without the marker (older image) or one
+  that does not answer still shows `null`.
+- Not frozen, listed for completeness: web `about-view.js` and Android
+  `AboutPresentation.kt` / `strings.xml` (the proxy note no longer says
+  "does not report a version"; a dash on the proxy row now gets the dash
+  note), both demo fixtures, `deploy/tests/verify-stack.sh` (step 6w reads
+  `dev` from the live proxy, the UPD-1 re-render writes the page to /tmp),
+  tests and docs.
+
+Every other frozen-path change still needs its own user decision and note
+here.

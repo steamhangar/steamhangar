@@ -2036,7 +2036,8 @@ say 'Expected in this stack: vault-api ok/dev; vault-core unknown/dev (read'
 say 'from the version file its hook wrote into the shared volume -- vault-api'
 say 'has no network path to vault-core, ADR-0011); vault-runner ok/dev (its'
 say 'presence row); SteamPrefill ok/3.7.2 (the api image pin, reported by the'
-say 'runner); vault-proxy ok (it answered and refused the .invalid probe host);'
+say 'runner); vault-proxy ok/dev (it answered and refused the .invalid probe'
+say 'host, and its refusal page named its version, WP PROXY-VERSION-1);'
 say 'vault-dns unknown (never probed). /v1/about needs the key, /v1/health'
 say 'stays the fixed version-free body.'
 # about_field <json file> <component> <field>: prints the value, "null" for null.
@@ -2064,7 +2065,12 @@ assert_eq "dev"     "$(about_field "$work/about.json" vault-runner version)" "va
 assert_eq "ok"      "$(about_field "$work/about.json" steamprefill status)"  "steamprefill: status"
 assert_eq "3.7.2"   "$(about_field "$work/about.json" steamprefill version)" "steamprefill: version (api/Dockerfile's pin, reported by the runner)"
 assert_eq "ok"      "$(about_field "$work/about.json" vault-proxy status)"   "vault-proxy: status (answered, refused the off-list probe host)"
-assert_eq "null"    "$(about_field "$work/about.json" vault-proxy version)"  "vault-proxy: version stays null (reachability only)"
+assert_eq "dev"     "$(about_field "$work/about.json" vault-proxy version)"  "vault-proxy: version from its refusal page (WP PROXY-VERSION-1, the baked dev default)"
+assert_eq "null"    "$(about_field "$work/about.json" vault-proxy commit)"   "vault-proxy: commit (unknown -> null)"
+proxy_page=$(dc exec -T vault-proxy stat -c '%n %u:%g' /run/tinyproxy/403.html 2>&1 | tr -d '\r')
+assert_eq "/run/tinyproxy/403.html 100:101" "$proxy_page" "vault-proxy: the entrypoint rendered the refusal page onto the tmpfs (WP PROXY-VERSION-1)"
+proxy_marker=$(dc exec -T vault-proxy grep -c 'vault-build component=vault-proxy version=dev commit=unknown' /run/tinyproxy/403.html 2>&1 | tr -d '\r')
+assert_eq "1" "$proxy_marker" "vault-proxy: the refusal page carries exactly one build marker"
 assert_eq "unknown" "$(about_field "$work/about.json" vault-dns status)"     "vault-dns: status (never probed)"
 proxy_refusal=$(dc logs --no-log-prefix vault-proxy 2>&1 | grep -c 'filtered domain "steamhangar-about-probe.invalid"' || true)
 if [ "${proxy_refusal:-0}" -ge 1 ]; then
@@ -2364,7 +2370,8 @@ oracle_on_filter=$(dc exec -T \
     -e VAULT_MANIFEST_ORACLE_URL= \
     -e VAULT_PROXY_FILTER_FILE_FOR_TESTS=/tmp/upd1-filter \
     -e VAULT_PROXY_CONF_FILE_FOR_TESTS=/tmp/upd1-tinyproxy.conf \
-    vault-proxy sh -c '/usr/local/bin/vault-proxy-entrypoint.sh true >/dev/null && cat /tmp/upd1-filter; rm -f /tmp/upd1-filter /tmp/upd1-tinyproxy.conf' 2>&1 || true)
+    -e VAULT_PROXY_ERROR_PAGE_FILE_FOR_TESTS=/tmp/upd1-403.html \
+    vault-proxy sh -c '/usr/local/bin/vault-proxy-entrypoint.sh true >/dev/null && cat /tmp/upd1-filter; rm -f /tmp/upd1-filter /tmp/upd1-tinyproxy.conf /tmp/upd1-403.html' 2>&1 || true)
 assert_contains "$oracle_on_filter" '^api\.steamcmd\.net$' "with VAULT_MANIFEST_ORACLE unset (= on), the proxy entrypoint allows the default oracle host with no VAULT_EGRESS_ALLOW entry"
 
 say ''

@@ -6651,7 +6651,7 @@ is a list, always six entries in this order:
 | `vault-core` | the file `<cache volume>/logs/vault-core-version.json` (`/vault/logs/...` in the images), written by vault-core's start hook `core/docker/29-vault-build-version.sh` | always `unknown`, see below |
 | `vault-runner` | the freshest `runner_presence` row (schema v16) | `ok` while that row is younger than 90 s, else `unreachable`; `not_in_use` in `VAULT_PREFILL_MODE=subprocess` |
 | `steamprefill` | queue mode: what the runner reported (its image's `STEAMPREFILL_VERSION`); subprocess mode: vault-api's own `STEAMPREFILL_VERSION` | queue: `ok` with a fresh runner, else `unknown`; subprocess: `ok` when `VAULT_STEAMPREFILL_PATH` is an executable file, else `unknown` |
-| `vault-proxy` | nothing: `version` and `commit` are always `null` | `ok` when the proxy answers and refuses the probe host with `403`; `unreachable` when it does not answer; `unknown` for any other answer; `not_in_use` without `HTTP_PROXY` |
+| `vault-proxy` | the marker line of its refusal page, read by the same probe (WP PROXY-VERSION-1); `null` when the page has none (an older proxy image) | `ok` when the proxy answers and refuses the probe host with `403`; `unreachable` when it does not answer; `unknown` for any other answer; `not_in_use` without `HTTP_PROXY` |
 | `vault-dns` | nothing | always `unknown` |
 
 Each entry also has `checked_at` (UTC, when vault-api looked) and `detail`
@@ -6705,21 +6705,37 @@ runner shows `unreachable` within 90 s, as seen by the database. Add the
 claim or a download. Each restart gets a new `runner_id`; rows older than a
 day are pruned. Values are validated again on read.
 
-**vault-proxy: reachability only.** The proxy image carries its version like
-every image, but tinyproxy 1.11.3 can serve a page of its own only for its
-`StatHost`, and it runs its destination filter BEFORE that check
-(`process_request` in `reqs.c`). A version page would need its host on the
-egress allowlist; the filter matches case-insensitively while the `StatHost`
-comparison is a case-sensitive `strcmp`, so an upper-case spelling of that
-host would pass the filter and be forwarded. That weakens the lock, so the
-version stays `null`. The probe instead connects to the proxy from
-`HTTP_PROXY` (2 s timeout) and asks for
+**vault-proxy: one probe, version from the refusal.** The probe connects to
+the proxy from `HTTP_PROXY` (2 s timeout) and asks for
 `http://steamhangar-about-probe.invalid/`, a name that never resolves
 (RFC 6761) and is on no allowlist: the filter refuses it on the name alone
 with `403 Filtered`, before any lookup. That proves the proxy answers and
 its filter is in force. The proxy logs one `Proxying refused on filtered
 domain "steamhangar-about-probe.invalid"` line per probe (at most one a
 minute, the cache); that line is this probe, not an attack.
+
+The version and commit come from that same refusal (WP PROXY-VERSION-1,
+ADR-0016 addendum 2026-11-21). The proxy's entrypoint renders tinyproxy's
+`ErrorFile 403` page (`/run/tinyproxy/403.html`) at every start with one
+line `<!-- vault-build component=vault-proxy version=<v> commit=<c> -->`
+from the image's `VAULT_BUILD_VERSION`/`VAULT_BUILD_COMMIT`, checked
+against the VER-1 grammar there (a bad value is written as `invalid`, the
+Dockerfile default commit stays `unknown`). The probe reads at most 4 KiB,
+stops at that line, and checks the values again: `unknown` is `null`, a
+value outside the grammar is `"invalid"`. No marker (a proxy image from
+before rc23, or a page that could not be written): `version` and `commit`
+are `null` and `detail` says so; a proxy that does not answer stays
+`unreachable` with `null` values. A version page of its own was rejected
+in WP VER-2: tinyproxy 1.11.3 can serve one only for its `StatHost`, it
+runs its destination filter BEFORE that check (`process_request` in
+`reqs.c`), so that host would have to be on the egress allowlist, and the
+filter matches case-insensitively while the `StatHost` comparison is a
+case-sensitive `strcmp`, so an upper-case spelling would be forwarded. The
+refusal page needs no allowlist entry. Every client that gets a 403 from
+the proxy sees the build version; that is vault-api, plus any container of
+the stack that reaches port 8888 and is refused by the `Allow` lines. The
+page uses no tinyproxy `{variables}`, so nothing from a request is echoed
+back.
 
 **vault-dns: never probed.** It is optional (`--profile dns`) and vault-api
 has no network path to it (same ADR-0011 rule), and a test query would

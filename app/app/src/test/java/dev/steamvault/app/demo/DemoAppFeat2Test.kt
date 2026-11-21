@@ -59,7 +59,9 @@ class DemoAppFeat2Test {
         val byName = about.components.associateBy { it.name }
         assertEquals("unknown", byName.getValue("vault-core").status) // never probed (Weg A)
         assertEquals("unknown", byName.getValue("vault-dns").status) // never probed
-        assertNull(byName.getValue("vault-proxy").version) // reachability only
+        // WP PROXY-VERSION-1: the proxy reports the same release as vault-api.
+        assertEquals(byName.getValue("vault-api").version, byName.getValue("vault-proxy").version)
+        assertEquals(byName.getValue("vault-api").commit, byName.getValue("vault-proxy").commit)
         for (c in about.components) {
             assertTrue(c.status in setOf("ok", "unreachable", "not_in_use", "unknown"))
             assertTrue("checked_at is YYYY-MM-DDTHH:MM:SSZ", Regex("""^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$""").matches(c.checked_at!!))

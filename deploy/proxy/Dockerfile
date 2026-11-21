@@ -107,7 +107,8 @@ USER tinyproxy:tinyproxy
 # (`docker build`, deploy/compose.yaml, deploy/tests/verify-stack.sh) gets the
 # defaults `dev` / `unknown`, so a hand-built image never claims a release.
 # Baked as runtime ENV so the running container can report it; nothing reads
-# a LABEL at runtime. Declared LAST, after every RUN and COPY: a changed
+# a LABEL at runtime. docker-entrypoint.sh writes it into the 403 refusal
+# page, where vault-api's GET /v1/about reads it (WP PROXY-VERSION-1). Declared LAST, after every RUN and COPY: a changed
 # build-arg value invalidates the cache of every later RUN, so the expensive
 # layers above stay cached across releases. Never validated here: ENV can be
 # overridden at `docker run` time, so every consumer validates what it reads

@@ -87,7 +87,7 @@ class AboutCrossFrontendContractTest {
             res("settings_about_note_steamprefill"),
         )
         assertEquals(
-            "The egress proxy does not report a version. Its status is reachability only.",
+            "The egress proxy that limits where vault-api may connect. OK means it answered and refused a host that is not on its allowlist.",
             res("settings_about_note_vault_proxy"),
         )
         assertEquals(
