@@ -2124,10 +2124,18 @@ and VERIFY-COLD-1 is prose in the Sunday-test box of the rc19.3 block.
   all output) and **OUTPUT-TRIM-NITS-1** (review: unreadable or still
   oversized read-back leaves core's result alone, `yamlEnd` stops at a
   dedent, version 0.2.0). Measured: passing test-web 2,293 lines -> 9.
-  Open: **OUTPUT-TRIM-LIVE-1** live check after the mod rollout Antrag
-  (inline result once the persisted fields are removed, `$.fs.read` on
-  the `tool-results` path, `seq 1 40000; exit 3` shows its output,
-  installed version 0.2.0). Nit: TAP drops `#` comments (a failing test's
+  **OUTPUT-TRIM-LIVE-1 done 2026-11-21** (after Antrag A-20261121-02):
+  the live mod is 0.2.0; `seq 1 40000` trims to head/tail with footer
+  "40000 lines" and a complete file (read-back of the `tool-results`
+  path works); `seq 1 40000; exit 3` shows "Exit code 3" and core's
+  ~30 KB cut output, no `tool_use_error`; passing `dev.sh test-web`
+  (2285/0) is 9 lines inline, file complete. The kept file is **not**
+  stdout only: core already interleaves stderr into stdout in run order,
+  so the mod's `--- stderr ---` section only applies when core reports
+  stderr separately. Follow-up **OUTPUT-TRIM-FAIL-1** (open, low): a long
+  failing command still puts ~30 KB into context (core refused the old
+  error answer); find an answer shape core accepts for non-zero exits,
+  or document the limit. Nit: TAP drops `#` comments (a failing test's
   console output) while spec keeps them (documented).
   Test nits (OUTPUT-TRIM-NITS-1 re-review): the test "read back but not
   shorter" (`tests/output-trim.test.ts`, ~450) passes only through the
@@ -2273,7 +2281,7 @@ APP-EXPERT-SWITCH-1, CAP-503-FIX-1b (scope above); one goldens round;
 RC23-RELEASE-NOTES-2 (sections for the six packages); then tag and the
 rollout Antrag (flag the read_only services; new: schema v34). Antrag
 A-20261121-02 (output-trim 0.2.0 into the managed mods) is filed; after
-it: OUTPUT-TRIM-LIVE-1.
+it: OUTPUT-TRIM-LIVE-1 (done 2026-11-21, passed; see the OUTPUT-TRIM-2 entry).
 **MUTATION-PATH-1 (open, operator decision 2026-11-21: Weg C, clarify
 auto mode):** auto mode refuses mutation runs that edit a scratch worktree
 and run `dev.sh test-api` (coder and reviewer, "Undermining Oversight");
