@@ -2198,8 +2198,9 @@ dialog window dims it) and a 1px `--line` sheet border that follows the
 drag offset (a `modifier` border does not).
 Operator items: CRYPTO-DEVICE-1; **TALKBACK-CHECK-1** (device: grid card
 and list row of an installed-not-cached game whose status is "Not
-cached" speak "Installed on <names>", no second "not cached"; reasoned in
-the ANDROID-INSTALLED-NITS-1 review, not measured). Open: CORE-LIVE-PARITY-1
+cached" speak "Installed on <names>", no second "not cached", and a
+Library, Downloads or Detail toast is read once when it appears; reasoned in
+the ANDROID-INSTALLED-NITS-1 and SNACKBAR-LIVE-1 reviews, not measured). Open: CORE-LIVE-PARITY-1
 (candidate); the rollout Antrag for rc23 must flag the read-only services
 for the operator's own compose override.
 
