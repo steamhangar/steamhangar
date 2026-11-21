@@ -2167,6 +2167,14 @@ Found 2026-11-21: **CI-NIGHTLY-1** (deploy/ci; S): the nightly
 commit; 2 of 656 checks fail because newer Docker on the runner prints
 the zero `GlobalIPv6Address` as `invalid IP` in the inspect template
 (`deploy/tests/verify-stack.sh:2303`); local `verify full` passes 656/0.
+Decided 2026-11-21 in the DESIGN-NITS-1 review: **D15-TAB-ORDER**
+Weg A, the Library toolbar DOM becomes search, tools, chips so the tab
+order follows the two-row desktop layout (phone shows tools above chips
+too); **ANDROID-INSTALLED-WORDING-1** (android; S; rc23, own package with
+an Android goldens round): align `library_installed_not_cached` to
+"Installed, not cached · %1$s", decide `detail_installed_not_cached_warning`
+like the web (no "the vault is not protecting it"), and add a Kotlin twin
+pin that reads `installedBadgeText` in `web/js/lib/game-status.js`.
 Not started: DESIGN-NITS-1, then NEUTRAL-RAMP-1, then DESIGN-MD-1 (in this
 order, each with one goldens round); OLD-SERVER-FALLBACK-1;
 NITS-AUDIT-WEB-1; moving the StatusIconLogic arrow helpers to the test
