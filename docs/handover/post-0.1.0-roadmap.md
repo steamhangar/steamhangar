@@ -2102,7 +2102,7 @@ and VERIFY-COLD-1 is prose in the Sunday-test box of the rc19.3 block.
   Candidate **PROXY-VERSION-CHECK-1**: compare the proxy's version with
   vault-api's (mismatch -> Check), like vault-core. Nit: re-wrap the long
   line in `api/README.md` "Component versions" (~6729).
-- **APP-DL-CARD-1 (android, operator 2026-11-01, screenshot; rc23 by operator decision 2026-11-01):** the
+- **APP-DL-CARD-1 (android, operator 2026-11-01, screenshot; rc23 by operator decision 2026-11-01):** **done 2026-11-21/22** (review FAIL -> fixes -> re-check PASS; web + Android same order: title + status pill, figures bold in mono, notes behind a rule, actions with Cancel as danger button; job card goldens `downloads_job_card_*` new). The
   Downloads page's active-job card ("Breathedge, job #266 ... 0 MB/s · 0
   GB loaded so far", Pause/Cancel) looks unpolished next to the
   throughput card; needs a design pass (layout, spacing, hierarchy).
@@ -2564,7 +2564,11 @@ Follow-up of the rc23 wave 2 reviews (2026-11-21), rc24:
   (no Android golden renders the job card); Android Pause stays a
   Material outlined accent button while web uses plain `.btn` (app-wide
   convention, 37 call sites); `GameDetailSheet` Delete edge uses danger at
-  alpha 0.6 instead of `vaultDangerButtonBorder`. Operator: the extra
+  alpha 0.6 instead of `vaultDangerButtonBorder`. At 360dp / font 1.3 a
+  long GC pill ("Garbage collection paused", ~240dp, never wraps on web or
+  Android) leaves the job title column ~55dp: the name breaks inside a word
+  and the mono meta wraps line by line (pinned as a KNOWN NIT test in
+  `JobCardLayoutTest`; decide whether the pill may wrap or gets capped). Operator: the extra
   remote branch `wp/app-dl-card-1-ci2` (CI rerun) can be deleted; the
   devbox may not delete remote branches.
 - EXPERT-SWITCH-NITS-1 (app) the 48 dp row-height assert in
