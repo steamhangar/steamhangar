@@ -187,3 +187,27 @@ at the end, under a dated heading, one entry each with the WP that proved it.
   desktop APIs such as `javax.imageio` / `java.awt` are missing there.
   Compare golden PNGs by bytes (`File.readBytes().contentEquals`) or put
   image decoding in a Roborazzi test under `src/testDebug`.
+
+### 2026-11-21 ANDROID-SHEET-BG-1
+
+- **Map all 36 `ColorScheme` slots, not only the pre-1.2 ones.** material3
+  1.2+ components read `surfaceContainer*`, `inverseSurface` and
+  `secondaryContainer` (sheet, dialog, menu, nav bar, card, snackbar,
+  selected chip/segment); a scheme that leaves them out renders those parts
+  on the Material baseline (the detail sheet on #1D1B20, a light snackbar,
+  a purple selected chip). `ThemeColorSchemeTest` pins every slot by
+  reflection; a Material update that adds a slot fails it until mapped.
+- **`contentColorFor` returns the first slot that matches the colour**:
+  when two slots share a token (Raised was `surfaceVariant` and
+  `surfaceContainer`), a container takes the wrong text role (Dim instead
+  of Text). Pass `contentColor` explicitly on call-site containers.
+  Raised still sits on `surfaceVariant` and `surfaceContainerHigh`, so an
+  AlertDialog surface's LocalContentColor resolves to Dim; harmless,
+  because AlertDialogContent sets explicit title and text colours
+  (SNACKBAR-LIVE-1 review).
+- **A border passed through `ModalBottomSheet`'s `modifier` does not follow
+  the sheet**: in material3 1.3.1 the modifier sits before the internal
+  `draggableAnchors` placement, so it would draw at the unshifted position.
+  An AlertDialog's modifier, in contrast, sizes the dialog surface exactly
+  (BasicAlertDialog's Box propagates its min constraints).
+

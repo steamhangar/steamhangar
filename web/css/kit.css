@@ -194,6 +194,9 @@
   .kit .fchip:hover{ color:var(--text); border-color:var(--line); }
 }
 .kit .fchip[aria-pressed="true"]{ color:var(--accent); border-color:var(--accent); background:color-mix(in srgb, var(--accent) 10%, var(--surface)); }
+/* A pressed chip's count takes the accent too, every chip row (ANDROID-SHEET-BG-1,
+   operator decision; the app twin is vaultFilterChipColors). */
+.kit .fchip[aria-pressed="true"] b{ color:var(--accent); }
 .kit .gchip{
   display:inline-block; font:400 var(--fs-2)/1 var(--ui); color:var(--text); background:var(--raised);
   border:1px solid var(--line-soft); border-radius:999px; padding:6px 10px; white-space:nowrap;
@@ -708,7 +711,7 @@
 
 /* Panels: h2 + blurb, then one field card per group. */
 .kit.view-settings .settings-panel{ display:grid; gap:18px; min-width:0; }
-.kit.view-settings .ph h2{ margin:0; font:600 var(--fs-5)/1.3 var(--ui); letter-spacing:-.3px; color:var(--text); }
+.kit.view-settings .ph h2{ margin:0; font:500 var(--fs-5)/1.3 var(--ui); letter-spacing:-.3px; color:var(--text); }
 .kit.view-settings .ph h2:focus{ outline:none; }
 .kit.view-settings .ph p{ margin:3px 0 0; color:var(--dim); font-size:var(--fs-3); }
 
@@ -775,7 +778,7 @@
 .kit.view-settings .about-table .about-row > th, .kit.view-settings .about-table .about-row > td{ vertical-align:middle; }
 /* RELEASE-SPLIT-1c: product version line and component list above the table. */
 .kit.view-settings .about-release{ display:grid; gap:var(--sp-2); margin:0 0 var(--sp-3); min-width:0; }
-.kit.view-settings .about-release-line{ margin:0; font:600 var(--fs-4)/1.35 var(--ui); color:var(--text); overflow-wrap:anywhere; }
+.kit.view-settings .about-release-line{ margin:0; font:500 var(--fs-4)/1.35 var(--ui); color:var(--text); overflow-wrap:anywhere; }
 .kit.view-settings .about-release-list{ display:grid; grid-template-columns:max-content minmax(0, 1fr); gap:var(--sp-1) var(--sp-3); margin:0; font-size:var(--fs-3); }
 .kit.view-settings .about-release-item{ display:contents; }
 .kit.view-settings .about-release-list dt{ color:var(--dim); }
@@ -866,7 +869,6 @@
 .kit .lib-chips{ display:flex; flex-wrap:wrap; gap:var(--sp-2); min-width:0; flex:1 1 100%; }
 .kit .lib-chips .fchip{ display:inline-flex; align-items:center; }
 .kit .lib-chips .fchip b{ font-variant-numeric:tabular-nums; margin-left:3px; } /* plus the space in the label: the a11y name reads "Cached 22" */
-.kit .lib-chips .fchip[aria-pressed="true"] b{ color:var(--accent); }
 .kit .lib-tools{ display:flex; flex-wrap:wrap; align-items:center; gap:var(--sp-2); margin-left:auto; }
 .kit .lib-tools .btn{ height:var(--ctl-h); }
 .kit .lib-tools .ico{ display:flex; }

@@ -12,6 +12,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
@@ -38,6 +39,13 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
 import dev.steamvault.app.R
+import dev.steamvault.app.ui.theme.VaultDialogShape
+import dev.steamvault.app.ui.theme.VaultScrim
+import dev.steamvault.app.ui.theme.VaultSheetDragHandle
+import dev.steamvault.app.ui.theme.vaultDialogBorder
+import dev.steamvault.app.ui.theme.vaultPanelCardBorder
+import dev.steamvault.app.ui.theme.vaultPanelCardColors
+import dev.steamvault.app.ui.theme.vaultPanelCardGround
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import dev.steamvault.app.ui.clients.logic.ClientPresence
@@ -86,6 +94,9 @@ fun ClientsSheet(controller: ClientsController, demoMode: Boolean = false) {
     ModalBottomSheet(
         onDismissRequest = { controller.close() },
         sheetState = sheetState,
+        // WP ANDROID-SHEET-BG-1: web `.sheet-backdrop` (Bg 62 %) and `.sheet .grab` (38 x 4, Line).
+        scrimColor = VaultScrim,
+        dragHandle = { VaultSheetDragHandle() },
     ) {
         // WP APP-DEMO review round 3 (F2): called directly here, in THIS
         // top-level public composable -- see GameDetailSheet.kt's identical
@@ -117,6 +128,8 @@ internal fun RemovePcConfirm(controller: ClientsController, scope: CoroutineScop
     val clientId = controller.removeTarget ?: return
     val busy = controller.removeBusy
     AlertDialog(
+        shape = VaultDialogShape,
+        modifier = Modifier.vaultDialogBorder(),
         onDismissRequest = { controller.cancelRemove() },
         title = { Text(removeConfirmTitle(clientId)) },
         text = {
@@ -240,7 +253,14 @@ private fun SectionHeading(text: String) {
  */
 @Composable
 private fun ClientRow(model: ClientRowModel, removeError: String?, onRemove: () -> Unit) {
-    Card(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+    // WP ANDROID-SHEET-BG-1: web `.jobcard` (Surface, LineSoft) / `.jobcard.bypass` (stale gradient and border).
+    val shape = CardDefaults.shape
+    Card(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp).vaultPanelCardGround(model.bypassSuspected, shape),
+        shape = shape,
+        colors = vaultPanelCardColors(bypass = model.bypassSuspected),
+        border = vaultPanelCardBorder(bypass = model.bypassSuspected),
+    ) {
         Column(modifier = Modifier.padding(12.dp)) {
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Column(modifier = Modifier.weight(1f)) {

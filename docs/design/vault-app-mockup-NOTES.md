@@ -1,5 +1,9 @@
 # vault-app mockup — design notes
 
+> The current design rules are in [`DESIGN.md`](../../DESIGN.md) at the repo
+> root (DESIGN-MD-1); these notes keep the mockup's history and rationale.
+> Where they differ, `DESIGN.md` wins.
+
 Companion to `vault-app-mockup.html` (same folder). Clickable design prototype for
 Phase 4, **not** production code, **not** in the repo.
 
@@ -110,8 +114,15 @@ belong to the same family. (Until NEUTRAL-RAMP-1, audit D-7, the ramp was `#0A10
 claimed; `docs/design/tokens.json` holds the current values.) `vault-app-mockup.html`
 keeps its original palette as the frozen round-7 reference; `docs/design/tokens.json`
 is the source of truth for every colour.
-Accent is a vault aqua `#2ED9CE`, used only for primary actions, active nav, focus
-and progress. Status colors are a separate semantic set and never double as accent.
+Accent is a vault aqua `#2ED9CE` with the roles the rc20 kit gives it
+(`docs/design/rc20/kit.html`, binding since 2026-10-17): primary actions and links,
+focus, selection (active nav, pressed chips and segments, the current tab, a checked
+switch), progress, and the live download data (the "From the internet" graph series,
+live speeds, the "Loading now" rows, the Clients device icon). Until ACCENT-ROLES-1
+(audit D-2, operator 2026-11-21: keep the kit) this sentence said "used only for
+primary actions, active nav, focus and progress", which the kit never followed; the
+role list is kept in `DESIGN.md` ("Accent").
+Status colors are a separate semantic set and never double as accent.
 **Retuned in round 5 for CVD separation** (see "Status icons" below): green `#57DD8A`
 current · yellow `#F2CE5B` running · orange `#F07B2E` update ready · grey `#82979E` not
 cached (`#8296A6` until NEUTRAL-RAMP-1) · red `#FF6F6F` destructive. The three coloured
@@ -128,7 +139,9 @@ so the page never looks broken in a light context.
 is Roboto first (the authentic Android system face), Roboto Condensed for capsule
 art titles (uppercase, tight tracking, the way cover typography actually behaves),
 Roboto Mono for every number, id, path and endpoint, with `tabular-nums` so sizes
-and percentages line up in columns.
+and percentages line up in columns. On the desktop the stack falls back to the
+platform UI face (Segoe UI, `system-ui`); that is the deliberate desktop choice
+(DESKTOP-FONT-1, audit D-14), see `DESIGN.md` ("Type").
 
 **Covers.** 600x900 portrait ratio, built from two per-title hues plus one of six
 overlay patterns (diagonal band, bottom glow, horizon, corner burst, scanlines,

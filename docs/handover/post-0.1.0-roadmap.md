@@ -2152,37 +2152,56 @@ that a nit touches a frozen path and rides on that exception. Design
 packages that change pixels re-record the web
 goldens through the `wp/<name>-goldens` path.
 
-### Status 2026-11-21 (end of the first fix session)
+### Status 2026-11-21 (end of the second fix session)
 
-Merged to `main` with green gates and CI: CI-CLOCK-1, AUDIT-DOCS-1,
-AUDIT-DECISIONS-1, GO-LINE-1 (with ROLLOUT-DOC-1, README-KEYS-1),
-APP-AUDIT-1 (PERSONA-LOAD-1, BACKOFF-DEAD-1), CONTRAST-1 (LINE-CONTRAST-1,
-GLYPH-CONTRAST-1), ACTIVE-STATUS-1, NITS-AUDIT-API-1 (with CLOCK-SEAM-1),
-AGENT-RC8-COMPAT-1, NITS-AUDIT-OPS-1, SEC-HARDEN-1, PILL-TONE-1,
-FONT-FLOOR-1, TM-CROSS-SITE-1, NGINX-DUP-1 (follow-up
-CORE-LIVE-PARITY-1), NITS-AUDIT-APP-1 with VERIFY-ALL-LABEL-1,
-AUDIT-STATUS-1 (all on `main` at `f98da86`, CI green).
-Found 2026-11-21: **CI-NIGHTLY-1** (deploy/ci; S): the nightly
-`deploy / verify-stack` (full) is red since 2026-11-16 on an unchanged
-commit; 2 of 656 checks fail because newer Docker on the runner prints
-the zero `GlobalIPv6Address` as `invalid IP` in the inspect template
-(`deploy/tests/verify-stack.sh:2303`); local `verify full` passes 656/0.
-Decided 2026-11-21 in the DESIGN-NITS-1 review: **D15-TAB-ORDER**
-Weg A, the Library toolbar DOM becomes search, tools, chips so the tab
-order follows the two-row desktop layout (phone shows tools above chips
-too); **ANDROID-INSTALLED-WORDING-1** (android; S; rc23, own package with
-an Android goldens round): align `library_installed_not_cached` to
-"Installed, not cached · %1$s", decide `detail_installed_not_cached_warning`
-like the web (no "the vault is not protecting it"), and add a Kotlin twin
-pin that reads `installedBadgeText` in `web/js/lib/game-status.js`.
-Not started: DESIGN-NITS-1, then NEUTRAL-RAMP-1, then DESIGN-MD-1 (in this
-order, each with one goldens round); OLD-SERVER-FALLBACK-1;
-NITS-AUDIT-WEB-1; moving the StatusIconLogic arrow helpers to the test
-source set (deferred from NITS-AUDIT-APP-1). Release follow-ups for rc23:
-release notes (update vault-api before the agents; read-only containers),
-rollout check that the operator's own compose override keeps the
-read-only services writable only on volumes and tmpfs, CRYPTO-DEVICE-1,
-CORE-LIVE-PARITY-1.
+Merged to `main` with green gates (test-api, test-go, test-web, test-core,
+verify) and CI, first session: CI-CLOCK-1, AUDIT-DOCS-1, AUDIT-DECISIONS-1,
+GO-LINE-1 (with ROLLOUT-DOC-1, README-KEYS-1), APP-AUDIT-1 (PERSONA-LOAD-1,
+BACKOFF-DEAD-1), CONTRAST-1 (LINE-CONTRAST-1, GLYPH-CONTRAST-1),
+ACTIVE-STATUS-1, NITS-AUDIT-API-1 (with CLOCK-SEAM-1), AGENT-RC8-COMPAT-1,
+NITS-AUDIT-OPS-1, SEC-HARDEN-1, PILL-TONE-1, FONT-FLOOR-1, TM-CROSS-SITE-1,
+NGINX-DUP-1, NITS-AUDIT-APP-1 with VERIFY-ALL-LABEL-1, AUDIT-STATUS-1.
+Second session: CI-NIGHTLY-1 (found 2026-11-21: the nightly
+`deploy / verify-stack` full run was red since 2026-11-16 because newer
+Docker on the runner prints the zero `GlobalIPv6Address` as `invalid IP`;
+the runner run of the fix was 656/0 — closes for good with the first green
+nightly on `main`), DESIGN-NITS-1 (D-5, D-8..D-13, D-15, D-16; decided in
+its review: **D15-TAB-ORDER** Weg A, the toolbar DOM is search, tools,
+chips), ANDROID-INSTALLED-WORDING-1 with ANDROID-INSTALLED-NITS-1 (decided
+2026-11-21: align Android now; detail line "Installed on", TalkBack twin of
+the web aria fragment), OLD-SERVER-FALLBACK-1, STATUS-ICON-TEST-HELPERS-1
+(the C-19 arrow helpers), NEUTRAL-RAMP-1 (Weg B; launcher icon background
+included, operator 2026-11-21), NITS-AUDIT-WEB-1, AUDIT-STATUS-2/-3.
+Finishing in the last integration round (one web + Android goldens round):
+DESIGN-MD-1 (DESIGN.md, DESKTOP-FONT-1 and ACCENT-ROLES-1 Weg A),
+**WEIGHTS-1** (decided 2026-11-21: font weights 400/500/700 only, web and
+Android, pinned), **ANDROID-SHEET-BG-1** (found 2026-11-21 in the
+NEUTRAL-RAMP-1 goldens: material3 1.3 slots `surfaceContainer*`, inverse,
+scrim and others stayed on the baseline palette, e.g. the detail sheet on
+`#1D1B20`; all 36 slots now map to `VaultColors`; decided 2026-11-21: the
+bottom bar, cards, filter chips, menus, switch, sheets, dialogs and
+snackbar are exact web twins, and the selected-chip count is accent on
+both sides, which also lifts the web count from 4.29:1 to 7.97:1),
+DOC-LINES-CHECK-1 (C-26: the DOC-DIET-1 proof compares the pinned split
+commits), RC23-RELEASE-NOTES-1, SNACKBAR-LIVE-1. Release gate: tag rc23 only once
+NEUTRAL-RAMP-1 and DESIGN-MD-1 are on `main` (the notes name both).
+Follow-ups recorded 2026-11-21: **SNACKBAR-LIVE-1** (rc23, a11y: every
+toast is a polite live region, not only the two Clients toasts);
+**ANDROID-TWIN-DETAIL-1** (android; rc24 candidate) for the twin gaps left
+outside the decided scope: type roles inside tiles, toast and nav pip (web
+`.k` 11px 500, `.v` 24px 500, `.n` 12px; `.toast` 12px padding, 12.5px
+text vs Material 16dp / 14sp; pip 15px), menu corners (`--r-l` / `--r-m`
+vs Material 4dp), sheet corners (`--r-xl` 26px vs 28dp) and drag-handle
+margins, the three-column ClientCard above a 700px list. Not possible with
+material3 1.3.1 (nits, rc23): the AlertDialog scrim colour (the platform
+dialog window dims it) and a 1px `--line` sheet border that follows the
+drag offset (a `modifier` border does not).
+Operator items: CRYPTO-DEVICE-1; **TALKBACK-CHECK-1** (device: grid card
+and list row of an installed-not-cached game whose status is "Not
+cached" speak "Installed on <names>", no second "not cached"; reasoned in
+the ANDROID-INSTALLED-NITS-1 review, not measured). Open: CORE-LIVE-PARITY-1
+(candidate); the rollout Antrag for rc23 must flag the read-only services
+for the operator's own compose override.
 
 ### Wave 0
 
@@ -2530,7 +2549,8 @@ Cleanup:
   `api/vault_api/agent_reports.py:50,55,71`) are unpinned: add three
   tuples to the scrape test `api/tests/test_agent_feat_1_packaging.py:144-175`.
 - C-26 `tools/doc-lines-check.py` one-off proof: already tracked (rc22
-  block, NITS-APP-1 review nit).
+  block, NITS-APP-1 review nit); done in DOC-LINES-CHECK-1 (compares the
+  pinned pre-split and split commits, `--new-ref WORKTREE` for a re-split).
 - C-27 `agent/README.md:40-100` tree misses `localaddr/`,
   `cmd/vault-agent/version.go`, the presence tests and
   `packaging/windows/tests/test-packaging-unit.ps1`: add them (the 58

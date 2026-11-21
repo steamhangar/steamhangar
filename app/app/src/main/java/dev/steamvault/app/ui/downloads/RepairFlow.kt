@@ -38,6 +38,8 @@ import dev.steamvault.app.ui.library.logic.repairPlanText
 import dev.steamvault.app.ui.library.logic.showsDialog
 import dev.steamvault.app.ui.library.logic.tokenOrNull
 import dev.steamvault.app.ui.library.logic.unreadableDepotsText
+import dev.steamvault.app.ui.theme.VaultDialogShape
+import dev.steamvault.app.ui.theme.vaultDialogBorder
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 
@@ -216,6 +218,8 @@ fun RepairDialog(flow: RepairFlow, scope: CoroutineScope, onRefresh: suspend () 
     }
 
     AlertDialog(
+        shape = VaultDialogShape,
+        modifier = Modifier.vaultDialogBorder(),
         onDismissRequest = { flow.close() },
         title = { Text(title) },
         text = {

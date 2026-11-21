@@ -33,7 +33,6 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Snackbar
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
@@ -66,6 +65,12 @@ import dev.steamvault.app.repo.ScheduleRepository
 import dev.steamvault.app.repo.SettingsRepository
 import dev.steamvault.app.repo.TrafficRepository
 import dev.steamvault.app.ui.status.StatusKind
+import dev.steamvault.app.ui.theme.VaultSnackbar
+import dev.steamvault.app.ui.theme.vaultCommandBox
+import dev.steamvault.app.ui.theme.vaultJobCardBorder
+import dev.steamvault.app.ui.theme.vaultJobCardColors
+import dev.steamvault.app.ui.theme.vaultPanelCardBorder
+import dev.steamvault.app.ui.theme.vaultPanelCardColors
 import dev.steamvault.app.ui.traffic.RangeChips
 import dev.steamvault.app.ui.traffic.logic.EtaSmoother
 import dev.steamvault.app.ui.traffic.TrafficPoll
@@ -309,7 +314,7 @@ fun DownloadsScreen(
                     delay(controller.toastMs)
                     controller.dismissToast()
                 }
-                Snackbar(modifier = Modifier.padding(12.dp)) { Text(message) }
+                VaultSnackbar(message, modifier = Modifier.padding(12.dp))
             }
         },
     ) { innerPadding ->
@@ -618,7 +623,12 @@ private fun JobCard(
     onResume: () -> Unit,
     onCancel: () -> Unit,
 ) {
-    Card(modifier = Modifier.fillMaxWidth()) {
+    // WP ANDROID-SHEET-BG-1: web `.kit .job` / `.job.held` (Raised, run-tinted border).
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = vaultJobCardColors(),
+        border = vaultJobCardBorder(held = model.mode == JobCardMode.HELD),
+    ) {
         Column(modifier = Modifier.padding(12.dp)) {
             // WP WEB-FIX-9: the status badge centres on the name + job line
             // block (web `.jobtop > .badge{ align-self:center }`), like the
@@ -883,7 +893,12 @@ private fun FailureHintBlock(
     onRetry: () -> Unit,
 ) {
     val text = view.text
-    Card(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+    // WP ANDROID-SHEET-BG-1: web `.kit .hpanel` (Surface, LineSoft border).
+    Card(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+        colors = vaultPanelCardColors(),
+        border = vaultPanelCardBorder(),
+    ) {
         Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text(text.title, style = MaterialTheme.typography.titleSmall)
             Text(text.body, style = MaterialTheme.typography.bodySmall)
@@ -892,10 +907,10 @@ private fun FailureHintBlock(
                 Text(
                     text.code,
                     style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                    // WP ANDROID-SHEET-BG-1: web `.kit .hpanel .cmd` (Bg, 1px Line, 8dp corners).
                     modifier = Modifier
                         .fillMaxWidth()
-                        .background(MaterialTheme.colorScheme.surfaceVariant)
-                        .padding(8.dp),
+                        .vaultCommandBox(),
                 )
             }
             Text(text.after, style = MaterialTheme.typography.bodySmall)

@@ -201,9 +201,16 @@ pinned by `api/tests/test_web_goldens_1_ci.py`.
 that splitting `docs/PROJECT_PLAN.md` into the core plus
 `docs/plan-archive/`, and `docs/LEARNINGS.md` into the index plus
 `docs/learnings/<area>.md`, lost no line: it reads the pre-split files from
-git (`--old-ref`, default `wp/rc22-plan`) and checks every non-empty old line
-against the new files as a multiset; deliberate rewrites are listed in its
-`EXEMPT` table. It also prints the sizes against the targets and a start-read
-estimate. Run from the repo root: `python3 tools/doc-lines-check.py`
-(exit 0 = no line lost). The logic is pinned by
-`api/tests/test_doc_diet_1_lines_check.py`.
+`--old-ref` (default: the pre-split commit, `wp/rc22-plan` at split time) and
+the split result from `--new-ref` (default: the DOC-DIET-1 split commit), and
+checks every non-empty old line against the new files as a multiset;
+deliberate rewrites are listed in its `EXEMPT` table. Both defaults are
+pinned commits, so the proof is reproducible and later edits to the plan do
+not show up as "lost" lines (DOC-LINES-CHECK-1); `--new-ref WORKTREE` checks
+the working tree instead, for a re-split. It also prints the sizes of the
+new set against the targets and a start-read estimate. Run from the repo
+root: `python3 tools/doc-lines-check.py` (exit 0 = no line lost, 1 = lines
+lost, 2 = git error or a ref missing from the clone: a shallow clone lacks
+the pinned commits, `git fetch --unshallow` first). The logic is pinned by
+`api/tests/test_doc_diet_1_lines_check.py`; its end-to-end run skips where
+the history is missing (CI's depth-1 checkout).

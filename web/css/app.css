@@ -84,7 +84,7 @@
   padding:6px 2px;
 }
 .nav-btn .nav-lb{
-  font-size:var(--fs-1); font-weight:600; letter-spacing:.3px;
+  font-size:var(--fs-1); font-weight:500; letter-spacing:.3px;
   /* WP MOBILE-1b: at 200 % text a label ellipsizes instead of pushing
      the four columns apart. */
   max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
@@ -177,7 +177,7 @@
 }
 .linkbtn{
   padding:0; border:0; background:none;
-  font:inherit; font-weight:600; color:var(--accent);
+  font:inherit; font-weight:500; color:var(--accent);
   text-decoration:underline; text-underline-offset:2px; cursor:pointer;
 }
 /* aria-disabled, not :disabled — the Reload button keeps focus while its
@@ -387,7 +387,7 @@ body.selecting .view-root{ padding-bottom:var(--bulk-room); }
 .btn{
   display:inline-flex; align-items:center; justify-content:center; gap:7px;
   padding:10px 15px; border-radius:var(--r-s);
-  font-size:13px; font-weight:600; letter-spacing:.15px;
+  font-size:13px; font-weight:500; letter-spacing:.15px;
   border:1px solid var(--line); background:var(--raised); color:var(--text);
   transition:filter .14s, background .14s;
 }
@@ -407,7 +407,7 @@ body.selecting .view-root{ padding-bottom:var(--bulk-room); }
    instead of `disabled` (LEARNINGS, WP WEB-FEAT-1), so it needs the same
    look. Also after `.btn:hover`, for the same source-order reason. */
 .btn[aria-disabled="true"]{ opacity:.45; cursor:progress; filter:none; }
-.btn.primary{ background:var(--accent); border-color:var(--accent); color:var(--accent-ink); }
+.btn.primary{ background:var(--accent); border-color:var(--accent); color:var(--accent-ink); font-weight:700; }
 .btn.danger{ background:transparent; border-color:color-mix(in srgb, var(--danger) 45%, transparent); color:var(--danger); }
 .btn.ghost{ background:transparent; }
 .btn.sm{ padding:7px 11px; font-size:12px; border-radius:var(--r-s); }
@@ -448,11 +448,11 @@ body.selecting .view-root{ padding-bottom:var(--bulk-room); }
 .dialog h3{ margin:0 0 9px; font-size:16.5px; letter-spacing:-.2px; }
 .dialog p{ margin:0 0 10px; font-size:13px; line-height:1.5; color:var(--dim); }
 .dialog .row{ display:flex; gap:9px; justify-content:flex-end; }
-.dialog p b{ color:var(--text); font-weight:600; }
+.dialog p b{ color:var(--text); font-weight:500; }
 .dialog p b.num{ font-family:var(--mono); font-weight:500; font-variant-numeric:tabular-nums; }
 
 .cflabel{
-  margin:0 0 6px; font-size:var(--fs-1); font-weight:700; color:var(--dim-2);
+  margin:0 0 6px; font-size:var(--fs-1); font-weight:500; color:var(--dim-2);
 }
 .cflist{
   list-style:none; margin:0 0 11px; padding:0;
@@ -509,9 +509,9 @@ body.selecting .view-root{ padding-bottom:var(--bulk-room); }
 
 /* Section labels here and in kit.css are sentence case (DESIGN-NITS-1,
    audit D-12): no uppercase transform, no tracking. Status tags (.tag,
-   .mk, .pkgstate, .os, .nw) are badges, not labels, and keep theirs. */
+   .mk, .os, .nw) are badges, not labels, and keep theirs. */
 h4.sec{
-  margin:18px 0 var(--sp-2); font-size:var(--fs-1); font-weight:700; color:var(--dim-2);
+  margin:18px 0 var(--sp-2); font-size:var(--fs-1); font-weight:500; color:var(--dim-2);
   display:flex; align-items:center; gap:var(--sp-2);
 }
 h4.sec::after{ content:""; flex:1; height:1px; background:var(--line-soft); }
@@ -528,10 +528,10 @@ h4.sec[hidden]{ display:none; }
 }
 .jobcard.held{ border-color:var(--line); background:var(--surface); }
 .jobtop{ display:flex; gap:11px; align-items:flex-start; justify-content:space-between; }
-.jobtop .nm{ font-size:13.5px; font-weight:600; letter-spacing:-.1px; }
+.jobtop .nm{ font-size:13.5px; font-weight:500; letter-spacing:-.1px; }
 .jobtop > div{ min-width:0; } /* WP WEB-FIX-3: the name column may shrink beside the nowrap badge */
 .jobtop .sm{ font-size:11px; color:var(--dim-2); font-family:var(--mono); margin-top:2px; font-variant-numeric:tabular-nums; }
-.badge{ display:inline-flex; align-items:center; gap:5px; font-size:11px; font-weight:600; flex:none; white-space:nowrap; }
+.badge{ display:inline-flex; align-items:center; gap:5px; font-size:11px; font-weight:500; flex:none; white-space:nowrap; }
 /* The Downloads count badges (kit `.badge`, WP DOWNLOADS-2) are hidden at
    zero; css-hygiene's lint sees this display rule, so it gets the guard too. */
 .badge[hidden]{ display:none; }
@@ -560,7 +560,7 @@ h4.sec[hidden]{ display:none; }
    ============================================================ */
 
 .field{ margin-bottom:11px; }
-.field label{ display:block; font-size:var(--fs-1); color:var(--dim-2); margin-bottom:5px; font-weight:600; }
+.field label{ display:block; font-size:var(--fs-1); color:var(--dim-2); margin-bottom:5px; font-weight:500; }
 .inp{
   display:flex; align-items:center; gap:var(--sp-2);
   border:1px solid var(--line-strong); background:var(--bg); border-radius:var(--r-s); padding:10px 11px;
@@ -586,7 +586,7 @@ input.inp.txt:disabled{ opacity:.55; }
   border:1px solid var(--line-soft); background:var(--surface);
   border-radius:var(--r-m); margin-bottom:var(--sp-2);
 }
-.srow .ttl{ display:block; font-size:13.5px; font-weight:600; }
+.srow .ttl{ display:block; font-size:13.5px; font-weight:500; }
 .srow .desc{ display:block; font-size:11.5px; color:var(--dim-2); line-height:1.45; margin-top:3px; }
 .srow .grow{ flex:1; min-width:0; }
 .srow input[type="checkbox"]{ width:17px; height:17px; flex:none; accent-color:var(--accent); }
@@ -622,7 +622,7 @@ input.inp.txt:disabled{ opacity:.55; }
 
 .bullets{ margin:0; padding-left:var(--sp-4); }
 .bullets li{ font-size:12px; line-height:1.55; color:var(--dim); margin-bottom:6px; }
-.bullets b{ color:var(--text); font-weight:600; }
+.bullets b{ color:var(--text); font-weight:500; }
 
 .risky-list{ margin:0 0 var(--sp-3); }
 
@@ -654,7 +654,7 @@ body.onboarding .nav{ display:none; }
   box-shadow:inset 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent); color:var(--accent);
 }
 .wordmark{ font-size:15px; font-weight:700; letter-spacing:-.2px; }
-.stepnum{ font-size:var(--fs-1); color:var(--dim-2); font-weight:600; margin-top:2px; }
+.stepnum{ font-size:var(--fs-1); color:var(--dim-2); font-weight:500; margin-top:2px; }
 /* Onboarding progress (DESIGN-NITS-1, audit D-16): the fill is always
    full width and onboarding.js scales it with `transform:scaleX(p)` from
    the left edge, so a step change animates on the compositor instead of
@@ -770,7 +770,7 @@ body.onboarding .nav{ display:none; }
 .banner .acts{ display:flex; gap:var(--sp-4); margin-top:var(--sp-2); }
 /* Sentence case (DESIGN-NITS-1, audit D-13): the words are written as
    they read ("Details", "Dismiss"); no uppercase transform. */
-.banner .acts button{ font-size:var(--fs-2); font-weight:600; color:var(--stale); }
+.banner .acts button{ font-size:var(--fs-2); font-weight:500; color:var(--stale); }
 .banner .acts button.mute{ color:var(--dim); }
 /* New affordance (WP 4e.4): the banner's Details/Mute actions had no hover
    cue at all. `filter`, not `color` — a hover rule setting `color` here
@@ -861,7 +861,7 @@ body.onboarding .nav{ display:none; }
   border-radius:var(--r-s);
 }
 .notif .nbody{ flex:1; min-width:0; }
-.notif .nt{ font-size:13px; font-weight:600; color:var(--text); display:flex; align-items:center; gap:7px; flex-wrap:wrap; }
+.notif .nt{ font-size:13px; font-weight:500; color:var(--text); display:flex; align-items:center; gap:7px; flex-wrap:wrap; }
 .notif .nw{ font-size:var(--fs-1); font-weight:700; text-transform:uppercase; letter-spacing:.5px; }
 .notif .nx{ display:block; font-size:11.5px; line-height:1.5; color:var(--dim); margin-top:3px; }
 .notif .nwhen{ display:block; font-size:var(--fs-1); color:var(--dim-2); font-family:var(--mono); margin-top:var(--sp-1); }
@@ -887,7 +887,7 @@ body.onboarding .nav{ display:none; }
    CVD: online is a filled dot, offline a hollow ring, and the word is
    always there. */
 .pcs-badges{ display:flex; flex-direction:column; align-items:flex-end; gap:5px; flex:none; }
-.pchip{ display:inline-flex; align-items:center; gap:5px; font-size:11px; font-weight:600; white-space:nowrap; }
+.pchip{ display:inline-flex; align-items:center; gap:5px; font-size:11px; font-weight:500; white-space:nowrap; }
 .pchip .pdot{ width:8px; height:8px; border-radius:50%; background:currentColor; flex:none; box-sizing:border-box; }
 .pchip-on{ color:var(--ok); }
 .pchip-off, .pchip-unknown{ color:var(--dim-2); }
@@ -962,11 +962,11 @@ body.onboarding .nav{ display:none; }
   display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:6px var(--sp-3);
   padding:10px 0 var(--sp-1); border-top:1px solid var(--line-soft);
 }
-.about-table .about-name{ grid-column:1 / -1; text-align:left; font-weight:600; overflow-wrap:anywhere; }
+.about-table .about-name{ grid-column:1 / -1; text-align:left; font-weight:500; overflow-wrap:anywhere; }
 .about-table .about-status{ grid-column:1 / -1; }
 .about-table td[data-label]::before{
   content:attr(data-label); display:block; margin-bottom:2px;
-  font-size:var(--fs-1); font-weight:600; color:var(--dim-2);
+  font-size:var(--fs-1); font-weight:500; color:var(--dim-2);
 }
 .about-table .mono{ font-family:var(--mono); font-size:11.5px; overflow-wrap:anywhere; }
 .about-table .about-detail td{ padding:0 0 var(--sp-2); }
@@ -1017,7 +1017,7 @@ body.onboarding .nav{ display:none; }
 .detail-box{ display:flex; flex-direction:column; gap:10px; padding:14px var(--sp-4); background:var(--raised); border-radius:var(--r-m); }
 .detail-box:empty{ display:none; }
 .detail-box > .detail-block{ margin-top:0; }
-.detail-box-title{ margin:0; font-size:14px; font-weight:600; }
+.detail-box-title{ margin:0; font-size:14px; font-weight:500; }
 .detail-box-danger{ background:none; border:1px solid color-mix(in srgb, var(--danger) 35%, transparent); }
 .detail-box-danger .detail-block{ align-self:flex-start; }
 .store-desc{ margin:0 0 var(--sp-2); font-size:12.5px; line-height:1.55; color:var(--text);
@@ -1045,7 +1045,7 @@ body.onboarding .nav{ display:none; }
 }
 .depot .id{ font-family:var(--mono); font-size:12px; color:var(--text); font-variant-numeric:tabular-nums; }
 .depot .tag{
-  font-size:var(--fs-1); text-transform:uppercase; letter-spacing:.5px; font-weight:600;
+  font-size:var(--fs-1); text-transform:uppercase; letter-spacing:.5px;
   color:var(--stale); border:1px solid color-mix(in srgb, var(--stale) 40%, transparent); border-radius:calc(var(--r-s) / 2); padding:1px 5px;
 }
 .depot .b{ margin-left:auto; font-family:var(--mono); font-size:11.5px; color:var(--dim); font-variant-numeric:tabular-nums; }
@@ -1064,7 +1064,7 @@ body.onboarding .nav{ display:none; }
 
 .owners{ display:none; padding:2px 11px 11px; }
 .depotwrap.open .owners{ display:block; }
-.olabel{ margin:0 0 6px; font-size:var(--fs-1); font-weight:700; color:var(--dim-2); }
+.olabel{ margin:0 0 6px; font-size:var(--fs-1); font-weight:500; color:var(--dim-2); }
 .orow{ display:flex; align-items:center; gap:var(--sp-2); padding:var(--sp-1) 0; font-size:12px; }
 .orow .on{ color:var(--text); }
 .orow .os{ margin-left:auto; font-size:var(--fs-1); text-transform:uppercase; letter-spacing:.4px; color:var(--dim-2); }
@@ -1092,7 +1092,7 @@ body.onboarding .nav{ display:none; }
 .pkg-row .btn{ flex:none; }
 
 .unknown{ border:1px dashed var(--line); border-radius:var(--r-m); padding:14px 13px; }
-.unknown .u1{ margin:0 0 7px; font-size:13px; font-weight:600; color:var(--text); }
+.unknown .u1{ margin:0 0 7px; font-size:13px; font-weight:500; color:var(--text); }
 .unknown .u2{ margin:0; font-size:11.5px; line-height:1.55; color:var(--dim); }
 
 .detail-log{
@@ -1181,7 +1181,7 @@ body.onboarding .nav{ display:none; }
     display:table-cell; padding:var(--sp-2) 10px var(--sp-2) 0; vertical-align:top; text-align:left;
     border-top:1px solid var(--line-soft);
   }
-  .about-table thead th{ font-size:var(--fs-1); font-weight:600; color:var(--dim-2); }
+  .about-table thead th{ font-size:var(--fs-1); font-weight:500; color:var(--dim-2); }
   .about-table td[data-label]::before{ content:none; }
   .about-table .about-detail td{ border-top:0; padding:0 0 10px; }
 
