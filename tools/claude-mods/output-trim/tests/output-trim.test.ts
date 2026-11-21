@@ -308,20 +308,32 @@ test('TAP: output the harness cut is read back whole from its persisted file', a
   expect(result.interrupted).toBe(false)
 })
 
-test('TAP: when the persisted file cannot be read, the generic trimming applies', async ($, on) => {
-  const tap = passingTap(400)
-  const cut = tap.slice(0, 30000)
-  on('tool.call', () => ({
-    result: { stdout: cut, stderr: '', interrupted: false, persistedOutputPath: '/gone/abc.txt' },
-  }))
-  on('fs.read', () => ({ deny: 'no such file' }))
-  on('fs.write', () => ({ value: undefined }))
-  mock.env(on, { HOME: '/home/dev' })
+test('TAP: when the persisted file cannot be read, core\'s result stays untouched', async ($, on) => {
+  const cut = passingTap(400).slice(0, 30000)
+  const { writes } = persistedEngine(on, cut, undefined)
   const ran = await $.tool.call({ tool: 'Bash', command: 'dev.sh test-web' })
-  const out = stdoutOf(ran)
-  expect(out).toContain('lines omitted; ')
-  expect(out).not.toContain('[output-trim: TAP')
-  expect((ran.result as Record<string, unknown>).persistedOutputPath).toBe('/gone/abc.txt')
+  const result = ran.result as Record<string, unknown>
+  expect(result.stdout).toBe(cut)
+  expect(result.persistedOutputPath).toBe('/home/dev/.claude/projects/p/s/tool-results/xyz.txt')
+  expect(writes.length).toBe(0)
+})
+
+test('TAP: an unclosed ok YAML block does not swallow the not ok after it', async ($, on) => {
+  const failing = notOkBlock('', 2, 'after the broken block')
+  const tap = [
+    'TAP version 13',
+    ...Array.from({ length: 300 }, (_, i) => okPoint('', i + 3, `case ${i + 3}`)).flat(),
+    'ok 1 - block never closed',
+    '  ---',
+    '  duration_ms: 1',
+    ...failing,
+    '1..302',
+    ...summary(302, 1),
+  ].join('\n') + '\n'
+  engine(on, tap)
+  const out = stdoutOf(await $.tool.call({ tool: 'Bash', command: 'dev.sh test-web || true' }))
+  expect(out).toContain(failing.join('\n'))
+  expect(out).toContain('1 not ok kept with their blocks]')
 })
 
 test('TAP: still long after the TAP cut, head, tail and not ok lines are kept', {
@@ -422,14 +434,49 @@ test('cut generic output is read back whole: right tail, line count and file lin
   }
 })
 
-test('cut generic output whose file cannot be read: the cut is trimmed, persisted fields stay', async ($, on) => {
+test('cut generic output whose file cannot be read: core\'s result stays untouched, nothing kept', async ($, on) => {
   const cut = numbered(40000).slice(0, 30000)
   const { writes } = persistedEngine(on, cut, undefined)
   const ran = await $.tool.call({ tool: 'Bash', command: 'seq-like run' })
   const result = ran.result as Record<string, unknown>
-  expect(writes[0]?.text).toBe(cut)
-  expect(result.stdout).toContain('lines omitted; 0 matching lines')
+  expect(result.stdout).toBe(cut)
   expect(result.persistedOutputPath).toBe('/home/dev/.claude/projects/p/s/tool-results/xyz.txt')
+  expect(result.persistedOutputSize).toBe(cut.length)
+  expect(writes.length).toBe(0)
+})
+
+test('read back but not shorter (few lines, none over 400 chars), with long stderr: core\'s result stays', async ($, on) => {
+  // 100 lines of 300 chars: 30 KB that trimText cannot shorten.
+  const whole = Array.from({ length: 100 }, (_, i) => `${i}:${'y'.repeat(297)}`).join('\n') + '\n'
+  const writes: Write[] = []
+  const record = {
+    stdout: whole.slice(0, 2000),
+    stderr: numbered(1000),
+    interrupted: false,
+    persistedOutputPath: '/p/tool-results/q.txt',
+    persistedOutputSize: whole.length,
+  }
+  on('tool.call', () => ({ result: record }))
+  on('fs.read', () => ({ value: whole }))
+  on('fs.write', (_, e) => {
+    writes.push({ path: e.path, text: e.text })
+    return { value: undefined }
+  })
+  mock.env(on, { HOME: '/home/dev' })
+  const ran = await $.tool.call({ tool: 'Bash', command: 'dump' })
+  expect(ran.result).toEqual(record)
+  expect(writes.length).toBe(0)
+})
+
+test('read back and trimmed but still above maxBytes: core\'s result stays', async ($, on) => {
+  // 1000 lines of 399 chars: head + tail alone are ~48 KB.
+  const whole = Array.from({ length: 1000 }, (_, i) => `${String(i).padStart(4, '0')}${'z'.repeat(395)}`).join('\n') + '\n'
+  const { writes } = persistedEngine(on, whole.slice(0, 30000), whole)
+  const ran = await $.tool.call({ tool: 'Bash', command: 'dump wide' })
+  const result = ran.result as Record<string, unknown>
+  expect(result.stdout).toBe(whole.slice(0, 30000))
+  expect(result.persistedOutputPath).toBe('/home/dev/.claude/projects/p/s/tool-results/xyz.txt')
+  expect(writes.length).toBe(0)
 })
 
 // --- node --test spec reporter (node 24's default) -----------------------
@@ -565,5 +612,16 @@ test('not spec: check marks without an ℹ summary get the generic trim', async 
   engine(on, long)
   const out = stdoutOf(await $.tool.call({ tool: 'Bash', command: 'make check' }))
   expect(out).toContain('880 lines omitted; 0 matching lines')
+  expect(out).not.toContain('[output-trim: spec')
+})
+
+test('not spec: an ℹ tests line and check marks without durations get the generic trim', async ($, on) => {
+  const long = [
+    ...Array.from({ length: 1000 }, (_, i) => `\u2714 step ${i + 1} done`),
+    '\u2139 tests 1000',
+  ].join('\n') + '\n'
+  engine(on, long)
+  const out = stdoutOf(await $.tool.call({ tool: 'Bash', command: 'make check' }))
+  expect(out).toContain('881 lines omitted; 0 matching lines')
   expect(out).not.toContain('[output-trim: spec')
 })

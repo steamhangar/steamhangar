@@ -165,9 +165,11 @@ that file back and trims the whole text, so line counts, the tail and the
 summary of a test run are those of the real output; it keeps the full text
 in its own output directory as usual and answers the result without the
 persisted-output fields, so the trimmed text and the file line are shown
-inline instead of being cut by the preview. If that file cannot be read,
-the cut text is trimmed by head and tail (the line count then is the cut's)
-and the persisted-output fields stay.
+inline instead of being cut by the preview. Claude Code's result is passed
+on untouched (preview and persisted-output fields included, nothing kept
+by the mod) when that file cannot be read, or when the text to show inline
+would still be above `maxBytes` (output that trimming cannot shorten
+enough, such as a few hundred very wide lines).
 
 Never trimmed:
 

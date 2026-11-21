@@ -2,6 +2,7 @@ import type { EngineInterface, PluginOptions, Register, ToolCallResult } from 'c
 import {
   DEFAULTS,
   asksForSmallRange,
+  byteLength,
   fileName,
   footer,
   fullOutputFile,
@@ -81,9 +82,11 @@ const PERSISTED_FIELDS = ['persistedOutputPath', 'persistedOutputSize', 'stdoutH
  * shows the model a 2 KB preview of `stdout`. The whole text is then read
  * back from that file and trimmed (`trimAny`: TAP and spec test output by
  * their structure), and the record is answered without the persisted
- * fields, so the trimmed text and the file line are shown inline. When the
- * file cannot be read, the cut `stdout` is trimmed as before this read-back
- * existed (head, failure lines, tail) and the persisted fields stay.
+ * fields, so the trimmed text and the file line are shown inline. Core's
+ * record stays as it came (persisted fields and preview included) when the
+ * file cannot be read, when the whole text does not get shorter, or when
+ * the trimmed text is still above `maxBytes` (inline it would be larger
+ * than the preview core guards against).
  */
 async function trimRecord(
   $: EngineInterface,
@@ -95,25 +98,26 @@ async function trimRecord(
   const persisted = typeof record.persistedOutputPath === 'string' && record.persistedOutputPath !== ''
     ? record.persistedOutputPath
     : undefined
-  const whole = persisted === undefined ? record.stdout : await readText($, persisted)
-  const stdout = whole ?? record.stdout
+  const stdout = persisted === undefined ? record.stdout : await readText($, persisted)
+  // Unreadable: the cut is not the full output, so nothing is kept or claimed.
+  if (stdout === undefined) return undefined
   const { stderr } = record
   const full = fullOutputFile(stdout, stderr)
   if (!isLong(full, settings)) return undefined
 
-  const newStdout = whole === undefined
-    ? (isLong(stdout, settings) ? trimText(stdout, settings) : undefined)
-    : trimAny(stdout, settings)
+  const newStdout = trimAny(stdout, settings)
   const newStderr = isLong(stderr, settings) ? trimText(stderr, settings) : undefined
   if (newStdout === undefined && newStderr === undefined) return undefined
-  // Never put a whole read-back output inline untrimmed.
-  if (persisted !== undefined && newStdout === undefined) return undefined
+  // Read back: never put more than `maxBytes` inline, whether the whole
+  // output did not get shorter or its trimmed text is still large.
+  if (persisted !== undefined &&
+    byteLength(newStdout ?? stdout) + byteLength(newStderr ?? stderr) > settings.maxBytes) return undefined
 
   const line = await keep($, configuredDir, toolUseId, full)
   if (line === undefined) return undefined
 
   const result: BashRecord = { ...record, stdout: `${newStdout ?? stdout}\n${line}`, stderr: newStderr ?? stderr }
-  if (persisted !== undefined && whole !== undefined) {
+  if (persisted !== undefined) {
     for (const field of PERSISTED_FIELDS) delete result[field]
   }
   return result

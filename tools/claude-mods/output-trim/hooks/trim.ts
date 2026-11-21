@@ -112,13 +112,17 @@ export const isTap = (text: string): boolean => {
 /**
  * Index of the last line of the YAML block that follows the test point at
  * `start` (indented two more than the point, from `---` to `...`), or
- * `start` when no complete block follows.
+ * `start` when no complete block follows. A non-blank line indented less
+ * than the block ends the search: an unclosed block never swallows the
+ * test points after it.
  */
 const yamlEnd = (lines: readonly string[], start: number, indent: number): number => {
   const pad = ' '.repeat(indent + 2)
   if ((lines[start + 1] ?? '').trimEnd() !== `${pad}---`) return start
   for (let j = start + 2; j < lines.length; j++) {
-    if ((lines[j] ?? '').trimEnd() === `${pad}...`) return j
+    const line = lines[j] ?? ''
+    if (line.trimEnd() === `${pad}...`) return j
+    if (line.trim() !== '' && !line.startsWith(pad)) return start
   }
   return start
 }
