@@ -2140,7 +2140,9 @@ and VERIFY-COLD-1 is prose in the Sunday-test box of the rc19.3 block.
   addendum, ADR-0025 note that summary tiles and job figures now include
   the unswept ring span). APP-DL-STATS-1 counts as done for RC23-HOLD only
   with 1b on `main`.
-  **APP-DL-STATS-1b built 2026-11-21 (in review):** `traffic_stitch.py`,
+  **APP-DL-STATS-1 + 1b done 2026-11-21** (caption part review PASS +
+  re-check PASS; 1b review PASS + re-check PASS; job "so far" decides per
+  job on its own depot bytes, never below swept-only). Built as: `traffic_stitch.py`,
   per bucket the swept row or the ring total stands (larger wins), swept
   figures read in one SQLite snapshot, ring per-depot store capped at
   4096 entries (incomplete buckets keep the swept value), no contract
@@ -2547,6 +2549,11 @@ Follow-up of the rc23 wave 2 reviews (2026-11-21), rc24:
 - DL-STATS-NITS-1 (api) the newest series bucket is averaged over its
   elapsed seconds, but the caption names the bucket's full length; carry
   the covered seconds in the series payload so the period is exact.
+  Also (APP-DL-STATS-1b re-check): `test_d15b_endpoints.py` ~186-212
+  still uses the real clock (pin `LiveTier(clock=...)` like
+  `test_job_size_1`); `_with_eta` reports `eta_bytes_per_second=0.0` with
+  source `live` for a non-running preview job whose ring rate is 0
+  (cosmetic, clients ignore 0).
 - CAP503-NAME-1 (api + web/app, found in CAP-503-FIX-1b) the hold texts
   name a device by its Clients-page name, else its address
   (`GET /v1/client-priority` sends only Clients-page names), while
