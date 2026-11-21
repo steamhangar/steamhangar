@@ -285,6 +285,7 @@ Steam-only, prefill-first design can solve better:
 | DELETE | /v1/jobs/{id} | Cancel a queued or running job (Phase 3, user decision 2026-08-06) |
 | POST | /v1/jobs/{id}/pause | Pause a running download — terminates the subprocess; cached chunks make resume cheap |
 | POST | /v1/jobs/{id}/resume | Resume: re-runs the prefill; already-cached chunks replay as disk-speed HITs |
+| GET | /v1/client-priority | Whether the prefill runner is held for a device loading through the cache, for whom and until when; client-paused and overridden job ids (WP CAP-503-FIX-1a, operator decision 2026-11-01 Weg A) |
 | GET | /v1/schedule | Scheduler state: window, interval, last/next sweep |
 | DELETE | /v1/cache/{appid} | Delete a game from the cache |
 | POST | /v1/cache/{appid}/gc | Garbage-collect orphaned chunks (manifest diff) |
