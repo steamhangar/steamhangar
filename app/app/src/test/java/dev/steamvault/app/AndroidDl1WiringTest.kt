@@ -91,6 +91,20 @@ class AndroidDl1WiringTest {
         assertCalledFrom(stats, "clearAndSetSemantics { contentDescription = status.text }", "StatusPill")
     }
 
+    /** WP APP-DL-STATS-1: the middle caption names the period of the highest point. */
+    @Test
+    fun `MUTATION PIN -- the graph highest caption carries the averaging period`() {
+        val graph = body(stats, "ThroughputGraph")
+        assertTrue(
+            "ThroughputGraph no longer appends highestSuffix(shown) to the highest caption",
+            graph.contains("seriesHighestText(geo.maxBytesPerSecond) + highestSuffix(shown)"),
+        )
+        assertTrue(
+            "ThroughputGraph's content description lost HIGHEST_NOTE",
+            graph.contains("contentDescription = \"\$label \$HIGHEST_NOTE\""),
+        )
+    }
+
     @Test
     fun `MUTATION PIN -- the graph draws the split bands and the legend`() {
         val graph = body(stats, "ThroughputGraph")

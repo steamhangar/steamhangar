@@ -177,7 +177,8 @@ class D15dWiringTest {
         assertCalledFrom(stats, "series?.let { it.copy(points = trimSeries(it.points)) } ?: return", "ThroughputGraph")
         assertCalledFrom(stats, "graphGeometryToShow(shown, selectedRange, unsupported, GRAPH_W, GRAPH_H) ?: return", "ThroughputGraph")
         assertCalledFrom(stats, "ranges = STATS_RANGES,", "DownloadsStatsHeader")
-        assertCalledFrom(stats, "contentDescription = label", "ThroughputGraph")
+        // WP APP-DL-STATS-1: the name carries the "highest" vs limit note.
+        assertCalledFrom(stats, "contentDescription = \"\$label \$HIGHEST_NOTE\"", "ThroughputGraph")
     }
 
     /** Review should-fix: the polls run only while the screen is STARTED

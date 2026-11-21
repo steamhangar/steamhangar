@@ -253,6 +253,37 @@ class TrafficViewTest {
         assertNull(graphGeometryToShow(flat, "24h", false, 300f, 60f))
     }
 
+    /** WP APP-DL-STATS-1 (web traffic-view.test.js, same cases): the "highest"
+     * caption names its point's period; the note explains it next to the limit. */
+    @Test
+    fun `WP APP-DL-STATS-1 -- the highest caption names its period and the note says why it can top the limit`() {
+        assertEquals(listOf("5 s", "15 s", "1 min", "5 min", "1 h", "1 day"), listOf(5, 15, 60, 300, 3600, 86400).map { bucketShort(it) })
+        assertEquals("", bucketShort(0))
+        assertEquals("", bucketShort(null))
+        val persisted = SeriesOut(range = "24h", bucket_seconds = 300, points = listOf(point("a", 1.0), point("b", 9.0)))
+        assertEquals(300, highestBucketSeconds(persisted))
+        assertEquals(" (5 min avg)", highestSuffix(persisted))
+        // The live series mixes 5, 15 and 60 s points: the highest point's OWN length counts.
+        val live = liveSeries(
+            LiveOut(
+                event_feed = feed("ok"),
+                points = listOf(livePoint("a", 60, 2 * mib), livePoint("b", 15, 19 * mib), livePoint("c", 5, 13 * mib)),
+            ),
+        )
+        assertEquals(5, live.bucket_seconds)
+        assertEquals(15, highestBucketSeconds(live))
+        assertEquals(" (15 s avg)", highestSuffix(live))
+        val fine = liveSeries(LiveOut(event_feed = feed("ok"), points = listOf(livePoint("a", 60, 1.0), livePoint("b", 5, 7.0))))
+        assertEquals(" (5 s avg)", highestSuffix(fine))
+        assertNull(highestBucketSeconds(SeriesOut(range = "24h", bucket_seconds = 300, points = emptyList())))
+        assertEquals("", highestSuffix(SeriesOut(range = "24h", bucket_seconds = 300, points = emptyList())))
+        // Literal (cross-frontend contract): TrafficWebTwinTest pins it against the web.
+        assertEquals(
+            "Each point is the average over its period of everything the cache served, cache hits included, counted when each request ended. The download limit caps only what comes from the internet and holds over minutes, so a short point can be above it.",
+            HIGHEST_NOTE,
+        )
+    }
+
     @Test
     fun `series captions and the accessible name`() {
         val all = SeriesOut(range = "all", bucket_seconds = 86400, points = listOf(point("2026-09-01T00:00:00Z", 1.0)))

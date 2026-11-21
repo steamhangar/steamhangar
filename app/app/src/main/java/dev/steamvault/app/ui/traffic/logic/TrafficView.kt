@@ -399,6 +399,57 @@ fun seriesStartText(series: SeriesOut, nowMs: Long = System.currentTimeMillis())
 /** The graph's middle caption ("highest 40.0 MB/s"). */
 fun seriesHighestText(maxBytesPerSecond: Double): String = "highest ${formatSpeed(maxBytesPerSecond) ?: "0 MB/s"}"
 
+/**
+ * WP APP-DL-STATS-1 (web `HIGHEST_NOTE`): why the graph's "highest" can be
+ * above the upstream "Limit" although both use the same 1024 base: a point
+ * is the average over its own period of everything the cache served, HITs
+ * included, logged when each request ended; the cap (ADR-0015) applies to
+ * MISS downloads only and holds over minutes. Appended to the graph's
+ * content description (web: its accessible name and the captions' tooltip).
+ */
+const val HIGHEST_NOTE =
+    "Each point is the average over its period of everything the cache served, cache hits included, counted when each request ended. The download limit caps only what comes from the internet and holds over minutes, so a short point can be above it."
+
+/** WP APP-DL-STATS-1 (web `bucketShort`): "5 s", "1 min", "1 day"; "" for no length. */
+fun bucketShort(bucketSeconds: Int?): String {
+    if (bucketSeconds == null || bucketSeconds <= 0) return ""
+    return when {
+        bucketSeconds < 60 -> "$bucketSeconds s"
+        bucketSeconds < 3600 -> "${jsRound(bucketSeconds / 60.0)} min"
+        bucketSeconds < 86400 -> "${jsRound(bucketSeconds / 3600.0)} h"
+        else -> "${jsRound(bucketSeconds / 86400.0)} day"
+    }
+}
+
+/**
+ * WP APP-DL-STATS-1 (web `highestBucketSeconds`): the period the highest
+ * point averages over: a live point's own [SeriesPointOut.bucket_seconds]
+ * (the live series mixes 5, 15 and 60 s points, [liveSeries] keeps each
+ * one's length), else the series' bucket. The first highest point counts;
+ * `null` without points.
+ */
+fun highestBucketSeconds(series: SeriesOut): Int? {
+    var best: SeriesPointOut? = null
+    var bestValue = 0.0
+    for (p in series.points) {
+        val v = if (finiteNonNegative(p.bytes_per_second)) p.bytes_per_second else 0.0
+        if (best == null || v > bestValue) {
+            best = p
+            bestValue = v
+        }
+    }
+    if (best == null) return null
+    best.bucket_seconds?.takeIf { it > 0 }?.let { return it }
+    return series.bucket_seconds.takeIf { it > 0 }
+}
+
+/** WP APP-DL-STATS-1 (web `highestSuffix`): " (5 s avg)" after the "highest"
+ * caption, or "" when the period is unknown. */
+fun highestSuffix(series: SeriesOut): String {
+    val word = bucketShort(highestBucketSeconds(series))
+    return if (word.isNotEmpty()) " ($word avg)" else ""
+}
+
 /** The graph's right-edge caption. */
 const val SERIES_END_TEXT = "now"
 
@@ -620,6 +671,9 @@ fun liveSeries(live: LiveOut): SeriesOut {
             // WP RUNNER-SPLIT-1: the graph's served-from-cache band.
             runner_hit_bytes = p.runner_hit_bytes,
             runner_miss_bytes = p.runner_miss_bytes,
+            // WP APP-DL-STATS-1: the point's own length for the "highest"
+            // caption (web: the repeated live point object keeps it).
+            bucket_seconds = p.bucket_seconds.takeIf { it > 0 },
         )
         val repeat = maxOf(1, jsRound((if (p.bucket_seconds > 0) p.bucket_seconds else 5) / 5.0).toInt())
         repeat(repeat) { points.add(point) }

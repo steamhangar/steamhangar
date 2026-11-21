@@ -70,6 +70,7 @@ import dev.steamvault.app.ui.traffic.logic.DEFAULT_STATS_RANGE
 import dev.steamvault.app.ui.traffic.logic.EtaSmoother
 import dev.steamvault.app.ui.traffic.logic.FeedState
 import dev.steamvault.app.ui.traffic.logic.HERO_LABEL
+import dev.steamvault.app.ui.traffic.logic.HIGHEST_NOTE
 import dev.steamvault.app.ui.traffic.logic.HISTORY_LIMIT
 import dev.steamvault.app.ui.traffic.logic.HeroFigures
 import dev.steamvault.app.ui.traffic.logic.HeroMini
@@ -89,6 +90,7 @@ import dev.steamvault.app.ui.traffic.logic.feedState
 import dev.steamvault.app.ui.traffic.logic.graphGeometryToShow
 import dev.steamvault.app.ui.traffic.logic.headerTiles
 import dev.steamvault.app.ui.traffic.logic.heroFigures
+import dev.steamvault.app.ui.traffic.logic.highestSuffix
 import dev.steamvault.app.ui.traffic.logic.isRange
 import dev.steamvault.app.ui.traffic.logic.isStatsRange
 import dev.steamvault.app.ui.traffic.logic.jobSpeedNote
@@ -589,7 +591,8 @@ private fun ThroughputGraph(series: SeriesOut?, selectedRange: String, unsupport
                 .fillMaxWidth()
                 .height(88.dp)
                 .semantics {
-                    contentDescription = label
+                    // WP APP-DL-STATS-1: why "highest" can be above the limit (web: the svg's name).
+                    contentDescription = "$label $HIGHEST_NOTE"
                     role = Role.Image
                 },
         ) {
@@ -643,7 +646,7 @@ private fun ThroughputGraph(series: SeriesOut?, selectedRange: String, unsupport
             modifier = Modifier.fillMaxWidth().clearAndSetSemantics {},
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
-            for (text in listOf(seriesStartText(shown, nowMs()), seriesHighestText(geo.maxBytesPerSecond), SERIES_END_TEXT)) {
+            for (text in listOf(seriesStartText(shown, nowMs()), seriesHighestText(geo.maxBytesPerSecond) + highestSuffix(shown), SERIES_END_TEXT)) {
                 Text(text, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }

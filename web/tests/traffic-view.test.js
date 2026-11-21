@@ -31,6 +31,11 @@ import {
   seriesGeometry,
   seriesLabel,
   seriesStartText,
+  HIGHEST_NOTE,
+  bucketShort,
+  highestBucketSeconds,
+  highestSuffix,
+  liveSeries,
 } from "../js/lib/traffic-view.js";
 
 const MIB = 1024 * 1024;
@@ -219,6 +224,39 @@ test("graph label and start caption", () => {
   assert.equal(seriesLabel({ range: "7d", bucket_seconds: 3600 }, 0), "Average speed per hour in the last 7 days. Highest: 0 MB/s.");
   assert.equal(seriesStartText({ range: "30d" }), "30 days ago");
   assert.equal(seriesStartText({ range: "all", points: [{ t: "2026-09-01T00:00:00Z" }] }), "since 2026-09-01");
+});
+
+test("WP APP-DL-STATS-1: the graph's 'highest' names the period its point averages; the note says why it can top the limit", () => {
+  assert.deepEqual([5, 15, 60, 300, 3600, 86400].map(bucketShort), ["5 s", "15 s", "1 min", "5 min", "1 h", "1 day"]);
+  assert.equal(bucketShort(0), "");
+  assert.equal(bucketShort(null), "");
+  // A persisted range: the series' own bucket.
+  const persisted = { range: "24h", bucket_seconds: 300, points: [{ bytes_per_second: 1 }, { bytes_per_second: 9 }] };
+  assert.equal(highestBucketSeconds(persisted), 300);
+  assert.equal(highestSuffix(persisted), " (5 min avg)");
+  // The live series mixes 5, 15 and 60 s points (expanded onto a 5 s grid):
+  // the highest point's OWN bucket counts, not the grid's 5 s.
+  const live = liveSeries({
+    event_feed: { state: "ok" },
+    range_start: null,
+    points: [
+      { t: "a", bucket_seconds: 60, bytes_per_second: 2 * MIB },
+      { t: "b", bucket_seconds: 15, bytes_per_second: 19 * MIB },
+      { t: "c", bucket_seconds: 5, bytes_per_second: 13 * MIB },
+    ],
+  });
+  assert.equal(live.bucket_seconds, 5);
+  assert.equal(highestBucketSeconds(live), 15);
+  assert.equal(highestSuffix(live), " (15 s avg)");
+  const fine = liveSeries({ event_feed: { state: "ok" }, range_start: null, points: [{ t: "a", bucket_seconds: 60, bytes_per_second: 1 }, { t: "b", bucket_seconds: 5, bytes_per_second: 7 }] });
+  assert.equal(highestSuffix(fine), " (5 s avg)");
+  assert.equal(highestBucketSeconds({ bucket_seconds: 300, points: [] }), null);
+  assert.equal(highestSuffix({ bucket_seconds: 300, points: [] }), "");
+  // The words (Android twin: TrafficView.kt HIGHEST_NOTE, TrafficWebTwinTest).
+  assert.equal(
+    HIGHEST_NOTE,
+    "Each point is the average over its period of everything the cache served, cache hits included, counted when each request ended. The download limit caps only what comes from the internet and holds over minutes, so a short point can be above it.",
+  );
 });
 
 test("MUTATION TARGET: per-job speed only with the feed ok; unknown depots say why; null otherwise", () => {
