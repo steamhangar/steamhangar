@@ -113,7 +113,7 @@ class CacheComplete1cWiringTest {
         assertCalledFrom(row, "sizeCell(LIST_TRAILING_WIDTH)", "GameListRow")
         assertCalledFrom(row, "flagCell(LIST_TRAILING_WIDTH, Alignment.CenterEnd)", "GameListRow")
         assertCalledFrom(row, "statusCell(Modifier.width(LIST_WIDE_STATUS_WIDTH))", "GameListRow")
-        assertCalledFrom(row, "installedBadgeSpokenText(model.installedBadge, model.installedNames)", "GameListRow")
+        assertCalledFrom(row, "installedBadgeSpokenText(model.installedBadge, model.kind, model.installedNames)", "GameListRow")
         assertCalledFrom(row, "UpdateAvailableLabel(compact = true)", "GameListRow")
     }
 

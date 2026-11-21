@@ -42,7 +42,7 @@ class InstalledStateTest {
     }
 
     @Test
-    fun `fresh entries but NO cache content -- InstalledNotCached, not the cached branch (the protection-gap case)`() {
+    fun `fresh entries but NO cache content -- InstalledNotCached, not the cached branch (the installed-but-not-cached case)`() {
         val entries = listOf(InstalledOnEntry("gaming-pc", "2026-08-22T09:15:03Z"))
         // size_bytes null, hasVisibleCacheContent(game) == false.
         val badge = installedBadgeFor(game(installedOn = entries, sizeBytes = null))

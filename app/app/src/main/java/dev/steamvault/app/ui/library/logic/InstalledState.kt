@@ -2,6 +2,7 @@ package dev.steamvault.app.ui.library.logic
 
 import dev.steamvault.app.net.model.GameSummary
 import dev.steamvault.app.net.model.InstalledOnEntry
+import dev.steamvault.app.ui.status.StatusKind
 
 /**
  * The installed-state badge (WP AG-3) — Kotlin counterpart of the
@@ -45,7 +46,7 @@ sealed class InstalledBadge {
     /**
      * Fresh `installed_on` entries exist but the game has NO visible cache
      * content — the motivating scenario for the whole `installed_on` field:
-     * a game installed on a gaming PC that the vault is not protecting.
+     * a game installed on a gaming PC with no cached bytes on the vault.
      * Rendered as an explicit statement, not folded into the same wording
      * [InstalledAndCached] uses.
      */
@@ -101,4 +102,33 @@ fun installedBadgeFor(game: GameSummary): InstalledBadge {
     } else {
         InstalledBadge.InstalledNotCached(display)
     }
+}
+
+/** Which words the list row's spoken installed-on label uses
+ * ([installedSpokenWording]); `ui/library/InstalledBadgeText.kt` resolves it
+ * to a string resource. */
+enum class InstalledSpokenWording {
+    /** No badge: nothing is spoken. */
+    NONE,
+
+    /** "Installed on <names>" (`library_installed_on`). */
+    INSTALLED_ON,
+
+    /** "Installed, not cached · <names>" (`library_installed_not_cached`). */
+    INSTALLED_NOT_CACHED,
+}
+
+/**
+ * Twin of web `installedAriaFragment` (components/game-card.js): the
+ * not-cached wording restates "not cached", which duplicates the status
+ * word "Not cached" spoken right before it when the row's [kind] is itself
+ * [StatusKind.NONE]. In that one case the label is the plain "Installed on
+ * <names>"; every other kind (running, paused, error, ...) says nothing
+ * about cache state, so it keeps the full not-cached wording.
+ */
+fun installedSpokenWording(badge: InstalledBadge, kind: StatusKind): InstalledSpokenWording = when (badge) {
+    InstalledBadge.NoSignal -> InstalledSpokenWording.NONE
+    is InstalledBadge.InstalledAndCached -> InstalledSpokenWording.INSTALLED_ON
+    is InstalledBadge.InstalledNotCached ->
+        if (kind == StatusKind.NONE) InstalledSpokenWording.INSTALLED_ON else InstalledSpokenWording.INSTALLED_NOT_CACHED
 }

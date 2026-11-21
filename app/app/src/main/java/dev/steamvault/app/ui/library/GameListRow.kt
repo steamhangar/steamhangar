@@ -95,7 +95,7 @@ fun GameListRow(
         Modifier
     }
     val installedText = installedBadgeText(model.installedBadge)
-    val installedSpoken = installedBadgeSpokenText(model.installedBadge, model.installedNames)
+    val installedSpoken = installedBadgeSpokenText(model.installedBadge, model.kind, model.installedNames)
 
     val nameCell: @Composable (Modifier) -> Unit = { m ->
         Text(
