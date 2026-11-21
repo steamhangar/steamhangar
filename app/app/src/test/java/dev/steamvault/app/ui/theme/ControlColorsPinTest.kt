@@ -314,7 +314,21 @@ class ControlColorsPinTest {
     @Test
     fun `the toast, sheet, dialog, switch and command-box helpers carry the web tokens`() {
         val toast = stripComments(File("src/main/java/dev/steamvault/app/ui/theme/VaultSnackbar.kt").readText(Charsets.UTF_8))
-        assertTrue("VaultSnackbar: `.toast` edge", toast.contains("Snackbar(modifier = modifier.border(1.dp, VaultColors.Line, VaultToastShape), shape = VaultToastShape)"))
+        assertTrue(
+            "VaultSnackbar: `.toast` edge and shape",
+            toast.contains(".border(1.dp, VaultColors.Line, VaultToastShape),") && toast.contains("shape = VaultToastShape,"),
+        )
+        // SNACKBAR-LIVE-1: every toast is a polite live region (TalkBack reads it), set once here.
+        assertTrue(
+            "VaultSnackbar: the Snackbar modifier needs `.semantics { liveRegion = LiveRegionMode.Polite }`",
+            Regex("""modifier = modifier\s*\.semantics \{ liveRegion = LiveRegionMode\.Polite \}""").containsMatchIn(toast),
+        )
+        for (call in calls("VaultSnackbar")) {
+            assertTrue(
+                "${call.file}:${call.line} VaultSnackbar call sets its own live region; VaultSnackbar already does (SNACKBAR-LIVE-1)",
+                !call.args.contains("liveRegion"),
+            )
+        }
         assertTrue("VaultSnackbar: `.toast-key` 3px", toast.contains(".width(3.dp)") && toast.contains(".fillMaxHeight()"))
         assertTrue("VaultSnackbar: key accent, stale on warn", toast.contains("if (warn) VaultColors.StatusStale else VaultColors.Accent"))
         val code = stripComments(File("src/main/java/dev/steamvault/app/ui/theme/ControlColors.kt").readText(Charsets.UTF_8))

@@ -417,7 +417,7 @@ private fun RenameNotice(flow: ClientRenameFlow) {
         delay(NOTICE_MS)
         flow.notice = null
     }
-    VaultSnackbar(message, modifier = Modifier.padding(12.dp).semantics { liveRegion = LiveRegionMode.Polite })
+    VaultSnackbar(message, modifier = Modifier.padding(12.dp))
 }
 
 /** WP ANDROID-REDESIGN-1a: the card Remove's success note (web: the toast). */
@@ -428,5 +428,5 @@ private fun RemoveNotice(controller: ClientsController) {
         delay(NOTICE_MS)
         controller.clearRemoveNotice()
     }
-    VaultSnackbar(message, modifier = Modifier.padding(12.dp).semantics { liveRegion = LiveRegionMode.Polite })
+    VaultSnackbar(message, modifier = Modifier.padding(12.dp))
 }
