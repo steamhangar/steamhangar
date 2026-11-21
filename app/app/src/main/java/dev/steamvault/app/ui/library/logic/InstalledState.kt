@@ -45,7 +45,7 @@ sealed class InstalledBadge {
     /**
      * Fresh `installed_on` entries exist but the game has NO visible cache
      * content — the motivating scenario for the whole `installed_on` field:
-     * a game installed on a gaming PC that the vault is not protecting.
+     * a game installed on a gaming PC with no cached bytes on the vault.
      * Rendered as an explicit statement, not folded into the same wording
      * [InstalledAndCached] uses.
      */
