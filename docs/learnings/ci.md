@@ -120,3 +120,13 @@ at the end, under a dated heading, one entry each with the WP that proved it.
 - Gates that accept a skipped builder must tie that acceptance to the
   plan's `*_build == 'false'` AND the reuse job's success, or a skipped
   builder ends the tag run green with missing assets.
+
+## 2026-11-21 — rc23 audit fix run (CONTRAST-1, PILL-TONE-1, FONT-FLOOR-1)
+- **Several packages that change screenshots share one goldens round:**
+  merge them into one integration branch (`wp/rc23-design-1`), push that
+  head to `wp/<name>-goldens`, fast-forward to the bot commits and push for
+  the verifying run. Separate rounds per package would produce binary
+  golden conflicts on merge.
+- **Poll the GitHub API in one loop for all pending branches, every
+  240 s,** not one watcher per branch: the unauthenticated limit is 60
+  requests per hour for everything on the host.
