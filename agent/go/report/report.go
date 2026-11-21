@@ -14,14 +14,17 @@
 //
 // The two optional presence fields are attached with Payload.WithPresence
 // and are only ever sent when they pass the server's own rules (see
-// WithPresence); a server that predates them rejects them, and
-// agent/go/client then resends the report without them (see that
-// package's "Servers that predate the presence fields" section).
+// WithPresence).
 //
 // local_addrs (WP AGENT-ADDR-1) is attached with Payload.WithLocalAddrs:
 // the LAN addresses this PC uses toward the vault (agent/go/localaddr),
-// filtered to what the server accepts. A server older than it rejects the
-// field the same way and the client drops it the same way.
+// filtered to what the server accepts.
+//
+// A server that predates one of these optional fields (vault-api older than
+// v0.1.0-rc17) rejects the whole report with a 422. The agent does not
+// resend without them (WP AGENT-RC8-COMPAT-1): agent/go/client returns an
+// error telling the operator to update vault-api (see that package's
+// "Servers older than this agent" section and client.MinServerVersion).
 //
 // BuildReport mirrors the server's validation rules LOCALLY, so a
 // misconfigured agent fails fast with a clear message instead of spending a
@@ -78,11 +81,10 @@ func ValidAgentVersion(v string) bool {
 // (easier to diff in logs/tests than an arbitrary order would be).
 //
 // AgentVersion and ReportIntervalSeconds (WP AGENT-FEAT-1) are pointers
-// with omitempty, so a payload without them marshals to exactly the
-// pre-AGENT-FEAT-1 body: that legacy body is what agent/go/client resends
-// to a server that rejects the new fields.
+// with omitempty: a value the server would refuse is left out rather than
+// sent (WithPresence), and a left-out field reads as "unknown" server-side.
 //
-// LocalAddrs (WP AGENT-ADDR-1) is omitted when empty, for the same reason.
+// LocalAddrs (WP AGENT-ADDR-1) is omitted when empty (no usable address).
 type Payload struct {
 	ClientID              string   `json:"client_id"`
 	AppIDs                []int    `json:"appids"`
@@ -92,38 +94,10 @@ type Payload struct {
 }
 
 // OptionalFields are the JSON keys of the optional fields, in the order
-// they were added. agent/go/client drops exactly the ones an old server
-// names as unknown.
+// they were added. agent/go/client names them in its "server too old"
+// error when a vault-api that predates one of them refuses it as unknown
+// (WP AGENT-RC8-COMPAT-1: the agent no longer resends without them).
 var OptionalFields = []string{"agent_version", "report_interval_seconds", "local_addrs"}
-
-// Has reports whether the optional field with JSON key name is set.
-func (p Payload) Has(name string) bool {
-	switch name {
-	case "agent_version":
-		return p.AgentVersion != nil
-	case "report_interval_seconds":
-		return p.ReportIntervalSeconds != nil
-	case "local_addrs":
-		return len(p.LocalAddrs) > 0
-	}
-	return false
-}
-
-// Without returns a copy of p with the named optional fields removed.
-// Unknown names are ignored.
-func (p Payload) Without(names ...string) Payload {
-	for _, name := range names {
-		switch name {
-		case "agent_version":
-			p.AgentVersion = nil
-		case "report_interval_seconds":
-			p.ReportIntervalSeconds = nil
-		case "local_addrs":
-			p.LocalAddrs = nil
-		}
-	}
-	return p
-}
 
 // WithLocalAddrs returns a copy of p carrying addrs as local_addrs (WP
 // AGENT-ADDR-1), keeping only entries the server accepts
@@ -149,19 +123,6 @@ func (p Payload) WithLocalAddrs(addrs []string) Payload {
 		out = out[:localaddr.MaxAddrs]
 	}
 	p.LocalAddrs = out
-	return p
-}
-
-// HasPresence reports whether either optional presence field is set.
-func (p Payload) HasPresence() bool {
-	return p.AgentVersion != nil || p.ReportIntervalSeconds != nil
-}
-
-// WithoutPresence returns a copy of p with both presence fields removed:
-// the body a pre-AGENT-FEAT-1 server accepts.
-func (p Payload) WithoutPresence() Payload {
-	p.AgentVersion = nil
-	p.ReportIntervalSeconds = nil
 	return p
 }
 

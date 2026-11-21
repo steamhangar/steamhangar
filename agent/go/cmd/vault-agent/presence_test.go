@@ -46,8 +46,7 @@ func presenceServer(t *testing.T, legacy bool) (*httptest.Server, *capturedBodie
 		captured.mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
 		if legacy {
-			// Like FastAPI: ONE 422 listing every extra key (the agent
-			// drops exactly the keys it names, WP AGENT-ADDR-1).
+			// Like FastAPI: ONE 422 listing every extra key.
 			var extras []string
 			for k := range body {
 				if k != "client_id" && k != "appids" {
@@ -145,27 +144,27 @@ func TestReportOnce_LoopModeStatesItsDefaultInterval(t *testing.T) {
 	}
 }
 
-// A new agent against a vault-api that predates the fields still reports
-// successfully, and says why the server shows no version for it.
-func TestRun_OneShotAgainstAPreAgentFeat1ServerStillSucceeds(t *testing.T) {
+// A new agent against a vault-api that predates the presence fields (rc8):
+// since WP AGENT-RC8-COMPAT-1 the report is not resent, the run fails with
+// exit 1 and the log tells the operator to update vault-api.
+func TestRun_OneShotAgainstAPreAgentFeat1ServerFailsWithUpdateHint(t *testing.T) {
 	srv, captured := presenceServer(t, true)
 	var stdout, stderr bytes.Buffer
 	code := run(runReportArgs(srv.URL, emptyLibraryRoot(t), "--interval", "10m"), &stdout, &stderr)
-	if code != 0 {
-		t.Fatalf("exit code = %d, want 0 against an old server; stderr=%s", code, stderr.String())
+	if code != 1 {
+		t.Fatalf("exit code = %d, want 1 against an old server; stderr=%s", code, stderr.String())
 	}
-	bodies := captured.all()
-	if len(bodies) != 2 {
-		t.Fatalf("server saw %d request(s), want 2", len(bodies))
+	if n := len(captured.all()); n != 1 {
+		t.Fatalf("server saw %d request(s), want 1 (no resend)", n)
 	}
-	if _, ok := bodies[1]["agent_version"]; ok {
-		t.Errorf("resent body still carries agent_version: %v", bodies[1])
+	for _, want := range []string{"report send failed", "vault-api is older than this agent",
+		"update vault-api to " + client.MinServerVersion + " or newer", "agent_version"} {
+		if !strings.Contains(stderr.String(), want) {
+			t.Errorf("stderr lacks %q: %s", want, stderr.String())
+		}
 	}
-	if !strings.Contains(stderr.String(), "vault-api older than AGENT-FEAT-1") {
-		t.Errorf("stderr does not tell the operator the server is too old: %s", stderr.String())
-	}
-	if !strings.Contains(stdout.String(), "reported 0 installed app(s)") {
-		t.Errorf("stdout = %q, want the normal result line", stdout.String())
+	if strings.Contains(stdout.String(), "reported ") {
+		t.Errorf("stdout = %q, want no result line for a rejected report", stdout.String())
 	}
 }
 
@@ -212,9 +211,10 @@ func TestRun_OneShotSendsTheDetectedLocalAddrs(t *testing.T) {
 	}
 }
 
-// An rc16 server forbids local_addrs: the report still lands, with the
-// presence fields, and the log says why the address is missing.
-func TestRun_OneShotAgainstAPreAddrServerStillSucceeds(t *testing.T) {
+// An rc16 server forbids local_addrs: since WP AGENT-RC8-COMPAT-1 the
+// report is not resent without it; exit 1 and the log names the field and
+// the minimum vault-api version.
+func TestRun_OneShotAgainstAPreAddrServerFailsWithUpdateHint(t *testing.T) {
 	old := detectLocalAddrs
 	detectLocalAddrs = func(context.Context, string, localaddr.Resolver, localaddr.Dialer) ([]string, []string) {
 		return []string{"10.0.0.42"}, nil
@@ -240,17 +240,16 @@ func TestRun_OneShotAgainstAPreAddrServerStillSucceeds(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	var stdout, stderr bytes.Buffer
-	if code := run(runReportArgs(srv.URL, emptyLibraryRoot(t), "--interval", "10m"), &stdout, &stderr); code != 0 {
-		t.Fatalf("exit code = %d, stderr=%s", code, stderr.String())
+	if code := run(runReportArgs(srv.URL, emptyLibraryRoot(t), "--interval", "10m"), &stdout, &stderr); code != 1 {
+		t.Fatalf("exit code = %d, want 1; stderr=%s", code, stderr.String())
 	}
-	bodies := captured.all()
-	if len(bodies) != 2 {
-		t.Fatalf("server saw %d request(s), want 2", len(bodies))
+	if n := len(captured.all()); n != 1 {
+		t.Fatalf("server saw %d request(s), want 1 (no resend)", n)
 	}
-	if bodies[1]["agent_version"] != version {
-		t.Errorf("resend dropped agent_version: %v", bodies[1])
-	}
-	if !strings.Contains(stderr.String(), "older than AGENT-ADDR-1") {
-		t.Errorf("log does not explain the dropped field: %s", stderr.String())
+	for _, want := range []string{"refuses the report field(s) local_addrs",
+		"update vault-api to " + client.MinServerVersion + " or newer"} {
+		if !strings.Contains(stderr.String(), want) {
+			t.Errorf("log lacks %q: %s", want, stderr.String())
+		}
 	}
 }

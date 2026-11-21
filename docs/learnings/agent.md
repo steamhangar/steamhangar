@@ -147,6 +147,17 @@ at the end, under a dated heading, one entry each with the WP that proved it.
   interval only when its scheduler was told one, so old 30-minute tasks
   running a new binary are not judged on a 10-minute window (WP
   AGENT-FEAT-1).
+  **Superseded 2026-11-21 (WP AGENT-RC8-COMPAT-1, audit U-9, rc23):** the
+  resend (generalised to `local_addrs` for rc9..rc16 servers by WP
+  AGENT-ADDR-1, plus a resend on any 422 under `body.local_addrs`) was
+  removed before v0.1.0 final. The agent now requires vault-api
+  v0.1.0-rc17 or newer (`client.MinServerVersion`, the first release that
+  accepts `local_addrs`) and never resends a rejected report; a 422 that
+  names an optional field as `extra_forbidden` becomes an error telling
+  the operator to update vault-api. The lesson itself still holds: an
+  optional request field is breaking against an `extra="forbid"` server,
+  so a new field needs either a fallback or a stated minimum server
+  version with a clear error.
 
 ## 2026-10-09/10 — rc13 night run (CORE-FIX-4d, WEB-FEAT-6, DEPS-1, HYG-1, WEB-FIX-10, AGENT-FIX-3)
 - `powershell.exe -WindowStyle Hidden` in a Scheduled Task with an Interactive

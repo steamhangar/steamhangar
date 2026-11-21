@@ -35,39 +35,21 @@
 // 6*15s + 15.5s ≈ 105.5s. cmd/vault-agent budgets 2 minutes per report
 // specifically to comfortably clear this.
 //
-// Servers that predate the presence fields (WP AGENT-FEAT-1):
-// every vault-api up to and including v0.1.0-rc8 validates the report body
-// with extra="forbid", so the optional agent_version /
-// report_interval_seconds fields make it reject the WHOLE report with a
-// 422 (measured against the rc8 tree: {"detail":[{"type":
-// "extra_forbidden","loc":["body","agent_version"],...}]}). A fleet
-// upgrades agents and server in no fixed order, so ReportInstalled sends
-// the new fields first and, when the 422 consists of NOTHING BUT
-// extra_forbidden errors for those optional fields, resends the same
-// report once without them (Result.PresenceDropped tells the caller). Any
-// other 422 - including one that ALSO names a real problem such as a bad
-// client_id - is returned unchanged, so the fallback can never hide a
-// genuine rejection. The cost on an old server is one extra request per
-// report, nothing is remembered between reports, and the first report
-// after the server upgrade carries the fields again. Rejected
-// alternatives: asking the server first (an extra round trip on every
-// report, and rc8 has nothing to ask), and HTTP headers (old servers
-// ignore them, but the report contract would live in two places).
-//
-// WP AGENT-ADDR-1 adds a third optional field, local_addrs, that every
-// server up to rc16 forbids the same way. The rule is generalised rather
-// than duplicated: the resend drops EXACTLY the optional fields the 422
-// names (report.OptionalFields), and only when every error in it is
-// extra_forbidden on an optional field this payload actually carries. An
-// rc9..rc16 server therefore keeps receiving agent_version and
-// report_interval_seconds (it names only local_addrs); an rc8 server names
-// all three and gets the legacy body. Still at most one resend.
-//
-// One more resend case, local_addrs only: a 422 whose every error sits
-// under body.local_addrs (any error type, e.g. a server with stricter
-// address rules than this agent) is answered by resending once without
-// local_addrs. The address is a correlation aid; the report itself must
-// not be lost over it.
+// Servers older than this agent (WP AGENT-RC8-COMPAT-1, rc23): every
+// vault-api validates the report body with extra="forbid", so a server
+// that predates an optional field this agent sends rejects the WHOLE
+// report with a 422 naming that field as extra_forbidden (rc1..rc8 know
+// neither agent_version nor report_interval_seconds, WP AGENT-FEAT-1;
+// rc9..rc16 do not know local_addrs, WP AGENT-ADDR-1, first shipped in
+// v0.1.0-rc17). Until rc22 the agent answered such a 422 by resending the
+// report once without the named fields. That fallback was removed before
+// v0.1.0 final (audit U-9): this agent requires vault-api MinServerVersion
+// or newer and never resends a rejected report. A 422 that names one of
+// report.OptionalFields as extra_forbidden is instead returned as an
+// APIError whose message says the server is too old and must be updated,
+// so the operator sees the cause in the log line instead of a bare
+// validation dump. Every other 422 (a bad client_id, a server that
+// refuses an address value) is returned unchanged.
 //
 // TLS uses Go's default system root CA pool (no custom TLSClientConfig is
 // set). Proxying respects the standard http_proxy/https_proxy/no_proxy
@@ -80,7 +62,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"math/rand"
@@ -105,6 +86,11 @@ const (
 	// memory. vault-api's response is a few small JSON fields; anything
 	// wildly larger than this is not a response this client needs to trust.
 	maxResponseBytes = 1 << 20 // 1 MiB
+
+	// MinServerVersion is the oldest vault-api that accepts every field
+	// this agent may send: local_addrs (WP AGENT-ADDR-1) first shipped in
+	// v0.1.0-rc17. Named in the "server too old" error (package doc).
+	MinServerVersion = "v0.1.0-rc17"
 )
 
 // Result is the parsed outcome of a successful report (mirrors
@@ -115,14 +101,6 @@ type Result struct {
 	Added       []int
 	Removed     []int
 	FirstReport bool
-	// PresenceDropped is true when the server rejected the optional
-	// presence fields as unknown and the report was resent without them
-	// (see the package doc: the server predates WP AGENT-FEAT-1).
-	PresenceDropped bool
-	// LocalAddrsDropped is true when the server rejected local_addrs as
-	// unknown and the report was resent without it (the server predates
-	// WP AGENT-ADDR-1).
-	LocalAddrsDropped bool
 }
 
 // APIError is returned for a non-2xx HTTP response. StatusCode is always
@@ -142,17 +120,21 @@ type APIError struct {
 	// report and fix --server-url to point there directly.
 	Location string
 
-	// unknownOptional lists the optional fields a 422 names as unknown,
-	// set only when it names nothing else (see unknownOptionalFields): the
-	// one rejection ReportInstalled answers by resending without them.
-	unknownOptional []string
-	// localAddrsRejected is set on a 422 whose every error is located
-	// under body.local_addrs (any error type): a server whose rules for the
-	// field differ from this agent's. ReportInstalled resends without it.
-	localAddrsRejected bool
+	// UnknownFields lists the optional report fields a 422 names as
+	// extra_forbidden (see unknownOptionalFields): the server is older than
+	// this agent. Error() then says so and names MinServerVersion. Empty
+	// for every other response.
+	UnknownFields []string
 }
 
 func (e *APIError) Error() string {
+	if len(e.UnknownFields) > 0 {
+		return fmt.Sprintf(
+			"server returned HTTP %d: vault-api is older than this agent and refuses the report field(s) %s "+
+				"as unknown - update vault-api to %s or newer (vault-agent does not resend reports without them): %s",
+			e.StatusCode, strings.Join(e.UnknownFields, ", "), MinServerVersion, e.Body,
+		)
+	}
 	if e.Location != "" {
 		return fmt.Sprintf(
 			"server returned HTTP %d redirected to %s; vault-agent never follows redirects "+
@@ -300,49 +282,9 @@ func New(baseURL, apiKey string, opts ...Option) *Client {
 //
 // ctx governs the ENTIRE call including all retries and backoff sleeps —
 // canceling it (e.g. on SIGTERM in --loop mode) aborts promptly rather than
-// finishing out the retry budget.
+// finishing out the retry budget. A rejected report is never resent with a
+// different body (package doc: servers older than this agent).
 func (c *Client) ReportInstalled(ctx context.Context, payload report.Payload) (Result, error) {
-	result, err := c.send(ctx, payload)
-	var apiErr *APIError
-	if err != nil && payload.Has("local_addrs") && errors.As(err, &apiErr) && apiErr.localAddrsRejected {
-		// A server that refuses our addresses (stricter or different rules
-		// than localaddr.Usable): the report matters more than the
-		// address, so resend once without it.
-		result, err = c.send(ctx, payload.Without("local_addrs"))
-		if err == nil {
-			result.LocalAddrsDropped = true
-		}
-		return result, err
-	}
-	if err != nil && errors.As(err, &apiErr) && len(apiErr.unknownOptional) > 0 {
-		names := apiErr.unknownOptional
-		for _, name := range names {
-			if !payload.Has(name) {
-				// The server named a field this payload does not carry:
-				// not the old-server shape, return the rejection as is.
-				return result, err
-			}
-		}
-		// The server predates these optional fields (package doc): resend
-		// the same report without exactly them, once.
-		result, err = c.send(ctx, payload.Without(names...))
-		if err == nil {
-			for _, name := range names {
-				switch name {
-				case "agent_version", "report_interval_seconds":
-					result.PresenceDropped = true
-				case "local_addrs":
-					result.LocalAddrsDropped = true
-				}
-			}
-		}
-	}
-	return result, err
-}
-
-// send marshals payload and posts it with the retry policy from the
-// package doc.
-func (c *Client) send(ctx context.Context, payload report.Payload) (Result, error) {
 	body, err := json.Marshal(payload)
 	if err != nil {
 		// Payload is our own struct with only string/int fields - this
@@ -447,12 +389,12 @@ func (c *Client) attempt(ctx context.Context, url string, body []byte) (Result, 
 		return Result{}, true, &APIError{StatusCode: resp.StatusCode, Body: excerpt(respBody)}
 	case resp.StatusCode >= 400:
 		// Every other 4xx: never retryable (401/422 will not heal by
-		// resending the SAME body; ReportInstalled may resend a different
-		// one, see unknownOptional).
+		// resending the SAME body). A 422 naming an optional field as
+		// unknown means the server is older than this agent: the error
+		// says so (UnknownFields, package doc), nothing is resent.
 		apiErr := &APIError{StatusCode: resp.StatusCode, Body: excerpt(respBody)}
 		if resp.StatusCode == http.StatusUnprocessableEntity {
-			apiErr.unknownOptional = unknownOptionalFields(respBody)
-			apiErr.localAddrsRejected = onlyLocalAddrsErrors(respBody)
+			apiErr.UnknownFields = unknownOptionalFields(respBody)
 		}
 		return Result{}, false, apiErr
 	case resp.StatusCode >= 300:
@@ -498,8 +440,7 @@ func (c *Client) attempt(ctx context.Context, url string, body []byte) (Result, 
 }
 
 // optionalFieldNames are report.Payload's optional JSON keys
-// (report.OptionalFields), the only fields a 422 may name for the legacy
-// resend.
+// (report.OptionalFields): the fields an older server names as unknown.
 var optionalFieldNames = func() map[string]bool {
 	m := map[string]bool{}
 	for _, name := range report.OptionalFields {
@@ -508,12 +449,14 @@ var optionalFieldNames = func() map[string]bool {
 	return m
 }()
 
-// unknownOptionalFields returns the optional fields a 422 body names when
-// it is FastAPI's validation error listing nothing but "extra_forbidden"
-// at ["body", <optional field>]: what a vault-api older than one of those
-// fields answers to a report carrying it. Anything else (another error
-// type, another location, an empty or non-list detail, a non-JSON body)
-// gives nil. Each name appears once.
+// unknownOptionalFields returns the optional fields a 422 body names as
+// "extra_forbidden" at exactly ["body", <optional field>]: what a vault-api
+// older than one of those fields answers to a report carrying it (FastAPI
+// validation error, extra="forbid"). Other entries in the same detail list
+// (a bad client_id, an error inside a known field) do not hide the hint;
+// they stay visible in the APIError's Body. A body without such an entry
+// (another error type or location, an empty or non-list detail, non-JSON)
+// gives nil. Each name appears once, in the order the body names them.
 func unknownOptionalFields(body []byte) []string {
 	var parsed struct {
 		Detail []struct {
@@ -521,45 +464,23 @@ func unknownOptionalFields(body []byte) []string {
 			Loc  []any  `json:"loc"`
 		} `json:"detail"`
 	}
-	if err := json.Unmarshal(body, &parsed); err != nil || len(parsed.Detail) == 0 {
+	if err := json.Unmarshal(body, &parsed); err != nil {
 		return nil
 	}
 	seen := map[string]bool{}
 	var names []string
 	for _, d := range parsed.Detail {
 		if d.Type != "extra_forbidden" || len(d.Loc) != 2 || d.Loc[0] != "body" {
-			return nil
+			continue
 		}
 		name, ok := d.Loc[1].(string)
-		if !ok || !optionalFieldNames[name] {
-			return nil
+		if !ok || !optionalFieldNames[name] || seen[name] {
+			continue
 		}
-		if !seen[name] {
-			seen[name] = true
-			names = append(names, name)
-		}
+		seen[name] = true
+		names = append(names, name)
 	}
 	return names
-}
-
-// onlyLocalAddrsErrors reports whether a 422 body is FastAPI's validation
-// error with at least one entry and every entry located at
-// ["body", "local_addrs", ...], whatever the error type.
-func onlyLocalAddrsErrors(body []byte) bool {
-	var parsed struct {
-		Detail []struct {
-			Loc []any `json:"loc"`
-		} `json:"detail"`
-	}
-	if err := json.Unmarshal(body, &parsed); err != nil || len(parsed.Detail) == 0 {
-		return false
-	}
-	for _, d := range parsed.Detail {
-		if len(d.Loc) < 2 || d.Loc[0] != "body" || d.Loc[1] != "local_addrs" {
-			return false
-		}
-	}
-	return true
 }
 
 // redirectTarget returns resp's Location header resolved against the

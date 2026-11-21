@@ -188,9 +188,10 @@ def test_go_presence_field_names_match_the_request_model() -> None:
 
     report_go = (GO / "report" / "report.go").read_text(encoding="utf-8")
     client_go = (GO / "client" / "client.go").read_text(encoding="utf-8")
-    # WP AGENT-ADDR-1: the legacy-resend allowlist moved into
+    # WP AGENT-ADDR-1: the optional-field list lives in
     # report.OptionalFields (client.go builds its set from it) and gained
-    # local_addrs.
+    # local_addrs. Since WP AGENT-RC8-COMPAT-1 it no longer drives a
+    # resend, only the "server too old, update vault-api" error.
     optional = re.search(r"var OptionalFields = \[\]string\{([^}]*)\}", report_go)
     assert optional, "report.OptionalFields not found in report.go"
     assert "range report.OptionalFields" in client_go

@@ -3387,9 +3387,11 @@ lists are appended: `peer_addrs` (raw TCP peers, hops included) and
 
 **Compatibility.** Old agents keep working (the field is optional). A new
 agent against a server older than this package gets a `422` naming
-`local_addrs` as `extra_forbidden` and resends once without exactly the
-fields named (`agent/go/client`), so an rc9..rc16 server still receives
-`agent_version` / `report_interval_seconds`.
+`local_addrs` as `extra_forbidden`. Since WP AGENT-RC8-COMPAT-1 (rc23) the
+agent no longer resends without it: the report fails and the agent logs
+"update vault-api to v0.1.0-rc17 or newer" (`agent/go/client`,
+`agent/README.md` "Server version required"). Update vault-api before the
+agents.
 
 ### Deleting a client (`DELETE /v1/clients/{client_id}`, WP AG-1)
 
