@@ -2264,6 +2264,23 @@ APP-DL-CARD-1, APP-EXPERT-SWITCH-1, CAP-503-FIX-1b (pause reason in the
 Downloads UI, web + app); one goldens round, RC23-RELEASE-NOTES-2, tag. The rc23 release notes get a section for them before the tag.
 ANDROID-TWIN-DETAIL-1 and CORE-LIVE-PARITY-1 stay rc24 candidates.
 
+**Status 2026-11-21 night (rc23 wave 1 on `main` c7315ef, CI green):**
+CAP-503-FIX-1a, PROXY-VERSION-1 (+ -NITS-1), OUTPUT-TRIM-TAP-1, -2,
+-NITS-1 merged after reviews PASS, gates test-api/-go/-web/-core and
+verify (lean 207/0, proxy sections 273/0) green. Still open for the rc23
+tag: wave 2 APP-DL-STATS-1 (twin check first), APP-DL-CARD-1 (after it),
+APP-EXPERT-SWITCH-1, CAP-503-FIX-1b (scope above); one goldens round;
+RC23-RELEASE-NOTES-2 (sections for the six packages); then tag and the
+rollout Antrag (flag the read_only services; new: schema v34). Antrag
+A-20261121-02 (output-trim 0.2.0 into the managed mods) is filed; after
+it: OUTPUT-TRIM-LIVE-1.
+**MUTATION-PATH-1 (open, operator decision 2026-11-21: Weg C, clarify
+auto mode):** auto mode refuses mutation runs that edit a scratch worktree
+and run `dev.sh test-api` (coder and reviewer, "Undermining Oversight");
+inbox note 2026-11-21-automode-mutationen. Until decided, reviewers judge
+guards by reading and coders close the named gaps with tests; mutations
+in the mod test kit and node tests on /tmp copies still run.
+
 ### Wave 0
 
 - **CI-CLOCK-1** (audit T-1; api; high / S; own branch `wp/ci-clock-1`,
