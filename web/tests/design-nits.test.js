@@ -126,8 +126,9 @@ test("D-9: no padding/margin/gap px literal equals a --sp-* token (use the token
  * included), measured comment-stripped on 2026-11-21 (DESIGN-NITS-1; 233
  * in kit.css and 263 in app.css before, the audit counted kit 233, app 274). THESE NUMBERS ONLY GO DOWN: a package that touches a rule
  * moves its spacing onto --sp-* and lowers the pin; never raise it.
+ * APP-DL-CARD-1: kit.css 157 -> 154 (the job card padding and gaps).
  */
-const SPACING_LITERAL_PIN = { "kit.css": 157, "app.css": 186 };
+const SPACING_LITERAL_PIN = { "kit.css": 154, "app.css": 186 };
 test("D-9: the remaining px spacing literals only go down (pinned counts)", () => {
   for (const [name, pin] of Object.entries(SPACING_LITERAL_PIN)) {
     const count = spacingLiterals(sheets[name]).length;

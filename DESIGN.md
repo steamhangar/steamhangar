@@ -87,7 +87,9 @@ only.
 Graph series and live values reuse existing tokens; there is no separate
 data palette. "Served from cache" is `--ok`, "From the internet" the accent,
 a live speed the accent, an idle or unattributed row `--dim` with a dashed
-border.
+border. Secondary figures that are not the live ring (averages, peaks,
+totals in the Throughput caption and mini line, a job card's speed line)
+are bold `--text` in a `--dim` line, not the accent (APP-DL-CARD-1).
 
 ### Status
 

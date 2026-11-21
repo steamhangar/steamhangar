@@ -551,19 +551,28 @@
 .kit .sechd .hacts{ display:flex; align-items:center; justify-content:flex-end; gap:var(--sp-2); flex-wrap:wrap; min-width:0; }
 .kit .dl-updates-acts{ display:flex; gap:var(--sp-2); }
 
-/* active job card; the progress bar exists only with real progress data */
+/* active job card; the progress bar exists only with real progress data.
+   WP APP-DL-CARD-1 (design pass, Android twin JobCard): title (name in
+   --fs-4, the card-title role, over the mono meta) beside the status pill,
+   then the figures (speed line, figures in bold like the Throughput card's
+   caption), the notes, the actions; one --sp-3 rhythm between them and
+   the card padding on the scale (16 px sides, the Android column inset).
+   Secondary figures that are not the live ring (averages, peaks, totals,
+   the job's speed line) are bold --text in a --dim line, not the accent,
+   like `.hcap b` (accent = the live ring). */
 .kit .job{
   background:var(--raised); border:1px solid color-mix(in srgb, var(--run) 40%, var(--line));
-  border-radius:var(--r-m); padding:var(--sp-3) 14px; display:grid; gap:10px; min-width:0;
+  border-radius:var(--r-m); padding:var(--sp-3) var(--sp-4); display:grid; gap:var(--sp-3); min-width:0;
 }
 .kit .job.held{ border-color:var(--line-soft); }
-.kit .job .t{ display:flex; justify-content:space-between; gap:10px; align-items:center; }
+.kit .job .t{ display:flex; justify-content:space-between; gap:var(--sp-3); align-items:center; }
 .kit .job .t > div{ min-width:0; }
-.kit .job .nm{ font-weight:500; overflow-wrap:anywhere; }
+.kit .job .nm{ font-size:var(--fs-4); font-weight:500; overflow-wrap:anywhere; }
 .kit .job .meta{ font:var(--fs-1) var(--mono); color:var(--dim); }
 .kit .bar{ height:6px; border-radius:999px; background:var(--raised-2); overflow:hidden; }
 .kit .bar i{ display:block; height:100%; background:var(--accent); }
 .kit .job .m2{ margin:0; font:var(--fs-2) var(--mono); color:var(--dim); overflow-wrap:anywhere; }
+.kit .job .m2 b{ color:var(--text); font-weight:500; }
 .kit .job .holdnote, .kit .job .stopnote{ border-left:2px solid var(--line); padding-left:var(--sp-2); }
 .kit .job .acts{ display:flex; gap:var(--sp-2); flex-wrap:wrap; }
 

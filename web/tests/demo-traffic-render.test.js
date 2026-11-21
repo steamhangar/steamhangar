@@ -72,4 +72,8 @@ test("demo: the Downloads hero shows the speed, four tiles, the graph and the ru
     return line && !line.hidden;
   }, "the demo job's speed");
   assert.match(s.querySelector('[data-role="job-speed"]').textContent, /MB\/s · .* loaded so far$/);
+  // WP APP-DL-CARD-1: the view writes the line through fillJobSpeed, figures in bold.
+  const figures = s.querySelector('[data-role="job-speed"]').querySelectorAll("b").map((b) => b.textContent);
+  assert.match(figures[0] || "", /^[\d.]+ MB\/s$/, figures.join("|"));
+  assert.match(figures[1] || "", /^[\d.]+ (MB|GB)$/, figures.join("|"));
 });

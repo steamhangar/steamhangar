@@ -7,6 +7,8 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.BottomSheetDefaults
+import androidx.compose.material3.ButtonColors
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CardColors
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -174,6 +176,28 @@ fun vaultJobCardColors(): CardColors =
  */
 fun vaultJobCardBorder(held: Boolean): BorderStroke =
     BorderStroke(1.dp, if (held) VaultColors.LineSoft else srgbMix(VaultColors.Line, VaultColors.StatusRun, 0.40f))
+
+/**
+ * WP APP-DL-CARD-1: a danger action on an outlined button, web `.kit
+ * .btn.danger` (the job card's Cancel, `ghost danger`): transparent, label
+ * in --danger, edge `color-mix(in srgb, var(--danger) 45%, var(--line))`.
+ * Disabled follows the web `.btn:disabled{ opacity:.45 }` on label and edge.
+ */
+@Composable
+fun vaultDangerButtonColors(): ButtonColors =
+    ButtonDefaults.outlinedButtonColors(
+        contentColor = VaultColors.StatusDanger,
+        disabledContentColor = VaultColors.StatusDanger.copy(alpha = VAULT_DISABLED_ALPHA),
+    )
+
+/** The edge of [vaultDangerButtonColors]' button (web `.kit .btn.danger` border-color). */
+fun vaultDangerButtonBorder(enabled: Boolean): BorderStroke {
+    val edge = srgbMix(VaultColors.Line, VaultColors.StatusDanger, 0.45f)
+    return BorderStroke(1.dp, if (enabled) edge else edge.copy(alpha = VAULT_DISABLED_ALPHA))
+}
+
+/** Web `.btn:disabled{ opacity:.45 }`. */
+const val VAULT_DISABLED_ALPHA = 0.45f
 
 /**
  * A panel card on --surface: the Clients sheet row (web `.jobcard`,

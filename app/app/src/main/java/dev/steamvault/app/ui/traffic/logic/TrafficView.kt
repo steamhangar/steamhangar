@@ -666,6 +666,35 @@ fun jobSpeedText(
     return (if (sofar != null) "$speed · $sofar loaded so far" else speed) + tail
 }
 
+/**
+ * WP APP-DL-CARD-1 (web `JOB_FIGURE_PATTERN`): a figure in a job's speed
+ * line -- a speed or byte total from [formatSpeed] / [formatTrafficBytes]
+ * ("31.5 MB/s", "< 1 KB/s", "8.8 GB", "~51.6 GB") or a duration from
+ * [formatEta] ("5 min", "2 h"). The web writes it without backslashes so
+ * this string is pinned byte for byte (`JobCardDesignTwinTest`).
+ */
+const val JOB_FIGURE_PATTERN = "(?:< |~)?[0-9]+(?:[.][0-9]+)? (?:(?:KB|MB|GB)(?:/s)?|min|h)(?![A-Za-z])"
+
+private val JOB_FIGURE_REGEX = Regex(JOB_FIGURE_PATTERN)
+
+/**
+ * WP APP-DL-CARD-1 (web `jobFigureParts`): a job's speed line as parts with
+ * its figures bold, the anatomy of the Throughput card's caption and mini
+ * line. A line without a figure is one plain part, an empty text no part.
+ */
+fun jobFigureParts(text: String?): List<HeroPart> {
+    if (text.isNullOrEmpty()) return emptyList()
+    val parts = ArrayList<HeroPart>()
+    var last = 0
+    for (m in JOB_FIGURE_REGEX.findAll(text)) {
+        if (m.range.first > last) parts.add(HeroPart(text.substring(last, m.range.first)))
+        parts.add(HeroPart(m.value, bold = true))
+        last = m.range.last + 1
+    }
+    if (last < text.length) parts.add(HeroPart(text.substring(last)))
+    return parts
+}
+
 // ---------------------------------------------------------------------
 // Live view (GET /v1/throughput/live, WP GRAPH-LIVE)
 // ---------------------------------------------------------------------
