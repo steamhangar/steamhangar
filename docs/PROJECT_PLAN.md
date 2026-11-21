@@ -476,14 +476,13 @@ their open boxes (items 2, 7 and 11) are in section 12. Item 13 stays here.
       (red CI, own branch); wave 1 GO-LINE-1, LINE-CONTRAST-1,
       GLYPH-CONTRAST-1, PERSONA-LOAD-1, ROLLOUT-DOC-1, BACKOFF-DEAD-1,
       README-KEYS-1; wave 2 PILL-TONE-1, FONT-FLOOR-1, ACTIVE-STATUS-1;
-      wave 3 bundled decisions NGINX-DUP-1, FREEZE-EXIT-1, the design
-      decisions (UPDATE-TONE-1, UPDATE-WORD-1, NEUTRAL-RAMP-1,
-      DESKTOP-FONT-1, ACCENT-ROLES-1), DESIGN-MEASURE-1, CROSS-SITE-FILL-1
-      and four smaller ones (INCOMPLETE-ENDPOINT-1, VERIFY-ALL-LABEL-1,
-      OLD-SERVER-FALLBACK-1, AGENT-RC8-COMPAT-1) (open decisions in the
-      roadmap); the audit's low findings and
-      U-items are the rc23 nits, listed in the roadmap section "Audit
-      2026-11-20: findings"
+      wave 3 (decided 2026-11-21) NGINX-DUP-1 Weg B, NEUTRAL-RAMP-1 Weg B,
+      OLD-SERVER-FALLBACK-1, AGENT-RC8-COMPAT-1, VERIFY-ALL-LABEL-1,
+      TM-CROSS-SITE-1, DESIGN-MD-1; nit packages SEC-HARDEN-1,
+      DESIGN-NITS-1, NITS-AUDIT-WEB-1, NITS-AUDIT-APP-1, NITS-AUDIT-API-1,
+      NITS-AUDIT-OPS-1 (operator 2026-11-21: fix every finding, nits
+      included; audit exception to the api/core freeze, ADR-0016); all in
+      the roadmap section "Audit 2026-11-20: findings"
     - v0.2.0 rename: D18 incl. logo, LAUNCHER-PREP-1
     - v0.3.0 privacy: D22 then LIBRARY-META-1d
     - v0.4.0 agents and devices: Weg B for agents with the installer (D6

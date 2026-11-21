@@ -484,116 +484,9 @@ once decided (the decision then lives in the item it belongs to).
   a heartbeat probe from outside took up to 7.6 s during a cold download.
   With AIO it stayed at or below 0.3 s. Once AIO is live, a retry is
   probably not needed; decide after AIO-DEFAULT-1.
-- **Audit 2026-11-20 decisions** (wave 3 of the audit order, operator
-  2026-11-21; findings in "Audit 2026-11-20: findings" at the end):
-  - **NGINX-DUP-1** (audit C-1, medium, cost not risk): the nginx config
-    exists twice, native `core/nginx/nginx.conf` (937 lines) and
-    `core/docker/nginx.conf.template` (1015), held in step by
-    `core/docker/check-config-drift.sh` (733 lines, in CI); 12 double
-    changes since 2026-10-01. The native file is the declared, CDN-tested
-    "source of truth" (`check-config-drift.sh:3-16`,
-    `core/Dockerfile:51-56`, `deploy/tests/verify-stack.sh:412-415`), but
-    only the manual Windows rigs run it (`core/tests/test-core.ps1:123-124`,
-    `core/tests/mvp/run-mvp.ps1:114-121`,
-    `dns/tests/test-dnsmasq-config.ps1:137`, all need `poc/`), untouched
-    since 2026-10-01. Weg A: keep the contract and document it
-    (`poc/README.md` and `core/README.md` "Running it natively": the rigs
-    need `poc/`; S). Weg B: retire the native file, the drift checker and
-    the rigs, the image template becomes the only source (L, core freeze
-    exception, depends on FREEZE-EXIT-1). No recommendation; the docs
-    part of Weg A helps either way.
-  - **FREEZE-EXIT-1** (audit C-28): ADR-0016 still names `v0.1.0-rc1` as
-    the freeze exit (`docs/adr/0016-api-core-code-freeze.md:28`) while
-    its addenda run to 2026-11-01 and the plan says "until `v0.1.0`"
-    (`docs/PROJECT_PLAN.md` §11, "Parallel work on the post-v0.1.0
-    items"); 28 tags exist. An addendum must name the real exit. Weg A
-    (audit suggestion): the `v0.1.0` final tag, as the plan says; Weg B:
-    end it now (api/core changes then follow the normal package review).
-    The answer decides how many api/core nits (S-3, S-4, S-6,
-    C-8..C-13, NGINX-DUP-1 Weg B) can land before `v0.1.0`.
-  - **UPDATE-TONE-1** (audit design "Offen" 2, D-1): colour of "Update
-    ready". Weg A (recommended): disc and text orange like the library
-    card, status stays status; Weg B: both in the accent (call to
-    action), then on the card too. Weg A changes `pill.js`,
-    `status-vocabulary.json` and the Android twin. Blocks the stale part
-    of PILL-TONE-1.
-  - **UPDATE-WORD-1** (audit design "Offen" 3, D-1): "Update ready" (pill,
-    vocabulary) or "Update available" (card, UPD-6); both are pinned on
-    web and Android. No recommendation.
-  - **NEUTRAL-RAMP-1** (audit design "Offen" 4, D-7): the neutral ramp is
-    blue (hue 230-249, accent 188; mid tones chroma 0.031-0.035) while
-    the NOTES say "biased slightly toward cyan". Weg A (recommended): keep
-    it and document it as deliberate (fix the NOTES sentence; small diff,
-    no Android work); Weg B: turn it toward hue ~218 (values in the
-    audit; web + Android + goldens on both sides, recompute every
-    contrast pair).
-  - **DESKTOP-FONT-1** (audit design "Offen" 5, D-14): `--ui` starts with
-    Roboto (`web/css/theme.css:44`), which only Android has for sure; the
-    desktop renders Segoe UI or the system font. Weg A (recommended):
-    keep the stack and write the desktop choice down; Weg B: self-host
-    one font (`/css/fonts`, CSP `font-src 'self'`, licence, goldens
-    fontconfig).
-  - **ACCENT-ROLES-1** (audit D-2, low; a spec question, not a fix): the
-    accent also colours device icons, live speeds, the "Loading now" boxes
-    and the "From the internet" graph series (`web/css/kit.css:194`,
-    `:209`, `:215`, `:447`, `:453`, `:465-473`), exactly as the rc20 kit
-    specifies (`docs/design/rc20/kit.html:124`, `:133`, `:136`, `:169`,
-    `:173`, `:179-185`), while the older NOTES limit it to actions, nav,
-    focus and progress. Weg A: keep the kit and correct the NOTES rule;
-    Weg B: accent only for action, focus and selection, data in status
-    or neutral colours (kit change first). The design analysis proposes
-    Weg B; no recommendation after the cross-check.
-  - **DESIGN-MEASURE-1** (audit design "Offen" 1, Playwright): the design
-    skill's browser measurement needs Playwright, which is not installed,
-    so DOM contrast with overlays, targets below 24 px, the real fonts,
-    hover/focus/press/empty/loading/error states and the onboarding key
-    input were not measured (all contrast values are computed from CSS).
-    Weg A (audit proposal): install `playwright-core` outside the repo
-    (no `package.json` in the repo), reuse the existing Chromium build,
-    then rerun `/design:check` with measurement; needs the operator's ok
-    and possibly a devbox Antrag. Weg B: stay with code-only values.
-  - **CROSS-SITE-FILL-1** (audit S-1, medium -> low after the
-    cross-check): a foreign plain-HTTP page or HTML mail can make a LAN
-    browser fill the cache with `<img
-    src="http://lancache.steamcontent.com/depot/...">`, and `?nocache=1`
-    forces a refetch (`core/docker/nginx.conf.template:229-233` host map,
-    `:573-629` `location /depot/` checks only hop headers, method and
-    slash, `:279-282` nocache); the threat model mentions neither. Same
-    damage class as the accepted LAN DoS (TM §9); HTTPS pages upgrade to
-    the 443 passthrough (not stored). The first suggested `Sec-Fetch-*`
-    check does not work (browsers do not send it to `http://` targets).
-    Weg A: document only (TM §1: cross-site path and `nocache`); Weg B:
-    Weg A plus a `Referer`/`Origin` reject in `location /depot/`; Weg C:
-    Weg A plus a User-Agent allowlist. B and C only after measuring the
-    real Steam client and SteamPrefill headers, and with a core freeze
-    exception. Recommendation (audit): at least Weg A.
-  - **INCOMPLETE-ENDPOINT-1** (audit C-7, low): keep or remove `POST
-    /v1/prefill/incomplete` (`api/vault_api/routers/jobs.py:459-498`), a
-    documented operator endpoint (`api/README.md:657`) that web and app
-    avoid on purpose. Weg A (cross-check: same class as U-4, no finding):
-    keep; Weg B: remove (public API, api freeze). The dead demo handler
-    goes either way.
-  - **VERIFY-ALL-LABEL-1** (audit C-16, low): the button reads "Verify
-    all" on the web (`web/js/views/downloads.js:994`,
-    `components/job-row.js:27-32`) and "Complete all" on Android
-    (`IncompleteGames.kt:44`, `DownloadsIncomplete.kt:97`). Weg A: "Verify
-    all" on both; Weg B: "Complete all" on both; Weg C: keep the
-    difference and note it as deliberate. Then move the pin
-    `CacheCompletenessWebTwinTest.kt:35` to `job-row.js`. No
-    recommendation.
-  - **OLD-SERVER-FALLBACK-1** (audit U-1): the web has 57 "older server"
-    fallback branches although ADR-0022:155-156 says web and API always
-    match (the web ships in the vault-api image), while
-    `docs/learnings/web.md:192-194` asks for them; many are Android twins,
-    and Android does need them. Weg A: drop the web fallbacks feature by
-    feature, keep Android's; Weg B: keep them for twin symmetry and fix
-    the ADR wording. Decide in `web.md` or an ADR first. No
-    recommendation.
-  - **AGENT-RC8-COMPAT-1** (audit U-9): when does the agent's compatibility
-    with rc8/rc16 servers (resend without `local_addrs`,
-    `agent/go/client/client.go:37-70`, `docs/learnings/agent.md:143-149`)
-    go? Options: at `v0.1.0` final, with v0.4.0 (agents and devices), or
-    never. No recommendation.
+Decided 2026-11-21 (removed from the list above): the thirteen audit
+decisions of 2026-11-20; the answers live in "Audit 2026-11-20: findings",
+"Wave 3 (decided 2026-11-21)".
 
 Decided 2026-10-16 (removed from the list above): VERIFY-SPEED-TEXT-1 reads
 "Verifying files, no download speed" (DOWNLOADS-1); LIVE-DELAY-1 Weg A
@@ -2379,19 +2272,60 @@ goldens through the `wp/<name>-goldens` path.
   twin pin over `docs/design/status-vocabulary.json`. (The API already
   has one `ACTIVE_STATUSES`, used in `deletion.py:1158ff`.)
 
-### Wave 3 (bundled decisions)
+### Wave 3 (decided 2026-11-21)
 
-In "Open decisions" above: NGINX-DUP-1 (C-1), FREEZE-EXIT-1 (C-28),
-UPDATE-TONE-1, UPDATE-WORD-1, NEUTRAL-RAMP-1 (D-7), DESKTOP-FONT-1
-(D-14), ACCENT-ROLES-1 (D-2), DESIGN-MEASURE-1 (Playwright),
-CROSS-SITE-FILL-1 (S-1), plus INCOMPLETE-ENDPOINT-1 (C-7),
-VERIFY-ALL-LABEL-1 (C-16), OLD-SERVER-FALLBACK-1 (U-1) and
-AGENT-RC8-COMPAT-1 (U-9). Follow-up once the design decisions are made:
-**DESIGN-MD-1** (audit design step 10), a `DESIGN.md` at the repo root
-from the audit's target values (accent roles, status tones,
-`--line-strong`, type floor, three radii, two shadows, spacing scale,
-motion), pointing to `tokens.json` and the NOTES instead of replacing
-them.
+Operator 2026-11-21: fix every audit finding in rc23, nits included; the
+api/core/dns freeze stays until the `v0.1.0` final tag, with one exception
+for all audit findings (ADR-0016 addendum 2026-11-21). The options each
+decision was taken from are in git history (`03f5b19`).
+
+- **FREEZE-EXIT-1** (C-28): Weg A, the exit is the `v0.1.0` final tag;
+  audit findings are excepted. Done in ADR-0016 (addendum 2026-11-21).
+- **NGINX-DUP-1** (C-1): **Weg B**, retire the native `core/nginx/nginx.conf`,
+  `core/docker/check-config-drift.sh` (and its CI step) and the manual
+  Windows rigs that need `poc/` (`core/tests/test-core.ps1`,
+  `core/tests/mvp/run-mvp.ps1`, `dns/tests/test-dnsmasq-config.ps1`);
+  the image template becomes the only source. Recheck U-2 (subprocess
+  default) in the same package. L, core freeze exception.
+- **UPDATE-TONE-1 + UPDATE-WORD-1** (D-1): orange and "Update available"
+  everywhere (pill, vocabulary, Android twin); folds into PILL-TONE-1,
+  which is no longer blocked.
+- **CROSS-SITE-FILL-1** (S-1): Weg A, document only: threat model §1
+  gets the cross-site path (plain-HTTP page or mail, `<img>` on a depot
+  URL) and `?nocache=1`; no nginx change. Docs package TM-CROSS-SITE-1.
+- **DESIGN-MEASURE-1**: Playwright is installed in the dev container by
+  the operator (outside the repo); then `/design:check` reruns with the
+  browser measurement after the wave 2 design packages. Operator item.
+- **NEUTRAL-RAMP-1** (D-7): **Weg B**, turn the neutral ramp toward cyan
+  (hue ~218, values from the audit), web tokens + Android colours + both
+  golden sets, every contrast pair recomputed (incl. `--line-strong` of
+  LINE-CONTRAST-1). L; after PILL-TONE-1 and FONT-FLOOR-1.
+- **DESKTOP-FONT-1** (D-14): Weg A, keep the system stack and write the
+  desktop choice down. **ACCENT-ROLES-1** (D-2): Weg A, keep the rc20 kit
+  and correct the NOTES accent rule. Both land in **DESIGN-MD-1** (a
+  `DESIGN.md` at the repo root from the audit's target values, pointing
+  to `tokens.json` and the NOTES), after NEUTRAL-RAMP-1.
+- **INCOMPLETE-ENDPOINT-1** (C-7): keep the endpoint (documented operator
+  API); only the dead demo handler goes (nit C-7).
+- **VERIFY-ALL-LABEL-1** (C-16): "Verify all" on web and Android; move
+  the twin pin from `cache-completeness.js` to `job-row.js`, drop the dead
+  `completeAllAriaLabel`. S.
+- **OLD-SERVER-FALLBACK-1** (U-1): Weg A, remove the web's "older server"
+  fallbacks feature by feature (web and API ship together, ADR-0022);
+  Android keeps its own; amend `docs/learnings/web.md:192-194`. M-L.
+- **AGENT-RC8-COMPAT-1** (U-9): the agent's resend without `local_addrs`
+  for rc8/rc16 servers goes with `v0.1.0` final (removed in rc23, so the
+  final release ships without it). S.
+
+Nit packages (all low findings below and the U-items with an action,
+operator 2026-11-21 "fix everything"): **SEC-HARDEN-1** (S-3, S-4, S-6,
+S-7, S-8, S-9; api/core parts under the audit exception),
+**DESIGN-NITS-1** (D-5, D-8..D-13, D-15, D-16, after the wave 2 design
+packages), **NITS-AUDIT-WEB-1** (C-7, C-14 web side, C-15, C-17, C-18,
+C-20, C-29, U-8 note), **NITS-AUDIT-APP-1** (C-14 app side, C-18 Kotlin,
+C-19), **NITS-AUDIT-API-1** (C-8..C-12, CLOCK-SEAM-1, C-25, U-5),
+**NITS-AUDIT-OPS-1** (C-3, C-21..C-24, C-27, U-7). C-13, U-3, U-4, U-6
+need no change; C-26 stays with its rc22 nit.
 
 ### Low findings (nits)
 

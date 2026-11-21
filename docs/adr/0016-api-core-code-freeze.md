@@ -660,3 +660,18 @@ because `POST /v1/jobs/{id}/pause` answered `409` for every GC job.
 
 Every other frozen-path change still needs its own user decision and note
 here.
+
+## Addendum 2026-11-21 — freeze exit and audit exception (FREEZE-EXIT-1)
+
+The 2026-11-20 audit found that the exit above (`v0.1.0-rc1`) no longer
+matches practice: the freeze kept applying through rc22, and the plan
+says "until `v0.1.0`". User decision 2026-11-21:
+
+- **Exit:** the freeze on `api/`, `core/` and `dns/` ends with the
+  `v0.1.0` final tag (replaces "the tag `v0.1.0-rc1`" above).
+- **Exception:** every finding of the 2026-11-20 audit may be fixed in
+  frozen paths ("fix everything, the audit was important"): the packages
+  and nits in `docs/handover/post-0.1.0-roadmap.md`, section "Audit
+  2026-11-20: findings" (e.g. CI-CLOCK-1, NGINX-DUP-1, SEC-HARDEN-1,
+  NITS-AUDIT-API-1, CLOCK-SEAM-1). Each still runs through coder and
+  reviewer; no other new features in frozen paths before `v0.1.0`.
