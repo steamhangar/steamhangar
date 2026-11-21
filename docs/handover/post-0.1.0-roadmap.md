@@ -2542,6 +2542,11 @@ Follow-up of the rc23 wave 2 reviews (2026-11-21), rc24:
 - DL-STATS-NITS-1 (api) the newest series bucket is averaged over its
   elapsed seconds, but the caption names the bucket's full length; carry
   the covered seconds in the series payload so the period is exact.
+- CAP503-NAME-1 (api + web/app, found in CAP-503-FIX-1b) the hold texts
+  name a device by its Clients-page name, else its address
+  (`GET /v1/client-priority` sends only Clients-page names), while
+  "Loading now" names the same address by its agent name (demo:
+  `10.10.0.21` vs `workshop-pc`). Use one name resolution for both.
 - EXPERT-SWITCH-NITS-1 (app) the 48 dp row-height assert in
   `SettingsExpertSwitchTest` passes without `heightIn` at Robolectric's
   default width (the hint wraps); add a `w800dp` case or a source pin.
