@@ -489,53 +489,6 @@ def parse_webhook_events(raw: str) -> frozenset[str]:
     return frozenset(tokens)
 
 
-def validate_webhook_url(raw: str) -> str:
-    """Scheme-only check for an operator-supplied webhook URL.
-
-    **Not used by** :meth:`Settings.from_env` **today.** WP 3.13 deliberately
-    treats ``VAULT_WEBHOOK_URL`` as trusted operator configuration and never
-    refuses to boot over it (see ``vault_api/webhooks.py``'s "SSRF / trust
-    posture" section): a malformed URL fails per-delivery, at WARNING, the
-    same as an unreachable receiver, and that design is preserved here
-    unchanged. This function exists ONLY for ``PATCH /v1/settings``
-    (ADR-0009 decision 4) — a documented, deliberate gap between "the exact
-    same grammars config.py applies at startup" the ADR calls for and what
-    WP 3.13 actually shipped, since no such startup grammar exists for this
-    field to reuse. A settings PATCH is a human typing a value into a form
-    RIGHT NOW; "what you just typed is not even a URL" is worth a ``422``
-    immediately, rather than a silent per-delivery WARNING hours later. Blank
-    means "disabled" (the same one-enable-switch convention every optional
-    URL/path setting in this module uses) and is accepted unconditionally.
-    """
-    text = raw.strip()
-    if not text:
-        return ""
-    scheme = urlsplit(text).scheme.lower()
-    if scheme not in ("http", "https"):
-        # Deliberately no ``Got {raw!r}`` echo here (WP API-FIX-2, P2): a
-        # webhook URL can carry Basic-Auth userinfo, and this message ends up
-        # verbatim in a 422 response body and in the effective_settings log
-        # line for a corrupt stored override.
-        # The parsed scheme is not echoed either (WP API-FIX-2, N1): for a
-        # scheme-less ``admin:s3cr3t@host`` urlsplit reports ``admin`` as the
-        # "scheme", i.e. the username.
-        raise ValueError(
-            "must be an http:// or https:// URL (the scheme must be http or "
-            "https), or blank to disable webhooks."
-        )
-    after_scheme = text.split("://", 1)[1] if "://" in text else ""
-    if "@" in after_scheme and "@" not in urlsplit(text).netloc:
-        # WP SEC-FIX-4 (P-1): an unencoded '/', '?' or '#' in the password
-        # ends the authority early, so urlsplit puts the userinfo in the
-        # path/query/fragment — where redact_url never looks, and the secret
-        # would be logged. No echo of the value, for the reason above.
-        raise ValueError(
-            "the userinfo (user:password@) is not parsed as such: a '/', '?' "
-            "or '#' in the password must be percent-encoded (%2F, %3F, %23)."
-        )
-    return text
-
-
 #: ``vault_name`` is a label that ends up in every webhook envelope and in
 #: log lines, so it gets the same "printable, bounded" rule ``client_id`` has
 #: (``routers/agent.py::_validate_client_id``). Shared by ``Settings.from_env``

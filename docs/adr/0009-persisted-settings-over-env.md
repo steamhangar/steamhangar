@@ -44,7 +44,8 @@ chosen over env-only).
    path — no duplicated parsing. Exception: `VAULT_WEBHOOK_URL` has no
    startup grammar — WP 3.13 treats it as trusted operator config and
    never refuses to boot over it. The PATCH path adds a scheme-only check
-   (`config.validate_webhook_url`) used ONLY by the API;
+   (`config.validate_webhook_url`) used ONLY by the API (removed in rc23,
+   NITS-AUDIT-API-1: `webhook_url` is env-only since D16b);
    `Settings.from_env()` stays unchanged.
 5. **Env-only allowlist (not persistable, PATCH rejects with `422`):**
    bootstrap and security settings — the shipped fields `vault_api_key`,

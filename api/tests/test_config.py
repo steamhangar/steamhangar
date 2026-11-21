@@ -1347,50 +1347,6 @@ def test_relay_expose_playtime_and_last_played_read_independent_env_vars(
     assert settings.relay_expose_last_played is False
 
 
-# ==========================================================================
-# Settings-API work package: validate_webhook_url (used only by
-# PATCH /v1/settings, NOT by Settings.from_env — see the function's own
-# docstring for why no startup grammar exists for this field to reuse).
-# ==========================================================================
-
-
-def test_validate_webhook_url_accepts_blank_as_disabled() -> None:
-    from vault_api.config import validate_webhook_url
-
-    assert validate_webhook_url("") == ""
-    assert validate_webhook_url("   ") == ""
-
-
-@pytest.mark.parametrize(
-    "good",
-    [
-        "http://example.invalid/hook",
-        "https://example.invalid/hook",
-        "https://user:pass@example.invalid:8443/hook?x=1",
-    ],
-)
-def test_validate_webhook_url_accepts_http_and_https(good: str) -> None:
-    from vault_api.config import validate_webhook_url
-
-    assert validate_webhook_url(good) == good
-
-
-@pytest.mark.parametrize(
-    "bad",
-    [
-        "not a url",
-        "ftp://example.invalid/hook",
-        "example.invalid/hook",
-        "file:///etc/passwd",
-    ],
-)
-def test_validate_webhook_url_rejects_non_http_schemes(bad: str) -> None:
-    from vault_api.config import validate_webhook_url
-
-    with pytest.raises(ValueError):
-        validate_webhook_url(bad)
-
-
 # -- WP S-1 (ADR-0012): VAULT_PREFILL_MODE and the runner tuning knobs -------
 
 
@@ -1535,22 +1491,3 @@ def test_timedelta_caps_are_finite_for_the_stdlib() -> None:
     timedelta(minutes=config.MAX_INTERVAL_MINUTES)
     timedelta(minutes=config.MAX_COOLDOWN_MINUTES)
     timedelta(days=config.MAX_DAYS)
-
-
-def test_validate_webhook_url_does_not_echo_the_raw_value() -> None:
-    """P2: the 422 detail for a bad webhook URL must not carry userinfo."""
-    with pytest.raises(ValueError) as excinfo:
-        config.validate_webhook_url("ftp://user:s3cr3t@host/path")
-    assert "s3cr3t" not in str(excinfo.value)
-    assert "http or https" in str(excinfo.value)
-
-
-def test_validate_webhook_url_does_not_echo_the_parsed_scheme() -> None:
-    """N1: for scheme-less ``admin:s3cr3t@host`` urlsplit's "scheme" is the
-    username, so the parsed scheme must not be echoed either."""
-    with pytest.raises(ValueError) as excinfo:
-        config.validate_webhook_url("admin:s3cr3t@host/x")
-    message = str(excinfo.value)
-    assert "admin" not in message
-    assert "s3cr3t" not in message
-    assert "http or https" in message

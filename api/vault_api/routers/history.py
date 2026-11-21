@@ -12,7 +12,7 @@ one admin call behind the API key like every other ``/v1`` route.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Literal
 
 from fastapi import APIRouter, Depends, Query
@@ -20,7 +20,7 @@ from pydantic import BaseModel
 
 from vault_api import history
 from vault_api.auth import require_api_key
-from vault_api.deps import DbOpener, db_opener
+from vault_api.deps import DbOpener, db_opener, request_now
 
 router = APIRouter(dependencies=[Depends(require_api_key)], tags=["history"])
 
@@ -45,10 +45,11 @@ class HistoryDeleteOut(BaseModel):
 def delete_history(
     scope: Literal["all", "older-than-30d"] = Query(...),
     open_db: DbOpener = Depends(db_opener),
+    now: datetime = Depends(request_now),
 ) -> HistoryDeleteOut:
     """Delete finished jobs and traffic statistics, all or older than 30 days."""
     with open_db() as conn:
-        result = history.delete_history(conn, scope, datetime.now(timezone.utc))
+        result = history.delete_history(conn, scope, now)
     return HistoryDeleteOut(
         scope=scope,
         cutoff=result.cutoff,

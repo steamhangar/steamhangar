@@ -120,10 +120,9 @@ RANGE_24H = "24h"
 RANGE_7D = "7d"
 RANGE_30D = "30d"
 RANGE_ALL = "all"
-RANGES = (RANGE_1H, RANGE_6H, RANGE_24H, RANGE_7D, RANGE_30D, RANGE_ALL)
-#: Ranges answered by the 1-minute tier. That tier has server and per-address
-#: rows but no per-depot rows, so the clients overview does not offer them.
-SHORT_RANGES = (RANGE_1H, RANGE_6H)
+# 1h and 6h are answered by the 1-minute tier. That tier has server and
+# per-address rows but no per-depot rows, so the clients overview does not
+# offer them.
 _RANGE_TIER = {
     RANGE_1H: (TIER_1M, 60),  # 1 h of 1-minute buckets
     RANGE_6H: (TIER_1M, 360),

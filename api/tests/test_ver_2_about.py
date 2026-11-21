@@ -35,8 +35,10 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import socket
 import sqlite3
+import subprocess
 import threading
 import time
 from dataclasses import replace
@@ -47,7 +49,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from tests.conftest import TEST_API_KEY
-from vault_api import BASE_VERSION, about, runner_presence
+from vault_api import BASE_VERSION, _VERSION_GRAMMAR, about, runner_presence
 from vault_api.about import AboutService
 from vault_api.config import PREFILL_MODE_QUEUE, Settings
 from vault_api.db import SCHEMA_VERSION, get_connection, init_db
@@ -853,3 +855,33 @@ def test_hook_and_api_agree_on_the_file_location() -> None:
     hook = (REPO / "core" / "docker" / "29-vault-build-version.sh").read_text(encoding="utf-8")
     assert about.CORE_VERSION_FILE.replace("\\", "/") == "logs/vault-core-version.json"
     assert "/vault/" + about.CORE_VERSION_FILE.replace("\\", "/") in hook
+
+
+#: The version cases of core/tests/test-build-version-hook.sh plus edges of
+#: the grammar (first character, allowed punctuation, length 64/65).
+_HOOK_VERSION_CASES = (
+    "0.1.0-rc9", "dev", "dev-1a2b3c4", "1.0.0+build_7", "a" * 64, "a" * 65,
+    "", "1.0 beta", '1.0"x', "1.0/x", ".1.0", "-x", "1.0\n2", "1.0\u00e9",
+    "1\\0", "_x", "+x", "x-", "x.", "A", "0.1.0-rc22.1", "1..0", "1.0\t",
+)
+
+
+@pytest.mark.skipif(shutil.which("sh") is None, reason="needs a POSIX sh")
+def test_hook_version_check_is_the_api_grammar() -> None:
+    """Audit U-5: the core hook's ``valid_version`` (a shell twin, pinned
+    otherwise only by its own table) accepts exactly what
+    ``vault_api._VERSION_GRAMMAR`` accepts."""
+    hook = (REPO / "core" / "docker" / "29-vault-build-version.sh").read_text(encoding="utf-8")
+    function = re.search(r"^valid_version\(\) \{\n.*?^\}$", hook, re.M | re.S)
+    assert function, "GRAMMAR drift: valid_version() not found in the hook; widen this regex"
+    script = function.group(0) + '\nfor v; do if valid_version "$v"; then echo 1; else echo 0; fi; done'
+    result = subprocess.run(
+        ["sh", "-c", script, "sh", *_HOOK_VERSION_CASES],
+        check=True, capture_output=True, text=True, timeout=30,
+        env={"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "LC_ALL": "C"},
+    )
+    got = dict(zip(_HOOK_VERSION_CASES, (line == "1" for line in result.stdout.splitlines())))
+    want = {v: _VERSION_GRAMMAR.fullmatch(v) is not None for v in _HOOK_VERSION_CASES}
+    assert len(got) == len(_HOOK_VERSION_CASES), result.stdout
+    assert got == want
+    assert sum(want.values()) >= 5, "the table must keep accepted cases"

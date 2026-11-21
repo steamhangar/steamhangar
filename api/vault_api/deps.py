@@ -41,6 +41,7 @@ from __future__ import annotations
 import logging
 import sqlite3
 from contextlib import closing
+from datetime import datetime
 from typing import Callable, ContextManager
 
 from fastapi import Request
@@ -120,6 +121,17 @@ def effective_settings(request: Request) -> Settings:
     except sqlite3.Error:
         logger.exception("Could not resolve stored settings for this request.")
         return base
+
+
+def request_now(request: Request) -> datetime:
+    """FastAPI dependency returning the request's instant (CLOCK-SEAM-1).
+
+    The live tier's clock (``app.state.live_tier.clock``), the one time
+    source the traffic endpoints already read (CI-CLOCK-1): UTC wall time in
+    production, and a test that injects ``LiveTier(clock=...)`` moves every
+    handler that takes its ``now`` from here with it.
+    """
+    return request.app.state.live_tier.clock()
 
 
 def get_agent_report_keep(request: Request) -> int:

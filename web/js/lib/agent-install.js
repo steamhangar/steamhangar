@@ -99,8 +99,8 @@ export const AGENT_SERVER_URL_NOTE =
 
 // A release version as publish.yml derives it from a v* tag: digits-dot
 // triple, optional pre-release (e.g. "0.1.0", "0.1.0-rc10"). Same grammar
-// as api/vault_api/dist.py `_RELEASE_VERSION` (fullmatch; JS `$` without
-// the m flag does not match before a trailing newline).
+// as api/vault_api/client_versions.py `_RELEASE_VERSION` (fullmatch; JS
+// `$` without the m flag does not match before a trailing newline).
 const RELEASE_VERSION = /^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z]+(?:\.[0-9A-Za-z]+)*)?$/;
 
 /**

@@ -503,12 +503,6 @@ def finish_job_and_notify(
 # --------------------------------------------------------------------------
 
 
-#: The two valid ``event`` values ``notify_bypass_event`` accepts. Named here
-#: so a caller (and this module's own tests) can assert against them without
-#: hardcoding either string a second time.
-BYPASS_TRANSITION_EVENTS = (WEBHOOK_EVENT_BYPASS_SUSPECTED, WEBHOOK_EVENT_BYPASS_RESOLVED)
-
-
 def notify_bypass_event(
     notifier: "WebhookNotifier | None",
     *,

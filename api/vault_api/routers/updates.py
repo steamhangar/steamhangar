@@ -26,7 +26,7 @@ api/README.md "Manifest oracle -> Privacy").
 from __future__ import annotations
 
 import sqlite3
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
@@ -41,6 +41,7 @@ from vault_api.deps import (
     get_cache_root,
     get_settings,
     get_size_cache,
+    request_now,
 )
 from vault_api.sizes import SizeCache
 
@@ -112,6 +113,7 @@ def check_updates(
     size_cache: SizeCache = Depends(get_size_cache),
     cache_root: str = Depends(get_cache_root),
     runner: update_check.UpdateCheckRunner = Depends(_runner),
+    now: datetime = Depends(request_now),
 ) -> UpdateCheckStartOut:
     """Start an update check of every cached game; answer immediately.
 
@@ -137,7 +139,7 @@ def check_updates(
             settings,
             trigger=update_check.TRIGGER_MANUAL,
             select_appids=select,
-            now=datetime.now(timezone.utc),
+            now=now,
             require_interval=False,
         )
     if started == update_check.STOPPING:

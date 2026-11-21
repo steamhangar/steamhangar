@@ -7,22 +7,9 @@ import types
 
 import pytest
 
-from vault_api import config, oracle, webhooks
+from vault_api import oracle, webhooks
 
 SECRET = "s3cr3t"
-
-
-@pytest.mark.parametrize("sep", ["/", "?", "#"])
-def test_an_unencoded_delimiter_in_the_webhook_password_is_refused(sep: str) -> None:
-    raw = f"https://hook:pa{sep}{SECRET}@hooks.example.net/x"
-    with pytest.raises(ValueError, match="percent-encoded") as caught:
-        config.validate_webhook_url(raw)
-    assert SECRET not in str(caught.value)
-
-
-def test_a_percent_encoded_webhook_password_is_accepted() -> None:
-    raw = f"https://hook:pa%2F{SECRET}@hooks.example.net/x"
-    assert config.validate_webhook_url(raw) == raw
 
 
 @pytest.mark.parametrize("sep", ["/", "?", "#"])
