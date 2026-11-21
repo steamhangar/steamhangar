@@ -2138,6 +2138,14 @@ and VERIFY-COLD-1 is prose in the Sunday-test box of the rc19.3 block.
 - **APP-EXPERT-SWITCH-1 placement decided (operator, 2026-11-21): Weg A**,
   the switch stays on the About tab (before the disclaimer), like the web's
   narrow layout.
+- **RC23-AUTONOMOUS (operator, 2026-11-21 evening):** while the operator is
+  away the orchestrator (1) tags `v0.1.0-rc23` itself once all six 11-01
+  packages (incl. APP-DL-STATS-1b, APP-DL-CARD-1) are on `main` and tests,
+  `dev.sh verify`, branch CI and goldens are green; (2) files the rc23
+  rollout Antrag itself (read_only services, schema v34); (3) settles new
+  small, reversible Weg A/B questions with its recommendation, recorded
+  here as "decided by orchestrator, operator may revise"; plan deviations
+  and prod topics still stop for the operator.
 - **OUTPUT-TRIM-TAP-1 (dev tooling, found 2026-11-01):** the DEV-MODS-1
   output-trim mod omitted only 596 of 13,520 lines of `dev.sh test-web`
   (node TAP) and gave no file hint, so the harness still persisted 528 KB.
