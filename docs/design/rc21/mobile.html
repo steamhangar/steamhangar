@@ -9,7 +9,7 @@
   color-scheme:dark;
   /* token values copied from web/css/theme.css (same as rc20/kit.html) */
   --bg:#0A1016; --surface:#111C24; --raised:#17252F; --raised-2:#1D303C;
-  --line:#24363F; --line-soft:#1B2A33;
+  --line:#24363F; --line-soft:#1B2A33; --line-strong:#5F727E;
   --text:#E4EFF3; --dim:#8AA1AD; --dim-2:#7A91A0;
   --accent:#2ED9CE; --accent-ink:#04211F; --accent-glow:rgba(46,217,206,.16);
   --ok:#57DD8A; --run:#F2CE5B; --stale:#F07B2E; --danger:#FF6F6F; --none:#8296A6;
@@ -108,7 +108,7 @@ code{font:var(--fs-2) var(--mono);background:var(--raised);padding:1px 5px;borde
 .pill .sic{margin-left:-3px}
 .seg{display:inline-flex;gap:2px;padding:3px;background:var(--surface);border:1px solid var(--line-soft);border-radius:10px;max-width:100%;min-width:0;overflow:hidden}
 .seg button{font:500 var(--fs-2)/1 var(--ui);color:var(--dim);background:none;border:0;border-radius:7px;padding:7px 12px;flex:none;white-space:nowrap}
-.seg button[aria-pressed=true]{background:var(--raised-2);color:var(--text)}
+.seg button[aria-pressed=true]{background:var(--raised-2);color:var(--text);box-shadow:inset 0 0 0 1px var(--dim-2)}
 .tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,11em),1fr));gap:var(--sp-3)}
 .tile{background:var(--surface);border:1px solid var(--line-soft);border-radius:var(--r-m);padding:14px 16px;display:grid;gap:4px;align-content:start;min-width:0}
 .tile .k{font:500 var(--fs-1)/1 var(--ui);letter-spacing:.8px;text-transform:uppercase;color:var(--dim);overflow-wrap:anywhere}
@@ -140,7 +140,7 @@ code{font:var(--fs-2) var(--mono);background:var(--raised);padding:1px 5px;borde
 .ib{width:18px;height:18px;border-radius:50%;border:1px solid var(--line);color:var(--dim);font:500 var(--fs-1)/16px var(--mono);text-align:center;background:none;padding:0;flex:none}
 .chip{margin-left:auto;font:400 var(--fs-1)/1 var(--ui);padding:4px 8px;border-radius:999px;background:var(--raised-2);color:var(--dim);white-space:nowrap}
 .chip.ch{color:var(--accent);background:color-mix(in srgb,var(--accent) 14%,var(--surface))}
-.in{font:400 var(--fs-3) var(--ui);color:var(--text);background:var(--bg);border:1px solid var(--line);border-radius:var(--r-s);padding:9px 12px;width:100%}
+.in{font:400 var(--fs-3) var(--ui);color:var(--text);background:var(--bg);border:1px solid var(--line-strong);border-radius:var(--r-s);padding:9px 12px;width:100%}
 .in.mono{font-family:var(--mono);max-width:160px}
 .in[aria-disabled=true]{color:var(--dim);background:var(--surface)}
 .snav-list{display:flex;gap:2px;overflow:hidden;min-width:0}
@@ -228,12 +228,12 @@ code{font:var(--fs-2) var(--mono);background:var(--raised);padding:1px 5px;borde
 .lib-chips .fchip{flex:none}
 .lib-tools{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
 .lib-tools .btn{height:38px;padding-inline:10px}
-.sortg{display:inline-flex;align-items:stretch;height:38px;background:var(--surface);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.sortg{display:inline-flex;align-items:stretch;height:38px;background:var(--surface);border:1px solid var(--line-strong);border-radius:10px;overflow:hidden}
 .sortg .sel{display:flex;align-items:center;padding:0 10px 0 12px;font:400 var(--fs-3) var(--ui)}
 .sortg button{display:grid;place-items:center;width:40px;background:none;border:0;border-left:1px solid var(--line);color:var(--dim);padding:0}
-.segi{display:inline-flex;gap:2px;padding:2px;background:var(--surface);border:1px solid var(--line);border-radius:10px}
+.segi{display:inline-flex;gap:2px;padding:2px;background:var(--surface);border:1px solid var(--line-strong);border-radius:10px}
 .segi button{display:grid;place-items:center;width:32px;height:32px;border:0;border-radius:var(--r-s);background:none;color:var(--dim);padding:0}
-.segi button[aria-pressed=true]{background:var(--raised-2);color:var(--text)}
+.segi button[aria-pressed=true]{background:var(--raised-2);color:var(--text);box-shadow:inset 0 0 0 1px var(--dim-2)}
 .lib-stat{display:flex;flex-direction:column;gap:2px;font-size:var(--fs-3);color:var(--dim)}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,150px),1fr));gap:22px 16px}
 .card{position:relative;display:grid;gap:8px;align-content:start;min-width:0}

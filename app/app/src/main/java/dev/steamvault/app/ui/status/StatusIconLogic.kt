@@ -77,26 +77,23 @@ fun backgroundFor(kind: StatusKind): Color = when (kind) {
     StatusKind.ERROR -> VaultColors.StatusDanger
     StatusKind.WARN -> VaultColors.StatusStale
     StatusKind.CANCELLED -> VaultColors.Dim2
-    // web theme.css: `.sic.k-unknown, .sic.k-notinuse{ background:var(--dim-2); color:var(--text); }`
+    // web theme.css: `.sic.k-unknown, .sic.k-notinuse{ background:var(--dim-2); }`
     StatusKind.NOTINUSE -> VaultColors.Dim2
     // web theme.css (WP CACHE-COMPLETE-1c): `.sic.k-partial { background:var(--stale); }`,
-    // `.sic.k-unverified{ background:var(--dim-2); color:var(--text); }`
+    // `.sic.k-unverified{ background:var(--dim-2); }`
     StatusKind.PARTIAL -> VaultColors.StatusStale
     StatusKind.UNVERIFIED -> VaultColors.Dim2
 }
 
 /**
- * Glyph ink colour for a status-icon circle. Every kind uses the shared
- * dark ink (`.sic { color:#08120F }`) EXCEPT cancelled, which uses the
- * light text colour against its muted background (`.sic.k-cancelled
- * { color:var(--text) }`) — ported unchanged from theme.css.
+ * Glyph ink colour for a status-icon circle: the shared dark ink
+ * (`.sic { color:#08120F }`) for every kind. The muted Dim2 discs
+ * (cancelled, notinuse, unverified) used the light Text ink until WP
+ * CONTRAST-1 (GLYPH-CONTRAST-1, audit 2026-11-20): Text on Dim2 is 2.81:1,
+ * under the 3:1 a glyph needs; the dark ink is 5.79:1. Web twin: no
+ * `.sic.k-*` rule in theme.css sets its own `color` any more.
  */
-fun inkFor(kind: StatusKind): Color = when (kind) {
-    StatusKind.CANCELLED -> VaultColors.Text
-    StatusKind.NOTINUSE -> VaultColors.Text
-    StatusKind.UNVERIFIED -> VaultColors.Text
-    else -> VaultColors.StatusIconInk
-}
+fun inkFor(@Suppress("UNUSED_PARAMETER") kind: StatusKind): Color = VaultColors.StatusIconInk
 
 /**
  * The running download glyph, "arrow falls through" (WP APP-FIX-3, Android

@@ -15,6 +15,7 @@ import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import dev.steamvault.app.ui.traffic.logic.RANGE_LABELS
+import dev.steamvault.app.ui.theme.vaultRangeChipBorder
 import dev.steamvault.app.ui.traffic.logic.TRAFFIC_RANGES
 
 /**
@@ -47,6 +48,8 @@ fun RangeChips(
                 onClick = { onSelect(range) },
                 label = { Text(RANGE_LABELS.getValue(range), maxLines = 1, softWrap = false) },
                 modifier = Modifier.semantics { role = Role.RadioButton },
+                // WP CONTRAST-1: a 3:1 edge on the selected chip (web `.seg` ring).
+                border = vaultRangeChipBorder(selected = range == selected),
             )
         }
     }

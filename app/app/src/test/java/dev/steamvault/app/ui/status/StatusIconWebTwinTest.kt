@@ -88,9 +88,10 @@ class StatusIconWebTwinTest {
         )
         val css = read("../../web/css/theme.css")
         assertTrue("VALUE DRIFT: theme.css .sic.k-partial no longer uses --stale", Regex("""\.sic\.k-partial\s*\{\s*background:var\(--stale\);""").containsMatchIn(css))
+        // WP CONTRAST-1 (GLYPH-CONTRAST-1): the grey disc keeps the shared dark ink, no own `color`.
         assertTrue(
-            "VALUE DRIFT: theme.css .sic.k-unverified no longer uses --dim-2 / --text",
-            Regex("""\.sic\.k-unverified\{\s*background:var\(--dim-2\);\s*color:var\(--text\);""").containsMatchIn(css),
+            "VALUE DRIFT: theme.css .sic.k-unverified is no longer a plain --dim-2 disc with the shared ink",
+            Regex("""\.sic\.k-unverified\{\s*background:var\(--dim-2\);\s*\}""").containsMatchIn(css),
         )
     }
 

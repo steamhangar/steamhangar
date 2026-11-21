@@ -4,7 +4,7 @@
 :root{
   color-scheme:dark;
   --bg:#0A1016; --surface:#111C24; --raised:#17252F; --raised-2:#1D303C;
-  --line:#24363F; --line-soft:#1B2A33;
+  --line:#24363F; --line-soft:#1B2A33; --line-strong:#5F727E;
   --text:#E4EFF3; --dim:#8AA1AD; --dim-2:#7A91A0; --dim-2-old:#63798A;
   --accent:#2ED9CE; --accent-ink:#04211F;
   --ok:#57DD8A; --run:#F2CE5B; --stale:#F07B2E; --danger:#FF6F6F; --none:#8296A6;
@@ -64,7 +64,7 @@ code{font:var(--fs-2) var(--mono);background:var(--raised);padding:1px 6px;borde
 @media (prefers-reduced-motion:reduce){.pill.run i{animation:none}}
 .seg{display:inline-flex;gap:2px;padding:3px;background:var(--surface);border:1px solid var(--line-soft);border-radius:10px}
 .seg button{font:500 var(--fs-2)/1 var(--ui);color:var(--dim);background:none;border:0;border-radius:7px;padding:7px 12px;cursor:pointer}
-.seg button[aria-pressed=true]{background:var(--raised-2);color:var(--text)}
+.seg button[aria-pressed=true]{background:var(--raised-2);color:var(--text);box-shadow:inset 0 0 0 1px var(--dim-2)}
 .tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,140px),1fr));gap:var(--sp-3)}
 .tile{background:var(--surface);border:1px solid var(--line-soft);border-radius:var(--r-m);padding:14px 16px;display:grid;gap:4px;align-content:start}
 .tile .k{font:500 var(--fs-1)/1 var(--ui);letter-spacing:.8px;text-transform:uppercase;color:var(--dim)}
@@ -86,7 +86,7 @@ code{font:var(--fs-2) var(--mono);background:var(--raised);padding:1px 6px;borde
 .chip{margin-left:auto;font:400 var(--fs-1)/1 var(--ui);padding:4px 8px;border-radius:999px;background:var(--raised-2);color:var(--dim);white-space:nowrap}
 .chip.ch{color:var(--accent);background:color-mix(in srgb,var(--accent) 14%,var(--surface))}
 .chip.env{color:var(--dim)}
-.in{font:400 var(--fs-3) var(--ui);color:var(--text);background:var(--bg);border:1px solid var(--line);border-radius:var(--r-s);padding:9px 12px;width:100%}
+.in{font:400 var(--fs-3) var(--ui);color:var(--text);background:var(--bg);border:1px solid var(--line-strong);border-radius:var(--r-s);padding:9px 12px;width:100%}
 .in.num{font-family:var(--mono);max-width:160px}
 .in:disabled{color:var(--dim);background:var(--surface)}
 .hint{font-size:var(--fs-2);color:var(--dim)}

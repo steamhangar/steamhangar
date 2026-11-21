@@ -67,15 +67,17 @@ class StatusIconLogicTest {
     }
 
     @Test
-    fun `cancelled maps to stop`() {
+    fun `cancelled maps to stop, muted disc, dark ink (web k-cancelled, CONTRAST-1)`() {
         assertEquals(GlyphShape.STOP, glyphFor(StatusKind.CANCELLED))
+        assertEquals(VaultColors.Dim2, backgroundFor(StatusKind.CANCELLED))
+        assertEquals(VaultColors.StatusIconInk, inkFor(StatusKind.CANCELLED))
     }
 
     @Test
-    fun `notinuse maps to dash, muted disc, light ink (web k-notinuse)`() {
+    fun `notinuse maps to dash, muted disc, dark ink (web k-notinuse, CONTRAST-1)`() {
         assertEquals(GlyphShape.DASH, glyphFor(StatusKind.NOTINUSE))
         assertEquals(VaultColors.Dim2, backgroundFor(StatusKind.NOTINUSE))
-        assertEquals(VaultColors.Text, inkFor(StatusKind.NOTINUSE))
+        assertEquals(VaultColors.StatusIconInk, inkFor(StatusKind.NOTINUSE))
     }
 
     @Test
@@ -86,10 +88,17 @@ class StatusIconLogicTest {
     }
 
     @Test
-    fun `unverified maps to question, muted disc, light ink (web k-unverified)`() {
+    fun `unverified maps to question, muted disc, dark ink (web k-unverified, CONTRAST-1)`() {
         assertEquals(GlyphShape.QUESTION, glyphFor(StatusKind.UNVERIFIED))
         assertEquals(VaultColors.Dim2, backgroundFor(StatusKind.UNVERIFIED))
-        assertEquals(VaultColors.Text, inkFor(StatusKind.UNVERIFIED))
+        assertEquals(VaultColors.StatusIconInk, inkFor(StatusKind.UNVERIFIED))
+    }
+
+    @Test
+    fun `every kind draws its glyph in the shared dark ink (GLYPH-CONTRAST-1)`() {
+        for (kind in StatusKind.entries) {
+            assertEquals("ink of $kind", VaultColors.StatusIconInk, inkFor(kind))
+        }
     }
 
     @Test

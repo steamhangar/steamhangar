@@ -15,12 +15,20 @@
   --raised-2:#1D303C;
   --line:#24363F;
   --line-soft:#1B2A33;
+  /* WP CONTRAST-1 (LINE-CONTRAST-1, audit 2026-11-20): the border of a
+     control that is identified by its border (text input, select, the
+     fused sort box, the icon segmented switch). --line is only 1.52:1 on
+     --bg; WCAG 1.4.11 asks 3:1. #5F727E is 3.82:1 on --bg, 3.45:1 on
+     --surface, 3.13:1 on --raised. --line stays for separators and cards. */
+  --line-strong:#5F727E;
   --text:#E4EFF3;
   --dim:#8AA1AD;
   /* WP UI-KIT-1: lifted from #63798A (3.8:1 on --surface, fails WCAG AA for
      11px captions) to #7A91A0 (5.0:1). Tertiary text and grips only. The
      Android twin's Color.kt followed in WP TOKENS-SYNC-1; both are checked
-     against docs/design/tokens.json. */
+     against docs/design/tokens.json. WP CONTRAST-1 adds two non-text
+     uses that need 3:1 on --raised-2: control borders on the --raised-2
+     popover and the selected-segment ring (4.15:1). */
   --dim-2:#7A91A0;
 
   --accent:#2ED9CE;
@@ -352,20 +360,23 @@ a{ color:var(--accent); }
 .sic.k-verify  { background:var(--accent); }
 .sic.k-error   { background:var(--danger); }
 .sic.k-warn    { background:var(--stale); }
+/* WP CONTRAST-1 (GLYPH-CONTRAST-1, audit 2026-11-20): the grey --dim-2
+   discs below keep the shared dark ink too (5.79:1). They used --text
+   until then, 2.81:1, under the 3:1 a glyph needs (WCAG 1.4.11). */
 /* Added WP 4a.5: a stopped-on-purpose job is neither a failure (--danger)
    nor a success (--ok) — the muted, desaturated tone already used for
    "not cached"/dim text reads as deliberately neutral, matching job
    outcome honesty (docs/PROJECT_PLAN.md). */
-.sic.k-cancelled{ background:var(--dim-2); color:var(--text); }
+.sic.k-cancelled{ background:var(--dim-2); }
 /* WP WEB-FEAT-3 (Settings → About): "not checked" and "not used here" are
    not faults either — the same neutral tone as cancelled, own glyphs. */
-.sic.k-unknown, .sic.k-notinuse{ background:var(--dim-2); color:var(--text); }
+.sic.k-unknown, .sic.k-notinuse{ background:var(--dim-2); }
 /* WP CACHE-COMPLETE-1c: a cached game with only part of the current build
    on disk (half-disc glyph) is "a download would fix this", the hue the
    update state already uses; a game whose completeness is not known is
    neither good nor bad news, so it takes the neutral tone of "Check". */
 .sic.k-partial { background:var(--stale); }
-.sic.k-unverified{ background:var(--dim-2); color:var(--text); }
+.sic.k-unverified{ background:var(--dim-2); }
 
 .sic-lg{ --sz:19px; }
 .sic-sm{ --sz:16px; }

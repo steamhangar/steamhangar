@@ -57,6 +57,7 @@ class DesignTokensContractTest {
         "Raised2" to (VaultColors.Raised2 to "raised-2"),
         "Line" to (VaultColors.Line to "line"),
         "LineSoft" to (VaultColors.LineSoft to "line-soft"),
+        "LineStrong" to (VaultColors.LineStrong to "line-strong"),
         "Text" to (VaultColors.Text to "text"),
         "Dim" to (VaultColors.Dim to "dim"),
         "Dim2" to (VaultColors.Dim2 to "dim-2"),
@@ -109,6 +110,12 @@ class DesignTokensContractTest {
     @Test
     fun `Dim2 is the lifted 7A91A0 (UI-KIT-1, literal pin)`() {
         assertEquals("#7A91A0", rgbHex(VaultColors.Dim2))
+    }
+
+    @Test
+    fun `LineStrong is 5F727E and Line stays 24363F (CONTRAST-1, literal pin)`() {
+        assertEquals("#5F727E", rgbHex(VaultColors.LineStrong))
+        assertEquals("#24363F", rgbHex(VaultColors.Line))
     }
 
     @Test

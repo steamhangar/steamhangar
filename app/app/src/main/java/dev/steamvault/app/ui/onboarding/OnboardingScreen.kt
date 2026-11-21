@@ -46,6 +46,8 @@ import dev.steamvault.app.ui.onboarding.logic.onboardingProgressPercent
 import dev.steamvault.app.ui.settings.LibraryIdMessage
 import dev.steamvault.app.ui.settings.logic.LibraryLookupError
 import dev.steamvault.app.ui.settings.logic.LibraryPreview
+import dev.steamvault.app.ui.theme.vaultSegmentedButtonColors
+import dev.steamvault.app.ui.theme.vaultTextFieldColors
 import kotlinx.coroutines.launch
 
 /**
@@ -200,11 +202,13 @@ private fun ConnectStep(controller: OnboardingController, scope: kotlinx.corouti
 
     SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
         SegmentedButton(
+            colors = vaultSegmentedButtonColors(),
             selected = controller.profileChoice == ConnectivityProfileChoice.SYSTEM_VPN,
             onClick = { controller.profileChoice = ConnectivityProfileChoice.SYSTEM_VPN },
             shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2),
         ) { Text(stringResource(R.string.onboarding_profile_system_vpn)) }
         SegmentedButton(
+            colors = vaultSegmentedButtonColors(),
             selected = controller.profileChoice == ConnectivityProfileChoice.PUBLIC_DOMAIN,
             onClick = { controller.profileChoice = ConnectivityProfileChoice.PUBLIC_DOMAIN },
             shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2),
@@ -221,6 +225,7 @@ private fun ConnectStep(controller: OnboardingController, scope: kotlinx.corouti
     )
 
     OutlinedTextField(
+        colors = vaultTextFieldColors(),
         value = controller.baseUrlText,
         onValueChange = { controller.baseUrlText = it },
         label = { Text(stringResource(R.string.onboarding_base_url_label)) },
@@ -247,6 +252,7 @@ private fun ConnectStep(controller: OnboardingController, scope: kotlinx.corouti
     // button -- same "no icon pack for one glyph" call as WP 4b.4.
     var apiKeyVisible by rememberSaveable { mutableStateOf(false) }
     OutlinedTextField(
+        colors = vaultTextFieldColors(),
         value = controller.apiKeyText,
         onValueChange = { controller.apiKeyText = it },
         label = { Text(stringResource(R.string.onboarding_api_key_label)) },
@@ -352,6 +358,7 @@ private fun LibrarySteamIdSection(controller: OnboardingController, scope: kotli
     )
     val hint = stringResource(R.string.onboarding_library_id_hint)
     OutlinedTextField(
+        colors = vaultTextFieldColors(),
         value = controller.libraryIdInput,
         onValueChange = { controller.libraryIdInput = it },
         label = { Text(stringResource(R.string.onboarding_library_id_label)) },

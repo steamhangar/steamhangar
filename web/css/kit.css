@@ -90,7 +90,10 @@
    narrow container instead (same rule as app.css's `.segs.rangesegs`). */
 .kit .seg{ display:inline-flex; gap:2px; padding:3px; background:var(--surface); border:1px solid var(--line-soft); border-radius:10px; max-width:100%; min-width:0; overflow-x:auto; scrollbar-width:none; }
 .kit .seg button{ font:500 var(--fs-2)/1 var(--ui); color:var(--dim); background:none; border:0; border-radius:7px; padding:7px 12px; cursor:pointer; flex:none; white-space:nowrap; }
-.kit .seg button[aria-pressed="true"]{ background:var(--raised-2); color:var(--text); }
+/* WP CONTRAST-1: the selected segment's --raised-2 fill is only 1.27:1 on
+   --surface; the --dim-2 ring (5.25:1 on --surface, 4.15:1 on --raised-2)
+   is the 3:1 state indicator (WCAG 1.4.11). Same for `.segi` below. */
+.kit .seg button[aria-pressed="true"]{ background:var(--raised-2); color:var(--text); box-shadow:inset 0 0 0 1px var(--dim-2); }
 
 /* ---------- tiles and meter ---------- */
 /* A text-relative minimum (WP MOBILE-1b, docs/design/rc21/mobile.html 6a):
@@ -134,9 +137,12 @@
 }
 .kit .chip.ch{ color:var(--accent); background:color-mix(in srgb, var(--accent) 14%, var(--surface)); }
 .kit .chip.env{ color:var(--dim); }
+/* Inputs, selects and the fused sort / icon segment boxes are identified by
+   their border: --line-strong (3:1 on --bg/--surface/--raised, WP
+   CONTRAST-1), not --line; on --raised-2 they take --dim-2 instead. */
 .kit .in{
   font:400 var(--fs-3) var(--ui); color:var(--text); background:var(--bg);
-  border:1px solid var(--line); border-radius:var(--r-s); padding:9px 12px; width:100%; min-width:0;
+  border:1px solid var(--line-strong); border-radius:var(--r-s); padding:9px 12px; width:100%; min-width:0;
 }
 .kit .in.num{ font-family:var(--mono); max-width:160px; }
 .kit .in:disabled{ color:var(--dim); background:var(--surface); }
@@ -297,7 +303,10 @@
   font:500 var(--fs-1)/1.2 var(--ui); text-align:center; cursor:pointer;
 }
 .kit .ad-tabs .tab svg{ width:18px; height:18px; }
-.kit .ad-tabs .tab[aria-selected="true"]{ background:var(--raised-2); color:var(--accent); }
+/* WP CONTRAST-1: the --raised-2 fill is only 1.40:1 on the --bg strip; the
+   --dim-2 ring (5.81:1 on --bg, 4.15:1 on --raised-2) is the 3:1 state
+   indicator, as on the selected `.seg` segment. */
+.kit .ad-tabs .tab[aria-selected="true"]{ background:var(--raised-2); color:var(--accent); box-shadow:inset 0 0 0 1px var(--dim-2); }
 .kit .ad-tabs .tab:focus-visible{ outline:2px solid var(--accent); outline-offset:1px; }
 .kit .ad-scroll{
   flex:1 1 auto; min-height:0; overflow-y:auto; container:addev / inline-size;
@@ -818,7 +827,7 @@
 .kit .btn.on .fcount{ color:var(--accent); }
 
 /* sort: one fused box, select + icon-only direction button */
-.kit .sortg{ display:inline-flex; align-items:stretch; height:var(--ctl-h); background:var(--surface); border:1px solid var(--line); border-radius:10px; overflow:hidden; }
+.kit .sortg{ display:inline-flex; align-items:stretch; height:var(--ctl-h); background:var(--surface); border:1px solid var(--line-strong); border-radius:10px; overflow:hidden; }
 .kit .sortg:focus-within{ border-color:var(--accent); }
 .kit .sortg select{ background:none; border:0; outline:0; padding:0 8px 0 12px; font:400 var(--fs-3) var(--ui); color:var(--text); min-width:0; max-width:190px; cursor:pointer; }
 .kit .sortg select option{ background:var(--raised-2); color:var(--text); }
@@ -829,12 +838,12 @@
 .kit .sortg button:focus-visible{ outline-offset:-2px; }
 
 /* icon segmented control (layout) */
-.kit .segi{ display:inline-flex; gap:2px; padding:2px; background:var(--surface); border:1px solid var(--line); border-radius:10px; }
+.kit .segi{ display:inline-flex; gap:2px; padding:2px; background:var(--surface); border:1px solid var(--line-strong); border-radius:10px; }
 .kit .segi button{ display:grid; place-items:center; width:32px; height:32px; border:0; border-radius:var(--r-s); background:none; color:var(--dim); cursor:pointer; padding:0; }
 @media (hover:hover) and (pointer:fine){
   .kit .segi button:hover{ color:var(--text); }
 }
-.kit .segi button[aria-pressed="true"]{ background:var(--raised-2); color:var(--text); }
+.kit .segi button[aria-pressed="true"]{ background:var(--raised-2); color:var(--text); box-shadow:inset 0 0 0 1px var(--dim-2); }
 
 /* Filters popover */
 .kit .lib-filtersbtn{ position:relative; }
@@ -843,9 +852,11 @@
   display:flex; flex-wrap:wrap; align-items:center; gap:10px; border-radius:14px; box-shadow:0 14px 30px color-mix(in srgb, var(--bg) 70%, transparent);
 }
 .kit .lib-meta-cats{ display:flex; flex-wrap:wrap; gap:6px; flex-basis:100%; }
+/* On the --raised-2 popover --line-strong is only 2.72:1; --dim-2 is 4.15:1
+   against the popover and 5.81:1 against the field's --bg (WP CONTRAST-1). */
 .kit .lib-meta select, .kit .lib-meta-year{
   height:34px; padding:0 10px; border-radius:var(--r-s); background:var(--bg); color:var(--text);
-  border:1px solid var(--line); font:400 var(--fs-3) var(--ui);
+  border:1px solid var(--dim-2); font:400 var(--fs-3) var(--ui);
 }
 .kit .lib-meta-year{ width:96px; font-family:var(--mono); }
 .kit .lib-meta-unk{ display:flex; align-items:center; gap:6px; font-size:var(--fs-3); color:var(--dim); }

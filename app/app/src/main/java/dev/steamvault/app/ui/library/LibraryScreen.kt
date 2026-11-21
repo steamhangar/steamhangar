@@ -114,6 +114,10 @@ import dev.steamvault.app.ui.library.logic.ownedNoticeFor
 import dev.steamvault.app.ui.library.logic.normalizeQuery
 import dev.steamvault.app.ui.library.logic.visibleGames
 import dev.steamvault.app.ui.theme.VaultColors
+import dev.steamvault.app.ui.theme.vaultFieldButtonBorder
+import dev.steamvault.app.ui.theme.vaultFilterChipBorder
+import dev.steamvault.app.ui.theme.vaultSegmentedButtonColors
+import dev.steamvault.app.ui.theme.vaultTextFieldColors
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -431,6 +435,7 @@ private fun LibraryToolbar(
 ) {
     Column(modifier = Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 4.dp)) {
         OutlinedTextField(
+            colors = vaultTextFieldColors(),
             value = controller.query,
             onValueChange = { controller.query = it },
             modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
@@ -551,6 +556,8 @@ private fun SortRow(active: LibrarySort, keys: List<LibrarySortKey>, onSelect: (
             val sortDescription = "${LibrarySortWording.SORT_LABEL}: ${active.key.label}"
             OutlinedButton(
                 onClick = { menuOpen = true },
+                // WP CONTRAST-1: a select twin, identified by its border (3:1).
+                border = vaultFieldButtonBorder(),
                 contentPadding = PaddingValues(start = 14.dp, end = 8.dp),
                 modifier = Modifier.semantics { contentDescription = sortDescription },
             ) {
@@ -672,6 +679,7 @@ private fun LayoutToggle(
     SingleChoiceSegmentedButtonRow(modifier = modifier) {
         options.forEachIndexed { index, option ->
             SegmentedButton(
+                colors = vaultSegmentedButtonColors(),
                 selected = current == option.layout,
                 onClick = { onSelect(option.layout) },
                 shape = SegmentedButtonDefaults.itemShape(index = index, count = options.size),
@@ -708,6 +716,8 @@ private fun FilterChipsRow(
             FilterChip(
                 selected = chip.key == selectedKey,
                 onClick = { onSelect(chip.key) },
+                // WP CONTRAST-1: a 3:1 accent edge on the selected chip (web `.fchip`).
+                border = vaultFilterChipBorder(selected = chip.key == selectedKey),
                 // WP ANDROID-REDESIGN-1b (web `.chip small`): the count in the
                 // dim caption tone after the word; one spoken label.
                 label = {

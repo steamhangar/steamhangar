@@ -25,10 +25,17 @@ object VaultColors {
     val Raised2 = Color(0xFF1D303C) // --raised-2
     val Line = Color(0xFF24363F) // --line
     val LineSoft = Color(0xFF1B2A33) // --line-soft
+    // WP CONTRAST-1 (LINE-CONTRAST-1): the border of a control identified by
+    // its border (text fields, segmented buttons): 3.82:1 on Bg, 3.45:1 on
+    // Surface, 3.13:1 on Raised (WCAG 1.4.11: 3:1). Line stays for
+    // separators, cards and outlined buttons (theme `outline`).
+    val LineStrong = Color(0xFF5F727E) // --line-strong
     val Text = Color(0xFFE4EFF3) // --text
     val Dim = Color(0xFF8AA1AD) // --dim
     // WP TOKENS-SYNC-1: follows web UI-KIT-1's lift from #63798A (3.8:1 on
     // --surface) to #7A91A0 (5.0:1, WCAG AA for captions).
+    // WP CONTRAST-1: also the selected segment / range chip edge (web `.seg`
+    // --dim-2 ring), 5.81:1 on Bg.
     val Dim2 = Color(0xFF7A91A0) // --dim-2
 
     // Accent (vault aqua) — primary actions, active nav, focus, progress.
@@ -53,8 +60,7 @@ object VaultColors {
     // status hue above (web: `.sic { color:#08120F }`).
     val StatusIconInk = Color(0xFF08120F)
 
-    // Cancelled uses the muted --dim-2 background with --text ink, not the
-    // status-icon ink above (web: `.sic.k-cancelled { background:var(--dim-2);
-    // color:var(--text) }` — a stopped-on-purpose job is neither a failure
-    // nor a success, WP 4a.5 rationale, ported unchanged here).
+    // The muted Dim2 discs (cancelled, notinuse, unverified) use this ink
+    // too since WP CONTRAST-1 (GLYPH-CONTRAST-1): 5.79:1 on Dim2, where the
+    // old Text ink was 2.81:1 (web: `.sic.k-cancelled{ background:var(--dim-2); }`).
 }
