@@ -15,7 +15,6 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Snackbar
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
@@ -67,6 +66,7 @@ import dev.steamvault.app.ui.clients.logic.showAgentlessNote
 import dev.steamvault.app.ui.clients.logic.summaryTiles
 import dev.steamvault.app.ui.demo.DemoModeBanner
 import dev.steamvault.app.ui.theme.VaultColors
+import dev.steamvault.app.ui.theme.VaultSnackbar
 import dev.steamvault.app.ui.traffic.RangeChips
 import dev.steamvault.app.ui.traffic.TrafficPoll
 import dev.steamvault.app.ui.traffic.TrafficRanges
@@ -417,7 +417,7 @@ private fun RenameNotice(flow: ClientRenameFlow) {
         delay(NOTICE_MS)
         flow.notice = null
     }
-    Snackbar(modifier = Modifier.padding(12.dp).semantics { liveRegion = LiveRegionMode.Polite }) { Text(message) }
+    VaultSnackbar(message, modifier = Modifier.padding(12.dp).semantics { liveRegion = LiveRegionMode.Polite })
 }
 
 /** WP ANDROID-REDESIGN-1a: the card Remove's success note (web: the toast). */
@@ -428,5 +428,5 @@ private fun RemoveNotice(controller: ClientsController) {
         delay(NOTICE_MS)
         controller.clearRemoveNotice()
     }
-    Snackbar(modifier = Modifier.padding(12.dp).semantics { liveRegion = LiveRegionMode.Polite }) { Text(message) }
+    VaultSnackbar(message, modifier = Modifier.padding(12.dp).semantics { liveRegion = LiveRegionMode.Polite })
 }

@@ -194,6 +194,9 @@
   .kit .fchip:hover{ color:var(--text); border-color:var(--line); }
 }
 .kit .fchip[aria-pressed="true"]{ color:var(--accent); border-color:var(--accent); background:color-mix(in srgb, var(--accent) 10%, var(--surface)); }
+/* A pressed chip's count takes the accent too, every chip row (ANDROID-SHEET-BG-1,
+   operator decision; the app twin is vaultFilterChipColors). */
+.kit .fchip[aria-pressed="true"] b{ color:var(--accent); }
 .kit .gchip{
   display:inline-block; font:400 var(--fs-2)/1 var(--ui); color:var(--text); background:var(--raised);
   border:1px solid var(--line-soft); border-radius:999px; padding:6px 10px; white-space:nowrap;
@@ -866,7 +869,6 @@
 .kit .lib-chips{ display:flex; flex-wrap:wrap; gap:var(--sp-2); min-width:0; flex:1 1 100%; }
 .kit .lib-chips .fchip{ display:inline-flex; align-items:center; }
 .kit .lib-chips .fchip b{ font-variant-numeric:tabular-nums; margin-left:3px; } /* plus the space in the label: the a11y name reads "Cached 22" */
-.kit .lib-chips .fchip[aria-pressed="true"] b{ color:var(--accent); }
 .kit .lib-tools{ display:flex; flex-wrap:wrap; align-items:center; gap:var(--sp-2); margin-left:auto; }
 .kit .lib-tools .btn{ height:var(--ctl-h); }
 .kit .lib-tools .ico{ display:flex; }

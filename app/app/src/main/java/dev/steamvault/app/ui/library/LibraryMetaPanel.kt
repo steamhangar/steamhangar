@@ -52,6 +52,8 @@ import dev.steamvault.app.ui.library.logic.availableGenres
 import dev.steamvault.app.ui.library.logic.unknownNote
 import dev.steamvault.app.ui.theme.vaultFieldButtonBorder
 import dev.steamvault.app.ui.theme.vaultFilterChipBorder
+import dev.steamvault.app.ui.theme.vaultFilterChipColors
+import dev.steamvault.app.ui.theme.vaultMenuBorder
 import dev.steamvault.app.ui.theme.vaultTextFieldColors
 
 /**
@@ -98,6 +100,8 @@ fun LibraryMetaPanel(
                     label = { Text(category.label, maxLines = 1, softWrap = false) },
                     // WP CONTRAST-1: a 3:1 accent edge on a selected chip (web `.fchip`).
                     border = vaultFilterChipBorder(selected = on),
+                    // WP ANDROID-SHEET-BG-1: the `.fchip[aria-pressed]` accent fill and label.
+                    colors = vaultFilterChipColors(),
                 )
             }
         }
@@ -196,7 +200,7 @@ private fun PickerButton(label: String, value: String, options: List<String>, on
         OutlinedButton(onClick = { open = true }, border = vaultFieldButtonBorder()) {
             Text("$label: $value", maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
-        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }, border = vaultMenuBorder()) {
             options.forEachIndexed { index, text ->
                 DropdownMenuItem(
                     text = { Text(text) },

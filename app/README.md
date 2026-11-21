@@ -216,6 +216,16 @@ mapping). The app is committed to a single dark theme on purpose — the same
 design decision as the web frontend (mockup-notes.md "Committed to dark, on
 purpose") — so `Theme.kt` does **not** read `isSystemInDarkTheme()`; the
 scheme is always the same regardless of the device's system theme setting.
+Every slot of that Material 3 scheme is mapped to a `VaultColors` token,
+including the `surfaceContainer*` roles that sheets, dialogs and menus read
+(ANDROID-SHEET-BG-1); `ThemeColorSchemeTest` fails when a slot is left on
+the Material baseline, also after a Material update that adds one. The
+bottom bar and its pip, the cards and the filter chips take exact web twins at
+the call site (`ControlColors.kt`, pinned by `WebSurfaceTwinTest` against
+web/css), as do the switch, the toast (`VaultSnackbar`), the menu and
+dialog edges, the sheet scrim and grip and the figure tiles. One scheme
+slot is not a token: `onError` stays `Color.Black` (the ink on the
+StatusDanger badge and error buttons), listed by name in the test.
 
 `Type.kt` covers typography basics only. The mockup's type stack (Roboto /
 Roboto Condensed / Roboto Mono, no bundled webfonts) is approximated with

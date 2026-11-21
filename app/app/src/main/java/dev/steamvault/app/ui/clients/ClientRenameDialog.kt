@@ -41,6 +41,8 @@ import dev.steamvault.app.ui.clients.logic.renameErrorText
 import dev.steamvault.app.ui.clients.logic.renameHint
 import dev.steamvault.app.ui.clients.logic.renameTitle
 import dev.steamvault.app.ui.clients.logic.renamedToastText
+import dev.steamvault.app.ui.theme.VaultDialogShape
+import dev.steamvault.app.ui.theme.vaultDialogBorder
 import dev.steamvault.app.ui.theme.vaultTextFieldColors
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
@@ -166,6 +168,8 @@ fun ClientRenameDialog(
     val focus = remember { FocusRequester() }
     val save = { scope.launch { flow.save(onChanged) } }
     AlertDialog(
+        shape = VaultDialogShape,
+        modifier = Modifier.vaultDialogBorder(),
         onDismissRequest = { flow.cancel() },
         title = { Text(renameTitle(clientName(client))) },
         text = {

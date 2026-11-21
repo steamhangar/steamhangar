@@ -37,6 +37,8 @@ import dev.steamvault.app.ui.library.logic.buildBulkDownloadPlan
 import dev.steamvault.app.ui.library.logic.classifyBulkDeleteEligibility
 import dev.steamvault.app.ui.library.logic.classifyBulkSelection
 import dev.steamvault.app.ui.library.logic.formatBytesGB
+import dev.steamvault.app.ui.theme.VaultDialogShape
+import dev.steamvault.app.ui.theme.vaultDialogBorder
 import kotlinx.coroutines.CoroutineScope
 
 /**
@@ -153,6 +155,8 @@ fun DeleteConfirmDialog(controller: LibraryController, allGames: List<GameSummar
     if (ids.isEmpty()) return
 
     AlertDialog(
+        shape = VaultDialogShape,
+        modifier = Modifier.vaultDialogBorder(),
         onDismissRequest = { controller.closeDeleteConfirm() },
         title = { Text(pluralStringResource(R.plurals.library_delete_title, ids.size, ids.size)) },
         text = {

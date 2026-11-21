@@ -22,6 +22,8 @@ import dev.steamvault.app.ui.downloads.logic.confirmGcLines
 import dev.steamvault.app.ui.downloads.logic.pauseAllLabel
 import dev.steamvault.app.ui.downloads.logic.pauseConfirmTitle
 import dev.steamvault.app.ui.downloads.logic.resumeAllLabel
+import dev.steamvault.app.ui.theme.VaultDialogShape
+import dev.steamvault.app.ui.theme.vaultDialogBorder
 import kotlinx.coroutines.CoroutineScope
 
 /**
@@ -82,6 +84,8 @@ fun PauseAllDialog(controller: DownloadsController, scope: CoroutineScope) {
     if (!controller.pauseAllConfirmOpen) return
     val bar = bulkBarState(controller.jobs)
     AlertDialog(
+        shape = VaultDialogShape,
+        modifier = Modifier.vaultDialogBorder(),
         onDismissRequest = { controller.dismissPauseAll() },
         title = { Text(pauseConfirmTitle(bar.pauseCount)) },
         text = {

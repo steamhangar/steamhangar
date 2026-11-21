@@ -80,6 +80,12 @@ import dev.steamvault.app.ui.status.pillGroundColor
 import dev.steamvault.app.ui.status.pillTextColor
 import dev.steamvault.app.ui.status.toneFor
 import dev.steamvault.app.ui.theme.VaultColors
+import dev.steamvault.app.ui.theme.VaultTilePadding
+import dev.steamvault.app.ui.theme.VaultTileShape
+import dev.steamvault.app.ui.theme.vaultClientCardBorder
+import dev.steamvault.app.ui.theme.vaultClientCardPadding
+import dev.steamvault.app.ui.theme.vaultClientCardZoneGap
+import dev.steamvault.app.ui.theme.vaultTileBorderColor
 
 /*
  * The rc20 Clients card and summary tiles in Material terms (WP
@@ -95,7 +101,7 @@ import dev.steamvault.app.ui.theme.VaultColors
  * the actions. Colors are the kit tokens ([VaultColors]).
  */
 
-private val CardShape = RoundedCornerShape(14.dp)
+private val CardShape = RoundedCornerShape(18.dp) // web `.kit .ccard{ border-radius:var(--r-l) }`
 private val BoxShape = RoundedCornerShape(10.dp)
 private val SmallButtonPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
 
@@ -124,37 +130,42 @@ internal fun ClientCard(
     onRename: (() -> Unit)?,
     onRemove: (() -> Unit)?,
 ) {
-    Surface(
-        color = VaultColors.Surface,
-        shape = CardShape,
-        border = BorderStroke(1.dp, if (model.outdatedText != null || model.health?.bypass == true) VaultColors.StatusStale.copy(alpha = 0.35f) else VaultColors.LineSoft),
-        modifier = Modifier.fillMaxWidth().semantics(mergeDescendants = true) {},
-    ) {
-        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-            // Zone 1: identity and health.
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                KindIconTile(model.kind)
-                Column(modifier = Modifier.weight(1f).padding(start = 12.dp)) {
-                    Text(model.name, style = MaterialTheme.typography.titleMedium.copy(fontSize = 15.sp, fontWeight = FontWeight.Medium), color = VaultColors.Text)
-                    Text(model.meta, style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = 11.5.sp), color = VaultColors.Dim2)
+    // WP ANDROID-SHEET-BG-1: the padding follows the web card's container query (vaultClientCardPadding).
+    BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+        val cardPadding = vaultClientCardPadding(maxWidth)
+        Surface(
+            color = VaultColors.Surface,
+            shape = CardShape,
+            // WP ANDROID-SHEET-BG-1: web `.kit .ccard` / `.ccard.warn` (stale 45 % into Line).
+            border = vaultClientCardBorder(warn = model.outdatedText != null || model.health?.bypass == true),
+            modifier = Modifier.fillMaxWidth().semantics(mergeDescendants = true) {},
+        ) {
+            Column(modifier = Modifier.padding(cardPadding), verticalArrangement = Arrangement.spacedBy(vaultClientCardZoneGap(maxWidth))) {
+                // Zone 1: identity and health.
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    KindIconTile(model.kind)
+                    Column(modifier = Modifier.weight(1f).padding(start = 12.dp)) {
+                        Text(model.name, style = MaterialTheme.typography.titleMedium.copy(fontSize = 15.sp, fontWeight = FontWeight.Medium), color = VaultColors.Text)
+                        Text(model.meta, style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = 11.5.sp), color = VaultColors.Dim2)
+                    }
                 }
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    StatusPill(model.pill)
+                    if (model.outdatedText != null) StatusPill(CardPill(AGENT_OUTDATED_PILL, PillLook.RUNNING), stale = true)
+                }
+                model.outdatedText?.let { OutdatedBox(it) }
+                model.health?.let { AgentHealthRow(it.bypass, it.head, it.text) }
+
+                // Zone 2: activity and numbers.
+                NowBoxView(model.now)
+                StatGrid(model.stats)
+
+                // Zone 3: recent games.
+                RecentZone(model)
+
+                // Footer.
+                CardFooter(model, onRename, onRemove)
             }
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                StatusPill(model.pill)
-                if (model.outdatedText != null) StatusPill(CardPill(AGENT_OUTDATED_PILL, PillLook.RUNNING), stale = true)
-            }
-            model.outdatedText?.let { OutdatedBox(it) }
-            model.health?.let { AgentHealthRow(it.bypass, it.head, it.text) }
-
-            // Zone 2: activity and numbers.
-            NowBoxView(model.now)
-            StatGrid(model.stats)
-
-            // Zone 3: recent games.
-            RecentZone(model)
-
-            // Footer.
-            CardFooter(model, onRename, onRemove)
         }
     }
 }
@@ -538,10 +549,11 @@ internal fun SummaryTiles(tiles: List<SummaryTile>) {
 private fun TileView(tile: SummaryTile, modifier: Modifier = Modifier) {
     Column(
         modifier = modifier
-            .clip(RoundedCornerShape(12.dp))
+            // WP ANDROID-SHEET-BG-1: web `.kit .tile` / `.kit .tile.hi` (stale 55 % into Line).
+            .clip(VaultTileShape)
             .background(VaultColors.Surface)
-            .border(1.dp, if (tile.hi) VaultColors.StatusStale.copy(alpha = 0.35f) else VaultColors.LineSoft, RoundedCornerShape(12.dp))
-            .padding(horizontal = 14.dp, vertical = 12.dp)
+            .border(1.dp, vaultTileBorderColor(tile.hi), VaultTileShape)
+            .padding(VaultTilePadding)
             .semantics(mergeDescendants = true) {},
     ) {
         SectionLabel(tile.label)

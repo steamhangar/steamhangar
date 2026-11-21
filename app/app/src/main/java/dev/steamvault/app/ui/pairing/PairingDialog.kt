@@ -23,6 +23,8 @@ import androidx.compose.ui.unit.dp
 import dev.steamvault.app.R
 import dev.steamvault.app.net.pairing.PairingRejection
 import dev.steamvault.app.ui.pairing.logic.PairingReplaceNotice
+import dev.steamvault.app.ui.theme.VaultDialogShape
+import dev.steamvault.app.ui.theme.vaultDialogBorder
 import kotlinx.coroutines.delay
 
 /**
@@ -39,6 +41,8 @@ fun PairingDialog(controller: PairingController, onConfirm: () -> Unit) {
     when (val state = controller.state) {
         PairingUiState.Hidden -> Unit
         is PairingUiState.Rejected -> AlertDialog(
+            shape = VaultDialogShape,
+            modifier = Modifier.vaultDialogBorder(),
             onDismissRequest = { controller.dismiss() },
             title = { Text(stringResource(R.string.pairing_invalid_title)) },
             text = { Text(rejectionMessage(state.rejection, state.detail)) },
@@ -59,6 +63,8 @@ fun PairingDialog(controller: PairingController, onConfirm: () -> Unit) {
                 armed = true
             }
             AlertDialog(
+                shape = VaultDialogShape,
+                modifier = Modifier.vaultDialogBorder(),
                 onDismissRequest = { controller.dismiss() },
                 title = { Text(stringResource(R.string.pairing_title, state.request.displayHost)) },
                 text = { ConfirmBody(state) },
