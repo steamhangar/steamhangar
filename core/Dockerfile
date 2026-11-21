@@ -48,12 +48,13 @@ RUN set -eu; \
     echo "D16c gate: the stock entrypoint sources *.envsh and later hooks see its exports"
 
 # --- Config -------------------------------------------------------------------
-# The config is baked into the image, not mounted: it is reviewed, test-covered
-# code (core/tests/test-core.ps1), not a knob. The single deployment-specific
-# value -- the upstream DNS resolver (ADR-0001 req 4) -- is an env placeholder
-# rendered at start; see core/docker/nginx.conf.template's header for the
-# mechanism and core/docker/check-config-drift.sh for the contract that keeps
-# this template in sync with core/nginx/nginx.conf.
+# The config is baked into the image, not mounted: it is reviewed code, not a
+# knob (tests: core/tests/, the drift check below, CI's `core / nginx -t`).
+# Deployment-specific values come from env at start: the template's
+# ${VAULT_RESOLVER} and ${VAULT_EVENT_LOG} placeholders (envsubst, see
+# core/docker/nginx.conf.template's header) and the hooks below, which render
+# the rate, pool, cap and TLS-passthrough includes. check-config-drift.sh is
+# the contract that keeps this template in sync with core/nginx/nginx.conf.
 COPY docker/nginx.conf.template /etc/nginx/templates/nginx.conf.template
 # WP SEC-FIX-5: makes /vault, cache/, tmp/ and logs/ root:root 0755 at every
 # start (migrating a volume from an earlier image) and refuses to start when

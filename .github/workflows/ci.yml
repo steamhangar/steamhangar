@@ -997,13 +997,23 @@ jobs:
         # deploy/tests/verify-stack.sh's own two occurrences were rewritten
         # to `CDPATH='' cd`, which shellcheck accepts. Drop the exclusion
         # once core/'s copy is rewritten the same way.
+        # Audit 2026-11-20 C-24: the sourced 15-*.envsh hook (no .sh suffix,
+        # so the glob missed it), the core/dns/agent test scripts and the
+        # CI helpers in .github/scripts/ joined the list (the core job lints
+        # the helpers too, at its own levels); they were clean at this
+        # severity when added.
         run: |
           shellcheck --severity=warning -e SC1007 \
             deploy/tests/verify-stack.sh \
             deploy/tests/verify-sections.sh \
             deploy/proxy/*.sh \
             dns/docker-entrypoint.sh \
-            core/docker/*.sh
+            dns/tests/functional-check.sh \
+            core/docker/*.sh \
+            core/docker/15-vault-settings.envsh \
+            core/tests/*.sh \
+            agent/tests/sandbox/*.sh \
+            .github/scripts/*.sh
       - name: docker compose config (render the shipped compose file, dns profile included)
         # `-q`: exit status only -- a rendered config is not a useful log
         # line, a refused one is. VAULT_API_KEY=x satisfies the file's own

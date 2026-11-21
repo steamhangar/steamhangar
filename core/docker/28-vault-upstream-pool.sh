@@ -34,8 +34,10 @@
 #                              unset = 16. 0, off and garbage are refused: there
 #                              is no off switch (ADR-0021 decision 3).
 #   VAULT_PREFILL_MAX_THREADS  floor for C. compose forwards
-#                              ${VAULT_PREFILL_MAX_THREADS:-8}, and vault-api's
-#                              own default is 8, so empty/unset counts as 8.
+#                              ${VAULT_PREFILL_MAX_THREADS-} (blank = not set),
+#                              15- fills in Settings or the shipped default 8,
+#                              and vault-api's own default is 8, so empty/unset
+#                              counts as 8 here too.
 #                              C below it is refused (a prefill alone would
 #                              otherwise run into 503s). A value that is not a
 #                              whole number 1..64 is ignored here: vault-api
@@ -176,7 +178,8 @@ MARKER=lancache.steamcontent.com
 CAP_DEFAULT=16
 CAP_MIN=1
 CAP_MAX=64
-# vault-api's default for VAULT_PREFILL_MAX_THREADS (api/vault_api/config.py).
+# vault-api's default for VAULT_PREFILL_MAX_THREADS (api/vault_api/config.py
+# DEFAULT_PREFILL_MAX_THREADS; pinned by api/tests/test_d16b_core_grammar.py).
 PREFILL_DEFAULT=8
 CAP_ZONE=vault_upstream_total
 
@@ -275,10 +278,11 @@ case "$CAP_RAW" in
 esac
 
 # The prefill floor. Empty/unset counts as the default 8: compose forwards
-# ${VAULT_PREFILL_MAX_THREADS:-8}, and vault-api itself defaults to 8, so a
-# lowered cap without the variable would still collide with a prefill's 8
-# threads. A value that is not a whole number 1..64 is ignored (vault-api
-# refuses to boot on it).
+# ${VAULT_PREFILL_MAX_THREADS-} (blank), 15- then supplies Settings or the
+# shipped default 8, and vault-api itself defaults to 8, so a lowered cap
+# without the variable would still collide with a prefill's 8 threads. A
+# value that is not a whole number 1..64 is ignored (vault-api refuses to
+# boot on it).
 PREFILL=""
 case "$PREFILL_RAW" in
     "") PREFILL=$PREFILL_DEFAULT ;;

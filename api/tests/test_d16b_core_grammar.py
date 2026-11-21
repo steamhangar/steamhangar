@@ -132,6 +132,10 @@ HOOK_CONSTANTS = [
      core_settings.POOL_FAMILIES[1] == "steamserver.net"),
     ("28-vault-upstream-pool.sh", "MARKER=lancache.steamcontent.com",
      core_settings.POOL_MARKER == "lancache.steamcontent.com"),
+    # Audit 2026-11-20 C-22: the hook's floor default is a fourth copy of
+    # vault-api's prefill default (vs_default and compose rows are pinned in
+    # test_d16c_core_status.py / test_p1_compose_env_defaults.py).
+    ("28-vault-upstream-pool.sh", "PREFILL_DEFAULT=8", config.DEFAULT_PREFILL_MAX_THREADS == 8),
     ("26-vault-tls-passthrough.sh", "TLS_CLIENT_DEFAULT=64", core_settings.TLS_CLIENT_DEFAULT == 64),
     ("26-vault-tls-passthrough.sh", "TLS_CLIENT_MAX=256", core_settings.TLS_CLIENT_MAX == 256),
     ("26-vault-tls-passthrough.sh", "TLS_TOTAL_DEFAULT=256", core_settings.TLS_TOTAL_DEFAULT == 256),

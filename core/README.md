@@ -642,10 +642,14 @@ only for the server itself: an `nginx -t`/`-T`/`-s`/`-v`/`-V`/`-h` run
 "not a server start" instead, so a one-shot config check never leaves a
 loop behind.
 
-Knobs (image-level env, read at start, **not** forwarded by
-`deploy/compose.yaml` -- the decided defaults need none, in line with the
-"few env values" direction of D16; add them to a compose override only if
-you must):
+Knobs (env, read at start). `deploy/compose.yaml` forwards
+`VAULT_EVENT_LOG_ROTATE_BYTES` as `${VAULT_EVENT_LOG_ROTATE_BYTES-}` (D16b):
+blank or unset = not set, so the size comes from Settings or the default
+below and stays editable there; a value in `.env` pins it (see the commented
+block in `deploy/.env.example`). `VAULT_EVENT_LOG_ROTATE_INTERVAL` is
+image-level only and **not** forwarded -- the default needs no change, in
+line with the "few env values" direction of D16; add it to a compose
+override only if you must:
 
 | Variable | Default | Grammar |
 |---|---|---|

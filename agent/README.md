@@ -56,11 +56,17 @@ agent/go/
 │   └── discover_test.go                   # ported from test_discover.py
 ├── report/
 │   ├── report.go               # BuildReport, ValidateClientID (mirrors the server's rules)
-│   └── report_test.go
+│   ├── report_test.go
+│   └── presence_test.go         # optional presence fields of the payload (WP AGENT-FEAT-1)
 ├── client/
 │   ├── client.go                # HTTP POST /v1/agent/installed, retry + backoff + jitter
-│   └── client_test.go            # httptest.Server: success/401/500-then-ok/timeout/
-│                                  # malformed-JSON/connection-refused/retry-cap cases
+│   ├── client_test.go            # httptest.Server: success/401/500-then-ok/timeout/
+│   │                              # malformed-JSON/connection-refused/retry-cap cases
+│   ├── presence_test.go           # presence fields against an rc8 server (WP AGENT-FEAT-1)
+│   └── localaddrs_test.go          # local_addrs against older servers (WP AGENT-ADDR-1)
+├── localaddr/                     # WP AGENT-ADDR-1: this PC's LAN address toward the vault
+│   ├── localaddr.go                # per resolved vault address: UDP connect, read LocalAddr
+│   └── localaddr_test.go            # fake resolver/dialer: drops loopback/link-local, IPv4+IPv6
 ├── agentconfig/
 │   ├── config.go                 # flags+env parsing, defaults, validation (WP 2.2)
 │   └── config_test.go
@@ -73,8 +79,11 @@ agent/go/
 │   └── vault-agent/            # THE production CLI
 │       ├── main.go              # subcommand dispatch + `report` [--loop] (WP 2.2)
 │       ├── hosts.go              # `hosts apply|remove|status` (WP 2.3)
+│       ├── version.go             # build identity, set by -ldflags -X (WP VER-1)
 │       ├── main_test.go           # exit codes, one-shot success/failure, API-key redaction
-│       └── hosts_test.go           # hosts CLI: exit codes, refusals, elevation hint
+│       ├── hosts_test.go           # hosts CLI: exit codes, refusals, elevation hint
+│       ├── presence_test.go         # what `report` puts on the wire (WP AGENT-FEAT-1)
+│       └── version_test.go           # `--version` output and the -ldflags names (WP VER-1)
 ```
 
 (`cmd/probe` — a throwaway CLI used for manual real-machine validation during
@@ -95,7 +104,8 @@ agent/packaging/windows/
 │                               vault-agent.exe (Windows has no systemd
 │                               EnvironmentFile= equivalent)
 └── tests/
-    └── test-install-uninstall.ps1   # real-machine harness, run by hand (WP 2.6)
+    ├── test-install-uninstall.ps1   # real-machine harness, run by hand (WP 2.6)
+    └── test-packaging-unit.ps1      # hermetic unit tests, run in CI (WP AGENT-FIX-2)
 ```
 
 See "Windows Scheduled Task (WP 2.6)" below for the full install/uninstall
