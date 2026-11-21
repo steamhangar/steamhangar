@@ -169,3 +169,16 @@ at the end, under a dated heading, one entry each with the WP that proved it.
   to the second are the worse case, because two calls on either side of a
   second boundary differ by a whole second (`_demoCompletenessCheckedAt`,
   CI run 41326822533).
+
+### 2026-11-21 CI-CLOCK-1
+
+- An injected fake clock must reach every wall-clock read on the request
+  path under test. `GET /v1/clients/overview` took its 30-day listing
+  window from `datetime.now()` while the live tier used the test's clock;
+  the test pinned to 2026-10-18 went red on 2026-11-16 with no commit in
+  between (scheduled CI). Handlers take one `now` per request from the
+  same clock as the data they read.
+- Cheap time-bomb probe: a throwaway pytest plugin that shifts
+  `datetime.now`/`today` in `vault_api.*` and `tests.*` by N days, then a
+  full suite run at +45/+400/+3650 days. It does not move `time.time()`,
+  `time.gmtime()` or SQLite `'now'`, so mismatches there are probe noise.

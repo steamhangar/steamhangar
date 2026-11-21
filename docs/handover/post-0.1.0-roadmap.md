@@ -2395,6 +2395,14 @@ them.
 
 ### Low findings (nits)
 
+Follow-up of CI-CLOCK-1 (review 2026-11-21):
+- CLOCK-SEAM-1 (freeze) four api handlers still read the wall clock with
+  no injectable seam: `routers/clients.py:189` (`bypass_window_days`),
+  `routers/jobs.py:543` (history range), `routers/history.py:51`,
+  `routers/updates.py:140`. No test expires today (suite run with the
+  clock moved +45/+400/+3650 days); move them onto one clock only when a
+  package touches them.
+
 Security:
 - S-1 cross-site cache fill: see CROSS-SITE-FILL-1 (open decision).
 - S-3 (freeze) `api/Dockerfile:242` gives uid 101 `/app` and the
