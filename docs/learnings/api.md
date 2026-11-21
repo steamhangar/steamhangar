@@ -263,3 +263,13 @@ at the end, under a dated heading, one entry each with the WP that proved it.
   start because the ring keeps its earlier cells.
 - A count shown next to rows is derived from those rows (sum of client
   rows), so the two can never disagree.
+
+## 2026-11-21 — rc23 wave 2
+
+- Stitching a live ring into swept figures: per bucket exactly one source
+  stands (both are subsets of the same lines, so the larger one never
+  double-counts), and the decision is made **per figure**: a server-wide
+  winner can hold fewer of one job's bytes and make that job's "so far" go
+  backward. Read the swept total and the swept rows it subtracts in one
+  SQLite read transaction; state the remaining shortfall honestly ("until
+  the next sweep", never "one poll") (APP-DL-STATS-1b).
