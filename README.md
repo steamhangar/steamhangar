@@ -513,6 +513,9 @@ otherwise:
   the relay privacy gate, the egress lock, the prefill-runner split, the
   product rename to SteamHangar, and the cached-sweep/auto-GC default-on
   decision
+- [`DESIGN.md`](DESIGN.md) — design rules for the web UI and the Android
+  app: colour roles, status tones, type, spacing, motion, and where the
+  token values live
 - [`core/README.md`](core/README.md) — vault-core (nginx cache) internals
 - [`api/README.md`](api/README.md) — vault-api endpoints, schema, and
   configuration

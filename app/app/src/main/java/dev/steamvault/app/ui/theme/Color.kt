@@ -44,7 +44,10 @@ object VaultColors {
     // --dim-2 ring), 5.84:1 on Bg.
     val Dim2 = Color(0xFF7C9298) // --dim-2
 
-    // Accent (vault aqua) — primary actions, active nav, focus, progress.
+    // Accent (vault aqua) — the rc20 kit's roles (DESIGN.md "Accent",
+    // ACCENT-ROLES-1): primary action and links, focus, selection, progress
+    // and the live download data (internet graph series, live speeds,
+    // "Loading now" rows, the device icon).
     // Never doubles as a status colour (theme.css comment, binding here too).
     val Accent = Color(0xFF2ED9CE) // --accent
     val AccentDeep = Color(0xFF12A79F) // --accent-deep

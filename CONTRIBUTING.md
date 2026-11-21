@@ -105,6 +105,9 @@ on `v*` tags and manual dispatch.
   never `latest` or a floating release tag. `json-file` logging with bounded
   `max-size`/`max-file` on every service, matching `deploy/compose.yaml`'s
   existing pattern.
+- **UI (web and Android):** colours, type, spacing, radii and motion follow
+  [`DESIGN.md`](DESIGN.md); new rules take their values from the tokens
+  (`docs/design/tokens.json`).
 - **Every feature ships with at least one test proving it works.** A PR
   without a test for its own change will be asked to add one.
 

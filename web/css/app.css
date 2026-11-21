@@ -509,7 +509,7 @@ body.selecting .view-root{ padding-bottom:var(--bulk-room); }
 
 /* Section labels here and in kit.css are sentence case (DESIGN-NITS-1,
    audit D-12): no uppercase transform, no tracking. Status tags (.tag,
-   .mk, .pkgstate, .os, .nw) are badges, not labels, and keep theirs. */
+   .mk, .os, .nw) are badges, not labels, and keep theirs. */
 h4.sec{
   margin:18px 0 var(--sp-2); font-size:var(--fs-1); font-weight:700; color:var(--dim-2);
   display:flex; align-items:center; gap:var(--sp-2);

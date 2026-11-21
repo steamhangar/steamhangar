@@ -1,5 +1,9 @@
 # rc20 web redesign: approved mockups
 
+> The current design rules are in [`DESIGN.md`](../../../DESIGN.md) at the
+> repo root (DESIGN-MD-1); this README keeps the history of the rc20
+> decisions. Where they differ, `DESIGN.md` wins.
+
 Static HTML mockups approved on 2026-10-16. They are the visual reference for
 the rc20 packages in `docs/PROJECT_PLAN.md` ("rc20 web redesign"). Open them
 in a browser; they need no server.
@@ -70,8 +74,8 @@ DESIGN-NITS-1 rules (audit 2026-11-20, D-5..D-16; pinned in
 `web/tests/design-nits.test.js`):
 - Labels are sentence case: section labels (`.sec`, card titles, "Loading
   now") at `--fs-2`, key labels over a value at `--fs-1`, no uppercase
-  transform and no tracking. Status tags (`.tag`, `.mk`, `.pkgstate`, `.os`,
-  `.nw`) are badges, not labels, and keep their uppercase.
+  transform and no tracking. Status tags (`.tag`, `.mk`, `.os`, `.nw`) are
+  badges, not labels, and keep their uppercase.
 - One separator per level: a card's border is the only frame; a block
   inside a card is a row of it, set off by spacing or one hairline, never a
   filled or bordered box (Downloads hero tiles, the Settings connection

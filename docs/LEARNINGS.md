@@ -50,6 +50,8 @@ area, in the original order.
 
 - web package: `process.md`, `testing.md`, `web.md` (plus `android.md` when
   a web string or template that Android pins changes)
+- a package that changes colours, type, spacing, radii, motion or status
+  tones (web or Android) also reads the root `DESIGN.md`
 - api package: `process.md`, `testing.md`, `api.md` (plus `core-nginx.md` or
   `steam.md` when the package touches nginx or SteamPrefill)
 - android package: `process.md`, `testing.md`, `android.md`, `web.md` twin
