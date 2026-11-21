@@ -5,7 +5,8 @@ Finished phases and version blocks moved verbatim out of
 8-10, a phase summary in section 7, the current and future version blocks in
 section 11, and every still-open box of these files in section 12
 ("Carried-over open items"). Never read these files whole: grep them or read
-a line range. Re-check the move with `python3 tools/doc-lines-check.py`.
+a line range. Re-check the move with `python3 tools/doc-lines-check.py`
+(compares the pinned pre-split and split commits, needs full history).
 
 | File | Content |
 | --- | --- |

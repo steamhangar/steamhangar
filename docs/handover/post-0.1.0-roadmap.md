@@ -2530,7 +2530,8 @@ Cleanup:
   `api/vault_api/agent_reports.py:50,55,71`) are unpinned: add three
   tuples to the scrape test `api/tests/test_agent_feat_1_packaging.py:144-175`.
 - C-26 `tools/doc-lines-check.py` one-off proof: already tracked (rc22
-  block, NITS-APP-1 review nit).
+  block, NITS-APP-1 review nit); done in DOC-LINES-CHECK-1 (compares the
+  pinned pre-split and split commits, `--new-ref WORKTREE` for a re-split).
 - C-27 `agent/README.md:40-100` tree misses `localaddr/`,
   `cmd/vault-agent/version.go`, the presence tests and
   `packaging/windows/tests/test-packaging-unit.ps1`: add them (the 58
