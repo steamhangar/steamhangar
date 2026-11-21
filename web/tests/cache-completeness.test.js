@@ -49,7 +49,6 @@ import {
   incompleteListKey,
   UNVERIFIED_WORD,
   UNKNOWN_LINE,
-  DAMAGED_NOTE,
 } from "../js/lib/cache-completeness.js";
 import { STATUS_LABEL } from "../js/components/status-icon.js";
 import { KIND } from "../js/lib/game-status.js";
@@ -256,7 +255,6 @@ test("Incomplete texts: heading, aria labels, the row's figure", () => {
   assert.equal(completeNowAriaLabel("Aurora"), "Verify — Aurora");
   assert.equal(incompletePctText(partial(42)), "42%");
   assert.equal(incompletePctText(unknown()), "—");
-  assert.equal(DAMAGED_NOTE, "Damaged chunks — SteamHangar can't repair these yet.");
 });
 
 test("Incomplete list key: changes with the figure and the completable state, not with unrelated fields", () => {

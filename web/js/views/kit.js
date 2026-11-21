@@ -192,7 +192,7 @@ function fieldCard() {
   card.appendChild(el("h3", null, "Field card · group title"));
   const grid = el("div", "fg");
   grid.append(
-    field("Vault name", "chip ch", "Changed here", "SteamVAULT"),
+    field("Vault name", "chip ch", "Changed here", "SteamHangar"),
     field("Rate limit", "chip", "Default", "16 MB/s", { num: true, hint: "Takes effect within a minute." }),
     field("Cache root", "chip env", "From env", "/vault/cache", { disabled: true }),
     openField(),

@@ -289,3 +289,16 @@ at the end, under a dated heading, one entry each with the WP that proved it.
   while the bottom nav rendered 68-70 px depending on the font; fix the
   boxes (icon height, label line height) so the height is font-independent
   and pin the sum against the token.
+
+### 2026-11-21 NITS-AUDIT-WEB-1
+
+- **The web's five byte formatters are separate on purpose; do not merge
+  them** (audit U-8): `lib/format.js` `formatBytesGB` /
+  `formatBytesGBOrZero`, `lib/traffic-view.js` `formatTrafficBytes`,
+  `lib/cache-repair.js` `repairSizeText` and `lib/dist-downloads.js`
+  `formatDownloadSize` (base 1000, kB/MB, the Add a device download
+  tooltip). Each has its own visible output pinned by web tests; the
+  Android mirrors of the others are pinned against the web call sites
+  (`StorageBalanceWebTwinTest`, `JobSizeWebTwinTest`,
+  `CacheRepairWebTwinTest`). A shared helper would change shown values and
+  break those twin pins.

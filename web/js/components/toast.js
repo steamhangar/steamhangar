@@ -32,10 +32,3 @@ export function showToast(message, { warn = false, duration = 2600 } = {}) {
   clearTimeout(hideTimer);
   hideTimer = setTimeout(() => toastEl.classList.remove("on"), duration);
 }
-
-/** Hide the toast immediately, if one is showing. */
-export function hideToast() {
-  if (!toastEl) return;
-  clearTimeout(hideTimer);
-  toastEl.classList.remove("on");
-}
