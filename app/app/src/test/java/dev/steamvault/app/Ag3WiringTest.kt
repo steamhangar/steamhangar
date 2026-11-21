@@ -164,10 +164,10 @@ class Ag3WiringTest {
             badgeCallIdx >= 0,
         )
 
-        val badgeDisplayIdx = body.indexOf("installedBadgeText(installedBadge, includeTimestamp = true)")
+        val badgeDisplayIdx = body.indexOf("installedDetailLineText(installedBadge)")
         assertTrue(
-            "LoadedDetailBody must render the badge's own display text via " +
-                "installedBadgeText(installedBadge, includeTimestamp = true) -- deleting just this Text " +
+            "LoadedDetailBody must render the installed-on line via " +
+                "installedDetailLineText(installedBadge) -- deleting just this Text " +
                 "call (leaving installedBadgeFor's call and the warning block intact) removed the " +
                 "'installed on <client>' line entirely (found body:\n$body)",
             badgeDisplayIdx > badgeCallIdx,
@@ -176,7 +176,7 @@ class Ag3WiringTest {
         val notCachedGateIdx = body.indexOf("is InstalledBadge.InstalledNotCached")
         assertTrue(
             "LoadedDetailBody must branch on InstalledBadge.InstalledNotCached to decide whether to show the " +
-                "protection-gap warning (found body:\n$body)",
+                "installed-but-not-cached warning (found body:\n$body)",
             notCachedGateIdx > badgeCallIdx,
         )
 
@@ -186,6 +186,27 @@ class Ag3WiringTest {
                 "the whole installed_on field exists for -- AFTER the InstalledNotCached gate opens, not " +
                 "unconditionally and not before it (found body:\n$body)",
             warningStringIdx > notCachedGateIdx,
+        )
+    }
+
+    @Test
+    fun `MUTATION PIN -- the detail line never says not cached, the warning below it does`() {
+        val text = stripComments(read("src/main/java/dev/steamvault/app/ui/library/InstalledBadgeText.kt"))
+        val start = text.indexOf("fun installedDetailLineText(")
+        check(start >= 0) { "expected to find installedDetailLineText in InstalledBadgeText.kt" }
+        val end = text.indexOf("private fun installedLabel(", start)
+        check(end > start) { "expected installedLabel to follow installedDetailLineText in InstalledBadgeText.kt" }
+        val body = text.substring(start, end)
+        assertEquals(
+            "installedDetailLineText must use library_installed_on in both installed states -- the red " +
+                "detail_installed_not_cached_warning right below already says \"Installed, not cached\", the " +
+                "web sheet shows the same order (\"Installed on\" rows, then the note); found body:\n$body",
+            2,
+            Regex("R\\.string\\.library_installed_on\\b").findAll(body).count(),
+        )
+        assertTrue(
+            "installedDetailLineText must not use library_installed_not_cached (found body:\n$body)",
+            !body.contains("library_installed_not_cached"),
         )
     }
 

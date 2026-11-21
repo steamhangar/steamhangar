@@ -3679,7 +3679,7 @@ app/app/src/main/java/dev/steamvault/app/
 │   ├── InstalledBadgeText.kt        # NEW: shared badge text, grid/list/detail
 │   ├── GameCard.kt                  # + installedBadgeText(model.installedBadge)
 │   └── GameListRow.kt               # + installedBadgeText(model.installedBadge)
-├── ui/detail/GameDetailSheet.kt     # gameSummaryFrom copies installed_on; the protection-gap warning
+├── ui/detail/GameDetailSheet.kt     # gameSummaryFrom copies installed_on; the installed-but-not-cached warning
 ├── ui/settings/
 │   ├── logic/SchedulePresentation.kt  # NEW: Kotlin port of web/js/lib/schedule-presentation.js
 │   ├── SettingsController.kt         # + scheduleRepository, `schedule` state (load()/save())

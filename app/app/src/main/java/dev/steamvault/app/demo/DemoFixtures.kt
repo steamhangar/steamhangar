@@ -79,9 +79,10 @@ internal fun seedGames(): MutableList<DemoGame> = mutableListOf(
         lastManifestCheck = isoAgo(2 * 86_400L),
         gcReclaimableBytes = 0L,
         gcHeldBackBytes = 0L,
-        // WP AG-3 state 2: installed but NOT cached -- the protection-gap
-        // case the whole installed_on field exists for (api/README.md
-        // "Installed state per app").
+        // WP AG-3 state 2: installed but NOT cached -- the
+        // installed-but-not-cached case the whole installed_on field exists
+        // for (api/README.md "Installed state per app"). Shot by
+        // DetailSheetScreenshotTest (detail_installed_not_cached_360dp_font130).
         installedOn = listOf(InstalledOnEntry(client_id = "demo-steamdeck", reported_at = isoAgo(1_800L))),
     ),
     DemoGame(
