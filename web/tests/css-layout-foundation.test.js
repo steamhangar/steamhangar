@@ -30,7 +30,8 @@
  *   2. the tokens that DO apply at the top level (`--w-text`, `--nav-h`, ...)
  *      still resolve to the exact pixel values the pre-WP-4e.1 literals had
  *      (960px / 64px+14px=78px / 928px), so token substitution alone changed
- *      no rendered pixel;
+ *      no rendered pixel (FONT-FLOOR-1 later made --nav-h the bar's real
+ *      69px, so the bulk bar now sits at 69+14=83px; pinned below);
  *   3. no colour/font/radius token changed (Android's VaultColors literal-
  *      pins them — out of scope for this WP by the brief's own rule);
  *   4. `--w-wall` (the library grid's width ceiling once BP-L applies) does
@@ -484,10 +485,60 @@ test(":root's base --w-text is 960px (the exact literal .view-root/.onb/.banner-
   assert.match(themeTop, /--w-text:\s*960px/);
 });
 
-test(":root's base --nav-h + 14px reproduces the old hand-derived .bulk bottom:78px", () => {
+test(":root's base --nav-h + 14px puts .bulk 14px above the nav's real top (69+14=83px; 78px before FONT-FLOOR-1)", () => {
   const m = /--nav-h:\s*(\d+)px/.exec(themeTop);
   assert.ok(m, "--nav-h not found at top level");
-  assert.equal(Number(m[1]) + 14, 78);
+  assert.equal(Number(m[1]) + 14, 83);
+});
+
+// ---------------------------------------------------------------------
+// 2c'. --nav-h is the bottom bar's real height (FONT-FLOOR-1). The token
+// was 64px while the bar rendered 68-70px (icon span on the font's line
+// box, label on the font's normal line height), so the bulk bar, toast and
+// save bar sat up to 6px over the nav. app.css now fixes the bar's boxes
+// below BP-L; this pin adds them up from the CSS and compares with the
+// token, portrait and landscape. Measured in headless Chromium at
+// 320/360/400/1000/1023px (69px) and 700x360/800x400 (48px), with the CI
+// fonts and with the host's fonts alike.
+// ---------------------------------------------------------------------
+
+test("--nav-h equals the bottom nav's box sum: border + .nav padding + .nav-btn padding + icon + gap + label line (portrait 69px, landscape 48px)", () => {
+  const px = (re, text, what) => {
+    const m = re.exec(text ?? "");
+    assert.ok(m, `${what} not found`);
+    return Number(m[1]);
+  };
+  const nav = ruleBody(appTop, ".nav") ?? "";
+  const btn = ruleBody(appTop, ".nav-btn") ?? "";
+  const border = px(/border-top:\s*(\d+)px solid/, nav, ".nav border-top");
+  const [navTop, navBottom] = /padding:\s*(\d+)px \d+px calc\((\d+)px \+ env\(safe-area-inset-bottom\)\)/.exec(nav)?.slice(1).map(Number) ?? [];
+  assert.ok(navTop !== undefined, ".nav padding (top, side, calc(bottom + inset)) not found");
+  const btnPad = px(/padding:\s*(\d+)px \d+px\s*;/, btn, ".nav-btn padding");
+  const gap = px(/gap:\s*(\d+)px/, btn, ".nav-btn gap");
+  const bar = appMedia.find((b) => b.header === "@media (max-width:1023px){");
+  assert.ok(bar, "the bottom-bar geometry block @media (max-width:1023px) is missing");
+  const icon = px(/height:\s*(\d+)px/, ruleBody(bar.body, ".nav-ic"), ".nav-ic height");
+  assert.match(ruleBody(bar.body, ".nav-ic svg") ?? "", /display:\s*block/, "the icon svg must be block (else the font's line box sets the height)");
+  const label = px(/line-height:\s*(\d+)px/, ruleBody(bar.body, ".nav-btn .nav-lb"), ".nav-lb line-height");
+  // Every nav icon is drawn at the height the box reserves.
+  const indexHtml = readFileSync(path.join(webDir, "index.html"), "utf8");
+  const icons = [...indexHtml.matchAll(/<span class="nav-ic"[^>]*>\s*<svg width="(\d+)" height="(\d+)"/g)];
+  assert.equal(icons.length, 4, "expected four nav icons in index.html");
+  for (const m of icons) assert.equal(Number(m[2]), icon, `a nav icon is ${m[2]}px tall, the box reserves ${icon}px`);
+
+  const token = px(/--nav-h:\s*(\d+)px/, themeTop, ":root --nav-h");
+  assert.equal(border + navTop + navBottom + 2 * btnPad + icon + gap + label, token, "portrait: the bar's boxes no longer add up to --nav-h");
+  assert.equal(token, 69);
+
+  const land = appMedia.find((b) => b.header === "@media (orientation:landscape) and (max-height:500px) and (max-width:1023px){");
+  assert.ok(land, "landscape block missing");
+  const landToken = px(/--nav-h:\s*(\d+)px/, land.body, "landscape --nav-h");
+  const landNavTop = px(/padding-top:\s*(\d+)px/, ruleBody(land.body, ".nav"), "landscape .nav padding-top");
+  const landNavBottom = px(/padding-bottom:\s*calc\((\d+)px \+ env/, ruleBody(land.body, ".nav"), "landscape .nav padding-bottom");
+  const landBtnPad = px(/padding:\s*(\d+)px \d+px/, ruleBody(land.body, ".nav-btn"), "landscape .nav-btn padding");
+  // Icon and label side by side: the row is as tall as the taller of the two.
+  assert.equal(border + landNavTop + landNavBottom + 2 * landBtnPad + Math.max(icon, label), landToken, "landscape: the bar's boxes no longer add up to --nav-h");
+  assert.equal(landToken, 48);
 });
 
 test(".bulk's max-width derives from --w-text/--gutter instead of repeating a second literal (928)", () => {

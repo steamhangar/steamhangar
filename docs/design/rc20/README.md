@@ -48,6 +48,22 @@ generator: `web/tests/design-tokens-contract.test.js` checks `theme.css`,
 and the status-icon logic, so a value changed on one side only fails CI.
 Change a value in the JSON first, then on both sides.
 
+One tone per state (PILL-TONE-1, audit D-1): a kind's pill tone is also its
+disc colour (`.sic.k-<kind>` in `theme.css`, `backgroundFor` on Android),
+as in the kit, where the disc is `currentColor`. The neutral tone (`null`)
+writes its word in `--dim` and draws its disc in `--dim-2`. Both contract
+tests check the disc colour against the tone. The update state reads
+"Update available" in orange on every surface.
+
+Card word rule (operator decision 2026-11-21, Weg A): the status word under
+a Library card takes its state's tone wherever the tone is an alert or a
+grey state: orange for Update available and Partially cached, red for
+Failed, `--none` for Not cached and Cached · not verified, so word, pill and
+dot agree for those states. Current and the active states (Downloading,
+Updating, Verifying, Paused) keep the `--dim` word; their dot carries the
+tone. Every coloured card word is 4.5:1 or more on the list row's
+`--surface` and on `--bg` (`web/tests/css-contrast.test.js`).
+
 ## Status (2026-10-17)
 
 All page packages of the rework are on main. The live reference for the

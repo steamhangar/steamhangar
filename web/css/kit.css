@@ -59,10 +59,16 @@
 
 /* ---------- status pill (wraps components/status-icon.js, see
    components/pill.js) ----------
-   Shape first, word second, colour third: the disc keeps its own kind
-   colour from theme.css; the pill adds the word and a tinted background so
-   the state reads at card size. Motion stays theme.css's (running arrows
-   fall, updating/verify turn, reduced motion stops it). */
+   Shape first, word second, colour third: the disc takes its kind colour
+   from theme.css; the pill adds the word and a tinted background so the
+   state reads at card size. One tone per state (WP PILL-TONE-1): every
+   kind's disc and its default pill tone (components/pill.js) use the same
+   token; every toned pill (ok, run, stale, danger, none) sits on its tone
+   mixed 14% into --surface; the neutral pill's word is --dim on --raised-2,
+   its discs --dim-2. No accent
+   tone: status colours never double as the accent. Motion stays
+   theme.css's (running arrows fall, updating/verify turn, reduced motion
+   stops it). */
 .kit .pill{
   display:inline-flex; align-items:center; gap:6px;
   font:500 var(--fs-2)/1 var(--ui); padding:5px 10px; border-radius:999px;
@@ -70,10 +76,11 @@
 }
 .kit .pill.ok{ color:var(--ok); background:color-mix(in srgb, var(--ok) 14%, var(--surface)); }
 .kit .pill.run{ color:var(--run); background:color-mix(in srgb, var(--run) 14%, var(--surface)); }
-.kit .pill.acc{ color:var(--accent); background:color-mix(in srgb, var(--accent) 14%, var(--surface)); }
 .kit .pill.stale{ color:var(--stale); background:color-mix(in srgb, var(--stale) 14%, var(--surface)); }
 .kit .pill.danger{ color:var(--danger); background:color-mix(in srgb, var(--danger) 14%, var(--surface)); }
-.kit .pill.none{ color:var(--none); }
+/* WP PILL-TONE-1: the none pill gets the tinted ground of the other tones;
+   on the plain --raised-2 its word was 4.46:1, under 4.5 for 12px text. */
+.kit .pill.none{ color:var(--none); background:color-mix(in srgb, var(--none) 14%, var(--surface)); }
 /* Disc rule (kit.html "Status vocabulary"): 16px disc, glyph box 60% of
    the diameter (9.6px), so at least 3px of disc stays visible around every
    shape. theme.css's default is --sz:17px with a 64% glyph box. The
@@ -936,6 +943,12 @@
 .kit .stt .state{ min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--dim); }
 .kit .stt .state.tx-stale, .kit .stt .state.tx-partial{ color:var(--stale); }
 .kit .stt .state.tx-error{ color:var(--danger); }
+/* WP PILL-TONE-1 (operator 2026-11-21, Weg A): the card word of the two
+   grey states takes the --none of its pill and dot, like the orange and red
+   ones take theirs: "Cached · not verified" and "Not cached" (5.65:1 on the
+   list row's --surface, 6.25:1 on --bg under a grid cover). Current and the
+   active states keep the --dim word; their dot carries the tone. */
+.kit .stt .state.tx-unverified, .kit .stt .state.tx-none{ color:var(--none); }
 .kit .stt .state .stcompact{ display:none; }
 .kit .stt .icnact{
   margin:-2px 0 -2px auto; flex:none; display:grid; place-items:center; width:22px; height:22px; padding:0;

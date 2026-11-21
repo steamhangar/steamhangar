@@ -51,16 +51,16 @@ object VaultColors {
     // colour blindness (which collapses hue onto a light-dark axis) still
     // separates them. Colour is the THIRD cue after glyph shape and word.
     val StatusOk = Color(0xFF57DD8A) // --ok (cached / current)
-    val StatusRun = Color(0xFFF2CE5B) // --run (running / updating / paused bg)
-    val StatusStale = Color(0xFFF07B2E) // --stale (update ready / warn)
-    val StatusNone = Color(0xFF8296A6) // --none (not cached) — fully desaturated
+    val StatusRun = Color(0xFFF2CE5B) // --run (running / updating / verify / paused)
+    val StatusStale = Color(0xFFF07B2E) // --stale (update available / warn / partial)
+    val StatusNone = Color(0xFF8296A6) // --none (not cached / not verified) — fully desaturated
     val StatusDanger = Color(0xFFFF6F6F) // --danger (error)
 
     // Status-icon ink: a single dark tone with high contrast against every
     // status hue above (web: `.sic { color:#08120F }`).
     val StatusIconInk = Color(0xFF08120F)
 
-    // The muted Dim2 discs (cancelled, notinuse, unverified) use this ink
+    // The muted Dim2 discs (cancelled, notinuse) use this ink
     // too since WP CONTRAST-1 (GLYPH-CONTRAST-1): 5.79:1 on Dim2, where the
     // old Text ink was 2.81:1 (web: `.sic.k-cancelled{ background:var(--dim-2); }`).
 }

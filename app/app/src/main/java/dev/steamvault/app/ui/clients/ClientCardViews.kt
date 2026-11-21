@@ -73,6 +73,12 @@ import dev.steamvault.app.ui.clients.logic.SummaryTile
 import dev.steamvault.app.ui.clients.logic.UNREMOVABLE_SLASH_NOTE
 import dev.steamvault.app.ui.clients.logic.moreChipText
 import dev.steamvault.app.ui.clients.logic.outdatedAgentsPillText
+import dev.steamvault.app.ui.status.StatusKind
+import dev.steamvault.app.ui.status.StatusTone
+import dev.steamvault.app.ui.status.discColorFor
+import dev.steamvault.app.ui.status.pillGroundColor
+import dev.steamvault.app.ui.status.pillTextColor
+import dev.steamvault.app.ui.status.toneFor
 import dev.steamvault.app.ui.theme.VaultColors
 
 /*
@@ -201,27 +207,26 @@ private fun KindIcon(kind: ClientKind, color: Color, size: Dp) {
     }
 }
 
-private fun pillColor(look: PillLook): Color = when (look) {
-    PillLook.RUNNING -> VaultColors.Accent
-    PillLook.ONLINE -> VaultColors.StatusOk
-    PillLook.OFFLINE -> VaultColors.StatusNone
-    PillLook.UNKNOWN -> VaultColors.Dim2
+/**
+ * WP PILL-TONE-1: the tone of a card pill, the web `connectionPill` kinds'
+ * default tones (running -> run, cached -> ok, notinuse / unknown ->
+ * neutral); the outdated pill is a warning (stale). Was the accent for
+ * "Downloading" until then, unlike the web's yellow.
+ */
+private fun pillTone(look: PillLook, stale: Boolean): StatusTone = when {
+    stale -> toneFor(StatusKind.WARN)
+    look == PillLook.RUNNING -> toneFor(StatusKind.RUNNING)
+    look == PillLook.ONLINE -> toneFor(StatusKind.CACHED)
+    else -> toneFor(StatusKind.NOTINUSE)
 }
 
 /** Kit `.pill`: dot + word on a rounded chip; the dot is decoration. */
 @Composable
 private fun StatusPill(pill: CardPill, stale: Boolean = false) {
-    val dot = if (stale) VaultColors.StatusStale else pillColor(pill.look)
-    val text = when {
-        stale -> VaultColors.StatusStale
-        pill.look == PillLook.OFFLINE || pill.look == PillLook.UNKNOWN -> VaultColors.Dim
-        else -> dot
-    }
-    val bg = when {
-        stale -> VaultColors.StatusStale.copy(alpha = 0.12f)
-        pill.look == PillLook.RUNNING -> VaultColors.AccentGlow
-        else -> VaultColors.Raised
-    }
+    val tone = pillTone(pill.look, stale)
+    val dot = discColorFor(tone)
+    val text = pillTextColor(tone)
+    val bg = pillGroundColor(tone)
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier.clip(RoundedCornerShape(99.dp)).background(bg).padding(start = 8.dp, end = 10.dp, top = 3.dp, bottom = 3.dp),

@@ -28,7 +28,7 @@ import {
 test("metaFor: every real event type has literal icon/tx/word metadata", () => {
   assert.deepEqual(metaFor("job_finished"), { icon: "cached", tx: "tx-cached", word: "Cached" });
   assert.deepEqual(metaFor("job_failed"), { icon: "error", tx: "tx-error", word: "Failed" });
-  assert.deepEqual(metaFor("update_ready"), { icon: "stale", tx: "tx-stale", word: "Update ready" });
+  assert.deepEqual(metaFor("update_ready"), { icon: "stale", tx: "tx-stale", word: "Update available" });
   assert.deepEqual(metaFor("bypass_suspected"), { icon: "warn", tx: "tx-warn", word: "Warning" });
   assert.deepEqual(metaFor("bypass_resolved"), { icon: "cached", tx: "tx-cached", word: "Resolved" });
   assert.deepEqual(metaFor("update_check_due"), { icon: "stale", tx: "tx-stale", word: "Check due" });
@@ -267,4 +267,11 @@ test("ackUpdateCheckDue adds the entry's games; pruneUpdateCheckDueSeen forgets 
   assert.deepEqual(ackUpdateCheckDue([5], []), [5], "no entry: unchanged");
   assert.deepEqual(pruneUpdateCheckDueSeen([3, 5, 9], [{ appid: 9 }, { appid: 3 }]), [3, 9]);
   assert.deepEqual(pruneUpdateCheckDueSeen([3, 9], []), [], "all checked: a later overdue episode is news again");
+});
+
+test("WP PILL-TONE-1 (UPDATE-WORD-1): the update entry's text says 'available', twin of the Android notification body", async () => {
+  const { readFileSync } = await import("node:fs");
+  const src = readFileSync(new URL("../js/components/notifications.js", import.meta.url), "utf8");
+  assert.ok(src.includes('"A newer manifest exists upstream — an update is available to download."'));
+  assert.ok(!/update is ready/.test(src), "the retired 'ready' wording is back in notifications.js");
 });

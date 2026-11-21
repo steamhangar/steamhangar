@@ -160,7 +160,7 @@ test("MUTATION TARGET: status-icon words are pinned (the About '?' kind reads 'C
       cached: "Current",
       running: "Downloading",
       updating: "Updating",
-      stale: "Update ready",
+      stale: "Update available",
       none: "Not cached",
       paused: "Paused",
       verify: "Verifying",

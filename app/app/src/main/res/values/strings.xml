@@ -13,7 +13,7 @@
     <string name="status_cached">Current</string>
     <string name="status_running">Downloading</string>
     <string name="status_updating">Updating</string>
-    <string name="status_stale">Update ready</string>
+    <string name="status_stale">Update available</string>
     <string name="status_none">Not cached</string>
     <string name="status_paused">Paused</string>
     <string name="status_verify">Verifying</string>
@@ -395,7 +395,7 @@
     <string name="notif_channel_downloads_name">Downloads</string>
     <string name="notif_channel_downloads_desc">Finished and failed downloads</string>
     <string name="notif_channel_updates_name">Updates</string>
-    <string name="notif_channel_updates_desc">Games with an update ready to download</string>
+    <string name="notif_channel_updates_desc">Games with an update available to download</string>
     <string name="notif_channel_bypass_name">Cache bypass warnings</string>
     <string name="notif_channel_bypass_desc">A client appears to be bypassing the cache</string>
 
@@ -403,7 +403,9 @@
          mockup's bell-panel vocabulary (mockup-notes.md round 5/6: "Cached",
          "Update ready", "Warnings", "Failures") and this app's own
          status-word table (ui/downloads/logic/JobPartition.kt's
-         PREFILL_WORD) rather than inventing new phrasing. -->
+         PREFILL_WORD) rather than inventing new phrasing. WP PILL-TONE-1
+         (UPDATE-WORD-1): the update state reads "Update available"
+         everywhere, the mockup's "Update ready" is gone. -->
     <string name="notif_job_finished_title">Download finished</string>
     <string name="notif_job_finished_body">App %1$d is now cached.</string>
     <string name="notif_job_failed_title">Download failed</string>
@@ -413,8 +415,8 @@
          genuine plural candidates elsewhere in this file
          (settings_steam_library_count et al., see their own comment). -->
     <string name="notif_job_failed_body" tools:ignore="PluralsCandidate">The download for app %1$d failed — check Downloads for details.</string>
-    <string name="notif_update_ready_title">Update ready</string>
-    <string name="notif_update_ready_body">%1$s has an update ready to download.</string>
+    <string name="notif_update_ready_title">Update available</string>
+    <string name="notif_update_ready_body">%1$s has an update available to download.</string>
     <string name="notif_bypass_suspected_title">Cache bypass suspected</string>
     <string name="notif_bypass_suspected_body">Client %1$s may be bypassing the cache.</string>
     <string name="notif_bypass_resolved_title">Cache bypass resolved</string>

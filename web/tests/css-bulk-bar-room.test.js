@@ -102,7 +102,7 @@ test("blocks exist (guard against a silent no-op suite)", () => {
 // 1. Tokens
 // ---------------------------------------------------------------------
 
-test("theme.css: --bulk-gap is 14px (the pre-fix literal, so --nav-h + gap still = 78px) and --bulk-h has a px fallback", () => {
+test("theme.css: --bulk-gap is 14px (the pre-fix literal; --nav-h + gap = 83px since FONT-FLOOR-1 made --nav-h the real 69px) and --bulk-h has a px fallback", () => {
   const root = ruleBody(theme.topLevel, ":root") ?? "";
   assert.match(root, /--bulk-gap:\s*14px\s*;/);
   const h = /--bulk-h:\s*(\d+)px\s*;/.exec(root);
@@ -111,7 +111,7 @@ test("theme.css: --bulk-gap is 14px (the pre-fix literal, so --nav-h + gap still
   // + 30px head + 8px gap + 16px note + 8px gap + 30px buttons = 114px.
   assert.ok(Number(h[1]) >= 114, `--bulk-h fallback ${h[1]}px is smaller than the smallest real bar`);
   const nav = /--nav-h:\s*(\d+)px/.exec(root);
-  assert.equal(Number(nav[1]) + 14, 78);
+  assert.equal(Number(nav[1]) + 14, 83);
 });
 
 // ---------------------------------------------------------------------

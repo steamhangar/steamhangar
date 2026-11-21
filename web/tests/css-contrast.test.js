@@ -15,7 +15,10 @@
  *   (e) the selected `.seg` / `.segi` segment, whose --raised-2 fill is only
  *       1.27:1 on --surface, carries a --dim-2 inset ring (5.25:1 on
  *       --surface, 4.15:1 on --raised-2) as its 3:1 state indicator, and so
- *       does the selected Add-a-device tab (`.ad-tabs`, fill 1.40:1 on --bg).
+ *       does the selected Add-a-device tab (`.ad-tabs`, fill 1.40:1 on --bg);
+ *   (f) WP PILL-TONE-1: every status pill's word on its own ground (the
+ *       tone mixed 14% into --surface, --raised-2 for the neutral pill) is
+ *       4.5:1 or more, and the glyph ink on every disc colour a state uses.
  *
  * The ratios are computed from docs/design/tokens.json with the WCAG 2.x
  * relative-luminance formula, so a token change that breaks a promise
@@ -118,8 +121,56 @@ test("no .sic.k-* rule overrides the shared dark glyph ink", () => {
     assert.doesNotMatch(m[2], /(^|[;\s])color\s*:/, `theme.css "${m[1].trim()}" sets its own glyph colour`);
   }
   assert.ok(checked >= 13, `expected the .sic.k-* rules, found ${checked}`);
-  for (const kind of ["cancelled", "unknown", "notinuse", "unverified"]) {
+  for (const kind of ["cancelled", "unknown", "notinuse"]) {
     assert.match(themeCss, new RegExp(`\\.sic\\.k-${kind}\\b[^{]*\\{\\s*background:var\\(--dim-2\\);\\s*\\}`), `.sic.k-${kind}`);
+  }
+  // WP PILL-TONE-1: "Not verified" takes the --none grey of its pill and card dot.
+  assert.match(themeCss, /\.sic\.k-unverified\{\s*background:var\(--none\);\s*\}/);
+});
+
+/** `color-mix(in srgb, A P%, B)` per channel, rounded like a #RRGGBB value. */
+function mix(a, b, p) {
+  const ch = (hex, i) => parseInt(hex.slice(1 + 2 * i, 3 + 2 * i), 16);
+  return "#" + [0, 1, 2].map((i) => Math.round(ch(a, i) * p + ch(b, i) * (1 - p)).toString(16).padStart(2, "0")).join("").toUpperCase();
+}
+
+test("PILL-TONE-1: each pill's word on its own ground, and the glyph ink on each disc colour", () => {
+  // The tinted grounds are kit.css's `color-mix(in srgb, var(--T) 14%, var(--surface))`;
+  // since PILL-TONE-1 the none pill too (on --raised-2 it was 4.46:1).
+  for (const tone of ["ok", "run", "stale", "danger", "none"]) {
+    assert.match(ruleBody(kitCss, `.kit .pill.${tone}`) ?? "", new RegExp(`color:var\\(--${tone}\\); background:color-mix\\(in srgb, var\\(--${tone}\\) 14%, var\\(--surface\\)\\)`), tone);
+  }
+  assert.match(ruleBody(kitCss, ".kit .pill") ?? "", /background:var\(--raised-2\); color:var\(--dim\)/);
+  const pairs = {
+    ok: [color("ok"), mix(color("ok"), color("surface"), 0.14), 7.39],
+    run: [color("run"), mix(color("run"), color("surface"), 0.14), 8.21],
+    stale: [color("stale"), mix(color("stale"), color("surface"), 0.14), 5.16],
+    danger: [color("danger"), mix(color("danger"), color("surface"), 0.14), 5.24],
+    none: [color("none"), mix(color("none"), color("surface"), 0.14), 4.6],
+    neutral: [color("dim"), color("raised-2"), 5.05],
+  };
+  for (const [tone, [fg, ground, expected]] of Object.entries(pairs)) {
+    const r = ratio(fg, ground);
+    assert.equal(round2(r), expected, `${tone} pill word`);
+    assert.ok(r >= 4.5, `${tone} pill word is ${r.toFixed(2)}:1, under WCAG AA for 12px text`);
+  }
+  // Every pill tone kit.css defines is covered above, each at 4.5:1 or more.
+  const tones = [...kitCss.matchAll(/\.kit \.pill\.([a-z]+)\s*\{/g)].map((m) => m[1]).sort();
+  assert.deepEqual(tones, ["danger", "none", "ok", "run", "stale"]);
+  // The card word of the grey states ("Not cached", "Cached · not verified":
+  // --none, app.css .tx-none / .tx-unverified, kit .stt .state) on the list
+  // row's --surface and the grid's --bg, both 4.5:1 or more.
+  assert.match(ruleBody(kitCss, ".kit .stt .state.tx-unverified, .kit .stt .state.tx-none") ?? "", /color:var\(--none\)/);
+  for (const ground of ["surface", "bg"]) assert.ok(ratio(color("none"), color(ground)) >= 4.5, `--none word on --${ground}`);
+  assert.equal(round2(ratio(color("none"), color("surface"))), 5.65);
+  assert.equal(round2(ratio(color("none"), color("bg"))), 6.25);
+  // Why the none pill needed its own ground: on --raised-2 the word is 4.46:1.
+  assert.ok(ratio(color("none"), color("raised-2")) < 4.5, "the plain ground would pass now; recheck");
+  // Glyph ink on every disc colour a state uses: all far above 3:1.
+  const ink = tokens.color_literal["sic-ink"];
+  const discs = { ok: 10.98, run: 12.46, stale: 6.87, danger: 7.03, none: 6.22, "dim-2": 5.79 };
+  for (const [name, expected] of Object.entries(discs)) {
+    assert.equal(round2(ratio(ink, color(name))), expected, `sic-ink on --${name}`);
   }
 });
 

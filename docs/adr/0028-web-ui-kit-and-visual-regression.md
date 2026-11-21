@@ -73,3 +73,15 @@ page could drift from its mockup without any test turning red.
 `docs/design/tokens.json` and `docs/design/status-vocabulary.json` pin colours, scale, radii and the status vocabulary for web and Android; tests on both sides are the generator.
 `Color.kt`'s `Dim2` now matches the lifted #7A91A0, which settles the last consequence above.
 Android `Type.kt` is a Material ramp, not a mirror of `--fs-*`, and stays outside the contract until the rc21 Compose follow-up.
+
+## Addendum: type floor (FONT-FLOOR-1, 2026-11-21)
+
+Audit D-3 found 21 legacy `app.css` rules at 8.5-10.5px, below `--fs-1` (11px), the floor `theme.css` names "never below this".
+That debt is paid: all 21 now read `var(--fs-1)`: `.nav-btn .nav-lb`, `.nav-pip`, `.bulk .count .hid`, `.cflabel`, `.cflist .mk`, `h4.sec`, `.field label`, `.tag`, `.stepnum`, `.npip`, `.notif .nw`, `.notif .nwhen`, `.about-table td[data-label]::before`, `.depot .tag`, `.olabel`, `.orow .os`, `.ohint`, `.pkg-row .pkgstate`, `.detail-log`, `.about-table thead th` and `.rail-version`.
+No rule needed `--fs-2`, because the kit's own uppercase section label is `--fs-1` too.
+Decision 2's pin drops from 95 to 74, the real count, and `css-kit-scale.test.js` gains a floor lint over `theme.css`, `kit.css` and `app.css`: no px size below 11px (`.9px` and the `font:` shorthand included), no `calc()` that resolves below it, and no em/rem font size at all.
+The bottom nav still fits "Downloads" and the other labels unclipped at 320, 360 and 400px.
+The same package made `--nav-h` the bar's real height: the bar rendered 68-70px (its height depended on the font) against a 64px token, so the bulk bar, toast and save bar sat over its top edge.
+Below BP-L the icon box and the label line are now fixed (21px, 16px), the bar is 69px with any font and `--nav-h` is 69px; landscape stays at the decided 48px (its button padding went from 8px to 9px).
+`css-layout-foundation.test.js` adds the boxes up and pins them to the token.
+Android needs no change: `tokens.json`'s `fs` group is unchanged, and the app's smallest text size is already 11sp (`Type.kt` `labelSmall`).
