@@ -77,7 +77,7 @@ import org.robolectric.annotation.Config
 class SettingsExpertSwitchTest {
 
     @get:Rule(order = 0)
-    val hostActivity: TestRule = RegisterSettingsHostActivityRule()
+    val hostActivity: TestRule = RegisterExpertSwitchHostActivityRule()
 
     @get:Rule(order = 1)
     val composeRule = createAndroidComposeRule<ComponentActivity>()
@@ -144,11 +144,11 @@ class SettingsExpertSwitchTest {
     private fun controller(): SettingsController {
         val demo = DemoState.fresh()
         return SettingsController(
-            ExpertRowsSettings(DemoSettingsRepository(demo)),
+            ExpertSwitchRowsSettings(DemoSettingsRepository(demo)),
             DemoScheduleRepository(demo),
             InMemoryCredentialStore(),
-            NoIdentity(),
-            PlainStrings(),
+            ExpertSwitchNoIdentity(),
+            ExpertSwitchStrings(),
             DemoSteamRelayRepository(demo),
             DemoAboutRepository(demo),
         ).also { it.selectSection("about") }
@@ -212,7 +212,7 @@ class SettingsExpertSwitchTest {
 
 /** The demo settings with the expert flag on every key of an Expert group
  * (the demo itself marks none, so the switch row would be hidden). */
-private class ExpertRowsSettings(private val base: SettingsRepository) : SettingsRepository {
+private class ExpertSwitchRowsSettings(private val base: SettingsRepository) : SettingsRepository {
     private val expertKeys = SettingsLayout.EXPERT_GROUPS.flatMap { it.keys }.toSet()
 
     private fun mark(out: SettingsOut): SettingsOut {
@@ -225,7 +225,7 @@ private class ExpertRowsSettings(private val base: SettingsRepository) : Setting
     override suspend fun patch(updates: Map<String, JsonElement?>): SettingsOut = mark(base.patch(updates))
 }
 
-private class NoIdentity : SteamIdentityRepository {
+private class ExpertSwitchNoIdentity : SteamIdentityRepository {
     override fun state(): SteamIdentityState = SteamIdentityState(null, null)
     override fun buildLoginUrl(vaultBaseUrl: String): String? = null
     override suspend fun completeLogin(rawCallbackUrl: String): SteamLoginResult = SteamLoginResult.Success("76561198042117903")
@@ -234,7 +234,7 @@ private class NoIdentity : SteamIdentityRepository {
     override fun signOut() {}
 }
 
-private class PlainStrings : SettingsStrings {
+private class ExpertSwitchStrings : SettingsStrings {
     override fun loadFailedFallback(cause: Throwable) = "load failed"
     override fun savedToast() = "saved"
     override fun saveFailedFallback() = "save failed"
@@ -247,7 +247,7 @@ private class PlainStrings : SettingsStrings {
 /** Same reason as `GameCardInstalledSemanticsTest`'s rule: register the bare
  * host activity with Robolectric for the test only (order 0). Own name: a
  * private top-level class still takes a JVM class name in this package. */
-private class RegisterSettingsHostActivityRule : TestRule {
+private class RegisterExpertSwitchHostActivityRule : TestRule {
     override fun apply(base: Statement, description: Description): Statement = object : Statement() {
         override fun evaluate() {
             val app = RuntimeEnvironment.getApplication()

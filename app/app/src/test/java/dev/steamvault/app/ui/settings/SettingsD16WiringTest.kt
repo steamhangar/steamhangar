@@ -99,7 +99,7 @@ class SettingsD16WiringTest {
     }
 
     @Test
-    fun `MUTATION PIN -- About panel order: the component list, the expert switch row, then the trademark line`() {
+    fun `MUTATION PIN -- About panel order is the component list, the expert switch row, then the trademark line`() {
         // WP APP-EXPERT-SWITCH-1 (web compact: the row before the About
         // footer): the switch never sits below the disclaimer.
         val text = code(screen)
