@@ -2,5 +2,5 @@
 <!-- Ground tone from the mockup palette (theme.css var bg). -->
 <shape xmlns:android="http://schemas.android.com/apk/res/android"
     android:shape="rectangle">
-    <solid android:color="#0A1016" />
+    <solid android:color="#081113" />
 </shape>

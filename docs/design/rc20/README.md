@@ -33,7 +33,8 @@ in a browser; they need no server.
 `kit.html` wins over the page mockups where they differ: Clients cards are
 one per row in three zones (not a two-column grid), the Downloads hero puts
 the four totals beside the graph and the page has three columns, pills wrap
-the `status-icon.js` disc instead of a dot, `--dim-2` is #7A91A0. The page
+the `status-icon.js` disc instead of a dot, `--dim-2` is the lifted #7A91A0
+(#7C9298 since NEUTRAL-RAMP-1). The page
 mockups remain the reference for everything the kit does not show
 (drawer, Settings panels, Library toolbar and detail sheet).
 

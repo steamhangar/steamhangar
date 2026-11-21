@@ -9,12 +9,12 @@
  *       inputs still in use: onboarding, Clients rename, Library search);
  *   (c) no status disc overrides the shared dark ink: the grey --dim-2
  *       discs (cancelled, unknown, notinuse, unverified) draw their glyph
- *       in sic-ink (5.79:1), not --text (2.81:1);
+ *       in sic-ink (5.82:1), not --text (2.80:1);
  *   (d) on the --raised-2 Filters popover, where --line-strong is only
- *       2.72:1, the select and year field take --dim-2 (4.15:1);
+ *       2.74:1, the select and year field take --dim-2 (4.17:1);
  *   (e) the selected `.seg` / `.segi` segment, whose --raised-2 fill is only
- *       1.27:1 on --surface, carries a --dim-2 inset ring (5.25:1 on
- *       --surface, 4.15:1 on --raised-2) as its 3:1 state indicator, and so
+ *       1.26:1 on --surface, carries a --dim-2 inset ring (5.26:1 on
+ *       --surface, 4.17:1 on --raised-2) as its 3:1 state indicator, and so
  *       does the selected Add-a-device tab (`.ad-tabs`, fill 1.40:1 on --bg);
  *   (f) WP PILL-TONE-1: every status pill's word on its own ground (the
  *       tone mixed 14% into --surface, --raised-2 for the neutral pill) is
@@ -22,7 +22,9 @@
  *
  * The ratios are computed from docs/design/tokens.json with the WCAG 2.x
  * relative-luminance formula, so a token change that breaks a promise
- * fails here, not only in an audit.
+ * fails here, not only in an audit. WP NEUTRAL-RAMP-1 (audit D-7) turned the
+ * neutral ramp toward the accent hue and recomputed every pin below; no
+ * pair dropped under its WCAG target.
  *
  * Run: node --test "web/tests/*.test.js"   (see web/tests/README.md)
  */
@@ -71,8 +73,8 @@ function ruleBody(css, selector) {
 }
 
 test("--line-strong is 3:1 or more on --bg, --surface and --raised (WCAG 1.4.11); --line is not", () => {
-  assert.equal(color("line-strong"), "#5F727E");
-  const grounds = { bg: 3.82, surface: 3.45, raised: 3.13 };
+  assert.equal(color("line-strong"), "#5F7379");
+  const grounds = { bg: 3.83, surface: 3.45, raised: 3.12 };
   for (const [ground, expected] of Object.entries(grounds)) {
     const r = ratio(color("line-strong"), color(ground));
     assert.ok(r >= 3, `--line-strong on --${ground} is ${r.toFixed(2)}:1`);
@@ -81,10 +83,10 @@ test("--line-strong is 3:1 or more on --bg, --surface and --raised (WCAG 1.4.11)
   }
 });
 
-test("the grey status discs: sic-ink on --dim-2 is 5.79:1, --text on --dim-2 only 2.81:1", () => {
+test("the grey status discs: sic-ink on --dim-2 is 5.82:1, --text on --dim-2 only 2.80:1", () => {
   const ink = tokens.color_literal["sic-ink"];
-  assert.equal(round2(ratio(ink, color("dim-2"))), 5.79);
-  assert.equal(round2(ratio(color("text"), color("dim-2"))), 2.81);
+  assert.equal(round2(ratio(ink, color("dim-2"))), 5.82);
+  assert.equal(round2(ratio(color("text"), color("dim-2"))), 2.80);
   assert.ok(ratio(ink, color("dim-2")) >= 4.5);
 });
 
@@ -107,7 +109,7 @@ test("inputs, selects and the sort / icon segment boxes take their border from -
 });
 
 test("--line stays the separator and card line (unchanged token, still used)", () => {
-  assert.equal(color("line"), "#24363F");
+  assert.equal(color("line"), "#26363B");
   assert.match(ruleBody(kitCss, ".kit .btn") ?? "", /border:\s*1px solid var\(--line\)/);
   // The divider inside the fused sort box is a separator, not the control edge.
   assert.match(ruleBody(kitCss, ".kit .sortg button") ?? "", /border-left:\s*1px solid var\(--line\)/);
@@ -142,12 +144,12 @@ test("PILL-TONE-1: each pill's word on its own ground, and the glyph ink on each
   }
   assert.match(ruleBody(kitCss, ".kit .pill") ?? "", /background:var\(--raised-2\); color:var\(--dim\)/);
   const pairs = {
-    ok: [color("ok"), mix(color("ok"), color("surface"), 0.14), 7.39],
-    run: [color("run"), mix(color("run"), color("surface"), 0.14), 8.21],
-    stale: [color("stale"), mix(color("stale"), color("surface"), 0.14), 5.16],
-    danger: [color("danger"), mix(color("danger"), color("surface"), 0.14), 5.24],
-    none: [color("none"), mix(color("none"), color("surface"), 0.14), 4.6],
-    neutral: [color("dim"), color("raised-2"), 5.05],
+    ok: [color("ok"), mix(color("ok"), color("surface"), 0.14), 7.33],
+    run: [color("run"), mix(color("run"), color("surface"), 0.14), 8.14],
+    stale: [color("stale"), mix(color("stale"), color("surface"), 0.14), 5.12],
+    danger: [color("danger"), mix(color("danger"), color("surface"), 0.14), 5.26],
+    none: [color("none"), mix(color("none"), color("surface"), 0.14), 4.58],
+    neutral: [color("dim"), color("raised-2"), 5.06],
   };
   for (const [tone, [fg, ground, expected]] of Object.entries(pairs)) {
     const r = ratio(fg, ground);
@@ -162,29 +164,29 @@ test("PILL-TONE-1: each pill's word on its own ground, and the glyph ink on each
   // row's --surface and the grid's --bg, both 4.5:1 or more.
   assert.match(ruleBody(kitCss, ".kit .stt .state.tx-unverified, .kit .stt .state.tx-none") ?? "", /color:var\(--none\)/);
   for (const ground of ["surface", "bg"]) assert.ok(ratio(color("none"), color(ground)) >= 4.5, `--none word on --${ground}`);
-  assert.equal(round2(ratio(color("none"), color("surface"))), 5.65);
+  assert.equal(round2(ratio(color("none"), color("surface"))), 5.63);
   assert.equal(round2(ratio(color("none"), color("bg"))), 6.25);
   // Why the none pill needed its own ground: on --raised-2 the word is 4.46:1.
   assert.ok(ratio(color("none"), color("raised-2")) < 4.5, "the plain ground would pass now; recheck");
   // Glyph ink on every disc colour a state uses: all far above 3:1.
   const ink = tokens.color_literal["sic-ink"];
-  const discs = { ok: 10.98, run: 12.46, stale: 6.87, danger: 7.03, none: 6.22, "dim-2": 5.79 };
+  const discs = { ok: 10.98, run: 12.46, stale: 6.87, danger: 7.03, none: 6.22, "dim-2": 5.82 };
   for (const [name, expected] of Object.entries(discs)) {
     assert.equal(round2(ratio(ink, color(name))), expected, `sic-ink on --${name}`);
   }
 });
 
 test("Filters popover (--raised-2): select and year field borders are --dim-2, 3:1 on both sides", () => {
-  assert.equal(round2(ratio(color("line-strong"), color("raised-2"))), 2.72);
-  assert.equal(round2(ratio(color("dim-2"), color("raised-2"))), 4.15);
-  assert.equal(round2(ratio(color("dim-2"), color("bg"))), 5.81);
+  assert.equal(round2(ratio(color("line-strong"), color("raised-2"))), 2.74);
+  assert.equal(round2(ratio(color("dim-2"), color("raised-2"))), 4.17);
+  assert.equal(round2(ratio(color("dim-2"), color("bg"))), 5.84);
   assert.match(ruleBody(appCss, ".pop") ?? "", /background:\s*var\(--raised-2\)/, "the popover ground changed; recheck the border token");
   assert.match(ruleBody(kitCss, ".kit .lib-meta select, .kit .lib-meta-year") ?? "", /border:\s*1px solid var\(--dim-2\)/);
 });
 
 test("the selected .seg / .segi segment has a --dim-2 inset ring (3:1 state indicator)", () => {
   assert.ok(ratio(color("raised-2"), color("surface")) < 3, "the fill alone would pass; recheck");
-  assert.equal(round2(ratio(color("dim-2"), color("surface"))), 5.25);
+  assert.equal(round2(ratio(color("dim-2"), color("surface"))), 5.26);
   assert.ok(ratio(color("dim-2"), color("raised-2")) >= 3);
   for (const selector of ['.kit .seg button[aria-pressed="true"]', '.kit .segi button[aria-pressed="true"]']) {
     const body = ruleBody(kitCss, selector);
@@ -196,7 +198,7 @@ test("the selected .seg / .segi segment has a --dim-2 inset ring (3:1 state indi
 
 test("the selected Add-a-device tab has the same --dim-2 inset ring (fill 1.40:1 on the --bg strip)", () => {
   assert.equal(round2(ratio(color("raised-2"), color("bg"))), 1.4);
-  assert.equal(round2(ratio(color("dim-2"), color("bg"))), 5.81);
+  assert.equal(round2(ratio(color("dim-2"), color("bg"))), 5.84);
   assert.match(ruleBody(kitCss, ".kit .ad-tabs") ?? "", /background:\s*var\(--bg\)/, "the tab strip ground changed; recheck the ring");
   const body = ruleBody(kitCss, '.kit .ad-tabs .tab[aria-selected="true"]');
   assert.ok(body !== null, "kit.css has no selected .ad-tabs .tab rule");
