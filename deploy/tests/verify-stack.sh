@@ -1430,6 +1430,49 @@ assert_contains "$core_boot" "21-vault-volume-ownership.sh: volume ownership OK"
 sec5_live "named volume (fresh)" 4291 off
 
 fi
+if vs_step 4e; then
+step "4e. SEC-HARDEN-1 (audit S-3): read-only root filesystems, root-owned code"
+say 'vault-api, vault-runner and vault-proxy run with read_only: true and a'
+say 'tmpfs /tmp (vault-proxy also /run/tinyproxy, uid 100; vault-dns is'
+say 'checked in section 7). Measured in the running containers: a write'
+say 'outside the volumes and tmpfs fails, /tmp works, and the code and the'
+say 'SteamPrefill binary are root-owned (api/Dockerfile chowns only the data'
+say 'paths). The stack reaching healthy in step 4 and the runner and proxy'
+say 'steps in section 6 show the writable set is enough.'
+for ro_svc in vault-api vault-runner vault-proxy; do
+    ro_val=$(docker inspect --format '{{.HostConfig.ReadonlyRootfs}}' "$(dc ps -q "$ro_svc")" 2>&1)
+    assert_eq "true" "$ro_val" "$ro_svc runs with a read-only root filesystem"
+done
+for ro_svc in vault-api vault-runner; do
+    ro_out=$(dc exec -T "$ro_svc" sh -c 'touch /app/sec-harden-1 2>/dev/null && echo wrote-app; touch /opt/steamprefill/sec-harden-1 2>/dev/null && echo wrote-opt; t=$(mktemp) && echo tmp-ok && rm -f "$t"; df -k /tmp | awk "NR == 2 { print \"tmp-kb=\" \$2 }"; stat -c "%n %u:%g" /app /app/vault_api /opt/steamprefill /opt/steamprefill/SteamPrefill' 2>&1 | tr -d '\r')
+    printf '%s\n' "$ro_out" | sed 's/^/    /'
+    assert_not_contains "$ro_out" "wrote-app" "$ro_svc: a write to /app fails"
+    assert_not_contains "$ro_out" "wrote-opt" "$ro_svc: a write to /opt/steamprefill fails"
+    assert_contains "$ro_out" "tmp-ok" "$ro_svc: /tmp is writable (tmpfs)"
+    assert_contains "$ro_out" "tmp-kb=262144" "$ro_svc: the /tmp tmpfs is capped at 256 MiB"
+    assert_contains "$ro_out" "/app 0:0" "$ro_svc: /app is root-owned"
+    assert_contains "$ro_out" "/app/vault_api 0:0" "$ro_svc: the code is root-owned"
+    assert_contains "$ro_out" "/opt/steamprefill/SteamPrefill 0:0" "$ro_svc: the SteamPrefill binary is root-owned"
+done
+say 'SteamPrefill writes app.log into its current directory. prefill.run_prefill'
+say 'runs it with cwd /opt/steamprefill (the binary'"'"'s directory); 6f covers the'
+say 'image WORKDIR /app. Same credential-free run as 6f, stdin closed, from'
+say 'that cwd: it must reach the login logic, and app.log must land on /tmp.'
+sp_own=$(dc exec -T vault-runner stat -c '%u' /tmp/steamprefill-app.log 2>&1 | tr -d '\r')
+assert_eq "101" "$sp_own" "vault-runner: app.log was created by the runner (uid 101) at start, so a root login only appends to it"
+sp_cwd=$(dc exec -T -w /opt/steamprefill vault-runner sh -c '/opt/steamprefill/SteamPrefill select-apps </dev/null 2>&1 | head -8; test -f /tmp/steamprefill-app.log && echo app-log-on-tmp' 2>&1 | strip_ansi | tr -d '\r')
+printf '%s\n' "$sp_cwd" | sed 's/^/    /'
+assert_contains "$sp_cwd" "account is required in order to prefill apps" "vault-runner: SteamPrefill run from /opt/steamprefill reaches its login logic"
+assert_not_contains "$sp_cwd" "UnauthorizedAccessException" "vault-runner: no app.log permission error from the prefill cwd"
+assert_not_contains "$sp_cwd" "Read-only file system" "vault-runner: no app.log read-only error from the prefill cwd"
+assert_contains "$sp_cwd" "app-log-on-tmp" "vault-runner: app.log lands on the /tmp tmpfs through the image's link"
+proxy_ro=$(dc exec -T vault-proxy sh -c 'touch /etc/tinyproxy/sec-harden-1 2>/dev/null && echo wrote-etc; stat -c "%n %u:%g" /run/tinyproxy /run/tinyproxy/tinyproxy.conf /run/tinyproxy/filter' 2>&1 | tr -d '\r')
+printf '%s\n' "$proxy_ro" | sed 's/^/    /'
+assert_not_contains "$proxy_ro" "wrote-etc" "vault-proxy: a write to /etc/tinyproxy fails"
+assert_contains "$proxy_ro" "/run/tinyproxy 100:101" "vault-proxy: the /run/tinyproxy tmpfs belongs to the proxy account"
+assert_contains "$proxy_ro" "/run/tinyproxy/filter 100:101" "vault-proxy: the entrypoint rendered the filter onto the tmpfs"
+
+fi
 vs_end
 else
     vs_skip 4
@@ -2587,6 +2630,14 @@ while [ "$i" -lt 20 ]; do
     i=$((i + 1)); sleep 2
 done
 assert_eq "healthy" "$dns_h" "vault-dns container healthcheck"
+# SEC-HARDEN-1 (audit S-3): healthy on a read-only root filesystem, with the
+# rendered config and the pid file on the /run tmpfs.
+dns_ro=$(docker inspect --format '{{.HostConfig.ReadonlyRootfs}}' "$(dc ps -q vault-dns)" 2>&1)
+assert_eq "true" "$dns_ro" "vault-dns runs with a read-only root filesystem (SEC-HARDEN-1)"
+dns_rw=$(dc exec -T vault-dns sh -c 'touch /etc/sec-harden-1 2>/dev/null && echo wrote-etc; test -s /run/vault-dns/dnsmasq.conf && echo conf-on-run; test -s /run/dnsmasq.pid && echo pid-on-run' 2>&1 | tr -d '\r')
+assert_not_contains "$dns_rw" "wrote-etc" "vault-dns: a write to /etc fails (read-only root)"
+assert_contains "$dns_rw" "conf-on-run" "vault-dns: the rendered config sits on the /run tmpfs"
+assert_contains "$dns_rw" "pid-on-run" "vault-dns: dnsmasq wrote its pid file on the /run tmpfs"
 dns_ver=$(dc exec -T vault-dns printenv VAULT_BUILD_VERSION 2>/dev/null | tr -d '\r')
 dns_commit=$(dc exec -T vault-dns printenv VAULT_BUILD_COMMIT 2>/dev/null | tr -d '\r')
 assert_eq "dev"     "$dns_ver"    "vault-dns: VAULT_BUILD_VERSION in the running container (WP VER-1)"

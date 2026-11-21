@@ -25,7 +25,7 @@
 
 # Leaves in script order. Section 2, 3 and 7-11 are leaves themselves;
 # sections 4, 5 and 6 are groups of steps.
-VS_GROUP_4="4-settings 3.5-runner 4a 4b 4c 4d"
+VS_GROUP_4="4-settings 3.5-runner 4a 4b 4c 4d 4e"
 VS_GROUP_5="5a 5a2 5b 5c 5d 5e 5f 5g 5h 5i 5j"
 VS_GROUP_6="6a 6b 6c 6d 6e 6f 6g 6h 6i 6i-core 6s 6v 6w 6x 6j 6k 6l"
 VS_SECTIONS="1 2 3 4 5 6 7 8 9 10 11"

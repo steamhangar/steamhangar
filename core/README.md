@@ -254,6 +254,16 @@ in case a future edit ever reintroduces a temp dir under `cache/` again.
 `core/tests/test-core.ps1` test 9 asserts `GET /tmp/proxy/whatever` returns
 404.
 
+**Catch-all (SEC-HARDEN-1, audit S-6):** `root cache;` used to serve any
+file under `cache/` to a request that no location took, so a stray file
+next to `cache/depot/` was readable by every LAN host. A catch-all
+`location / { return 404; }` now answers everything outside the named
+locations. It is the shortest prefix, so `/depot/` (and its `@miss`),
+`^~ /tmp/`, `^~ /steamhangar/runner-mark/`, `= /health` and
+`= /lancache-heartbeat` keep their own handling. `/` itself answers 404
+instead of 403, and `/depot` without the slash 404 instead of a 301.
+`.github/scripts/verify-core-nginx.sh` probes it live with a planted file.
+
 **Same-filesystem requirement (binding for WP 1.9):** `tmp/` and `cache/`
 must stay on the *same* filesystem/volume. `proxy_store` finishes a
 download by `rename()`-ing the completed temp file into its final path
@@ -563,8 +573,9 @@ and the store-path guard's 301/302 branch above).
 The `access_log ... vault_event ...` directive is declared **per-location**
 (inside `location /depot/`, `location @miss` and the runner-marker
 location below), not at `server`/`http`
-level. `/health`, `/lancache-heartbeat` and `location ^~ /tmp/` never
-declare it at all, so they produce **zero** event-log lines -- not a typed
+level. `/health`, `/lancache-heartbeat`, `location ^~ /tmp/` and the
+catch-all `location /` never declare it at all, so they produce **zero**
+event-log lines -- not a typed
 "heartbeat" line the sweeper has to recognize and skip, but no line at all,
 which is the cheapest possible thing to skip. A request that `try_files`
 resolves locally never reaches `@miss` (nginx switches the request's

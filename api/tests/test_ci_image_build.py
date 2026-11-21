@@ -21,7 +21,7 @@ This module is what makes that copy safe: it fails when
 - the job's docker actions are pinned to different SHAs than publish.yml's,
 - a matrix `context`/`dockerfile` path does not exist in the repo.
 
-Pure file parsing (PyYAML, pinned in api/requirements.txt);
+Pure file parsing (PyYAML, pinned in api/requirements-dev.txt);
 nothing here needs Docker.
 """
 

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import math
 import os
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from urllib.parse import urlsplit
 
@@ -19,15 +20,59 @@ from vault_api.schedule_window import (
     parse_window_or_off,
 )
 
-try:
-    # Optional convenience for local/native dev: load a .env file if present.
-    # Never overrides variables already set in the real environment.
-    from dotenv import load_dotenv
+#: SEC-HARDEN-1 (audit S-3): the marker that turns the ``.env`` loader off.
+#: ``api/Dockerfile`` bakes ``VAULT_DOTENV=off`` into the image, so the
+#: shipped containers (vault-api and vault-runner) take their configuration
+#: from the container environment only: compose's ``environment:`` blocks
+#: are the one source, and no ``.env`` file found by walking up from
+#: ``/app/vault_api`` can add a setting. A native checkout has no marker and
+#: keeps the convenience (``api/.env``, ``api/README.md`` "Configuration").
+#: Only the word ``off`` (any case, surrounding blanks ignored) disables the
+#: loader; anything else loads, which is the native default. The image's
+#: value is fixed at build time, so a typo cannot reach production.
+DOTENV_SWITCH_ENV = "VAULT_DOTENV"
 
+
+def dotenv_enabled(environ: Mapping[str, str]) -> bool:
+    """True unless ``VAULT_DOTENV`` is ``off`` (SEC-HARDEN-1, S-3)."""
+    return environ.get(DOTENV_SWITCH_ENV, "").strip().lower() != "off"
+
+
+def _load_dotenv_unless_disabled() -> bool:
+    """Load a ``.env`` file for local/native dev, unless the image disabled it.
+
+    Never overrides variables already set in the real environment. Returns
+    whether the loader ran (for the tests)."""
+    if not dotenv_enabled(os.environ):
+        return False
+    try:
+        from dotenv import load_dotenv
+    except ImportError:  # pragma: no cover - python-dotenv is a pinned dependency,
+        # but we don't want a missing optional import to break the app.
+        return False
     load_dotenv()
-except ImportError:  # pragma: no cover - python-dotenv is a pinned dependency,
-    # but we don't want a missing optional import to break the app.
-    pass
+    return True
+
+
+_load_dotenv_unless_disabled()
+
+
+#: SEC-HARDEN-1 (audit S-4): vault-api logs one WARNING at startup when
+#: ``VAULT_API_KEY`` is shorter than this. The key is not only compared per
+#: request (no lockout, threat model §7): it also keys the HMAC in every
+#: cover URL (``cover_cache.cover_signature``), and the HMAC's other inputs
+#: (the appid and the image's SHA-256, which is the ETag) are not secret, so
+#: one leaked cover URL lets an attacker test candidate keys offline at hash
+#: speed. 24 characters from the ``.env.example`` recipes' alphabets (base64,
+#: URL-safe base64) are 144 bits; the recipes themselves produce 48. A
+#: warning, not a refusal: the test suites use short keys, and refusing would
+#: turn an existing install's upgrade into a vault that does not start.
+MIN_RECOMMENDED_API_KEY_LENGTH = 24
+
+
+def api_key_is_short(api_key: str) -> bool:
+    """True when ``api_key`` is below :data:`MIN_RECOMMENDED_API_KEY_LENGTH`."""
+    return len(api_key) < MIN_RECOMMENDED_API_KEY_LENGTH
 
 
 #: Default wall-clock budget for one SteamPrefill subprocess run. A large

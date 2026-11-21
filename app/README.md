@@ -627,7 +627,7 @@ Added to the existing `gradle/libs.versions.toml` table:
 | OkHttp | 4.12.0 | current stable 4.x line (5.x still pre-release at the time of this WP) |
 | OkHttp MockWebServer | 4.12.0 | test-only, pinned to the same version as OkHttp itself |
 | OkHttp TLS (`okhttp-tls`) | 4.12.0 | test-only, same version again — added in the Opus review round for the redirect-leak pin's real HTTPS `MockWebServer` (`HeldCertificate`/`HandshakeCertificates`) |
-| androidx.security:security-crypto | 1.1.0-alpha06 | the `MasterKey` builder API (1.0.0's `MasterKeys` helper is deprecated); no stable 1.1.0 GA exists yet — a documented, narrow exception to "stable only" |
+| androidx.security:security-crypto | 1.1.0 | the `MasterKey` builder API (1.0.0's `MasterKeys` helper is deprecated); was 1.1.0-alpha06 (no GA yet at WP 4b.2), moved to the GA 1.1.0 by SEC-HARDEN-1 (audit S-7) with no source change; the on-device read-back of an alpha06-written key is still open (see `gradle/libs.versions.toml`) |
 
 ### Tests (WP 4b.2)
 

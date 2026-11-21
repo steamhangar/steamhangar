@@ -383,6 +383,14 @@ def main() -> None:
     logging.basicConfig(level=getattr(logging, settings.log_level.upper(), logging.INFO))
 
     runner = PrefillRunner(settings)
+    # SEC-HARDEN-1: create SteamPrefill's app.log (on the /tmp tmpfs in the
+    # image) as uid 101 before anyone can run an interactive login in this
+    # container, so a `docker exec -u root` login appends to a 101-owned file
+    # instead of leaving a root-owned one the next prefill cannot write.
+    if settings.steamprefill_path:
+        prefill.rotate_steamprefill_app_log(
+            os.path.dirname(os.path.abspath(settings.steamprefill_path))
+        )
 
     def _handle_signal(signum: int, _frame: object) -> None:
         logger.info("prefill_runner received signal %s; shutting down.", signum)
