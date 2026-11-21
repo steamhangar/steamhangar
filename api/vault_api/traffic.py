@@ -81,6 +81,8 @@ has no address, so it stays the ALL figure; a client-only sum is
 from __future__ import annotations
 
 import sqlite3
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Iterable
@@ -1079,6 +1081,63 @@ def depots_bytes_since(
         (tier, start, *depotids, *params),
     ).fetchone()
     return int(row["b"]) if row is not None else 0
+
+
+def depots_bytes_by_bucket(
+    conn: sqlite3.Connection,
+    depotids: list[int],
+    tier: str,
+    start: str,
+    scope: Scope | None = None,
+) -> dict[str, int]:
+    """WP APP-DL-STATS-1b: ``depots_bytes_since`` per bucket
+    (``{bucket_at: bytes}``, buckets without rows left out)."""
+    if not depotids:
+        return {}
+    placeholders = ",".join("?" for _ in depotids)
+    where, params = scope.sql() if scope is not None else ("", [])
+    rows = conn.execute(
+        f"""
+        SELECT bucket_at, COALESCE(SUM(bytes_served), 0) AS b FROM client_depot_traffic
+        WHERE tier = ? AND bucket_at >= ? AND depotid IN ({placeholders}){where}
+        GROUP BY bucket_at
+        """,
+        (tier, start, *depotids, *params),
+    ).fetchall()
+    return {str(row["bucket_at"]): int(row["b"]) for row in rows}
+
+
+def server_bucket_rows(conn: sqlite3.Connection, tier: str, start: str) -> dict[str, Totals]:
+    """WP APP-DL-STATS-1b: ``server_traffic`` rows of one tier from
+    ``start`` on, ``{bucket_at: sums}``."""
+    rows = conn.execute(
+        """
+        SELECT bucket_at, requests, hits, misses, bypasses, errors, bytes_served,
+               hit_bytes, miss_bytes
+        FROM server_traffic WHERE tier = ? AND bucket_at >= ?
+        """,
+        (tier, start),
+    ).fetchall()
+    return {str(row["bucket_at"]): _totals(row) for row in rows}
+
+
+@contextmanager
+def read_snapshot(conn: sqlite3.Connection) -> Iterator[None]:
+    """WP APP-DL-STATS-1b: run the reads inside one read transaction, so
+    they all see the same sweeps (WAL: a sweep committing meanwhile is not
+    seen half). A swept total and the per-bucket rows subtracted from it
+    must come from the same snapshot, or a stitched figure could count a
+    line twice or not at all. Nested use (already in a transaction) just
+    joins it."""
+    if conn.in_transaction:
+        yield
+        return
+    conn.execute("BEGIN")
+    try:
+        yield
+    finally:
+        if conn.in_transaction:
+            conn.execute("COMMIT")
 
 
 def depots_miss_bytes_since(

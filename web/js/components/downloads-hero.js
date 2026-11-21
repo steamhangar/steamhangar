@@ -49,11 +49,13 @@ import {
   feedState,
   formatSpeed,
   formatTrafficBytes,
+  graphLabel,
+  HIGHEST_NOTE,
   headerTiles,
+  highestSuffix,
   joinNotes,
   refreshFailedText,
   seriesGeometry,
-  seriesLabel,
   seriesStartText,
   trimSeries,
 } from "../lib/traffic-view.js";
@@ -438,7 +440,7 @@ export const NO_TRAFFIC_TEXT = "No traffic in this range";
  * @param {object | null | undefined} series
  * @param {string} range the range the user has selected
  * @param {{nowMs?: number}} [opts]
- * @returns {null | {line: string, area: string | null, label: string, axis: string[], idle?: boolean, note?: string,
+ * @returns {null | {line: string, area: string | null, label: string, axis: string[], axisTitle?: string, idle?: boolean, note?: string,
  *   split?: null | {served: {line: string, area: string}, internet: {line: string, area: string}}}}
  */
 export function graphModel(series, range, { nowMs = Date.now() } = {}) {
@@ -463,11 +465,16 @@ export function graphModel(series, range, { nowMs = Date.now() } = {}) {
     // WP WEB-FIX-20.2: served-from-cache under from-the-internet, or null
     // (no hit/miss split in the points: the single total line).
     split: split ? { served: split.served, internet: split.internet } : null,
-    label: seriesLabel(series, geo.maxBytesPerSecond),
+    // WP APP-DL-STATS-1: the name also says the highest point's period and
+    // why "highest" can be above the upstream limit (HIGHEST_NOTE, the axis
+    // captions' tooltip too).
+    label: graphLabel(shown, geo.maxBytesPerSecond),
     // The axis keeps the established "highest" wording (the Android app
     // says the same, pinned by TrafficWebTwinTest); the mini line's "Peak"
-    // is a separate figure.
-    axis: [seriesStartText(shown, nowMs), `highest ${formatSpeed(geo.maxBytesPerSecond) || "0 MB/s"}`, "now"],
+    // is a separate figure. WP APP-DL-STATS-1: the period the point
+    // averages follows outside the pinned literal (" (5 s avg)").
+    axis: [seriesStartText(shown, nowMs), `highest ${formatSpeed(geo.maxBytesPerSecond) || "0 MB/s"}` + highestSuffix(shown), "now"],
+    axisTitle: HIGHEST_NOTE,
   };
 }
 
@@ -642,6 +649,8 @@ export function createDownloadsHero({ range, onRangeChange }) {
     const axis = el("div", "ax");
     axis.setAttribute("aria-hidden", "true");
     for (const text of model.axis) axis.appendChild(el("span", null, text));
+    // WP APP-DL-STATS-1: hovering the captions explains "highest" vs the limit.
+    if (model.axisTitle) axis.title = model.axisTitle;
     graph.append(svg, axis);
     if (!model.idle && model.split) {
       const legend = el("div", "glegend");

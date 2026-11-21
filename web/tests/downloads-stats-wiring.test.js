@@ -125,6 +125,7 @@ globalThis.fetch = async (url) => {
 const { store } = await import("../js/store-singleton.js");
 const { renderDownloads } = await import("../js/views/downloads.js");
 const { navigateTo } = await import("../js/router.js");
+const { HIGHEST_NOTE } = await import("../js/lib/traffic-view.js");
 
 after(() => {
   store.stop();
@@ -188,13 +189,15 @@ test("MUTATION TARGET: feed ok — big speed, pill, caption, mini line, four til
   assert.equal(svg.tagName, "SVG");
   assert.equal(svg.getAttribute("role"), "img");
   assert.equal(svg.getAttribute("viewBox"), "0 0 600 96");
-  assert.equal(svg.getAttribute("aria-label"), "Average speed per 5 minutes in the last 6 hours. Highest: 10.0 MB/s."); // stored range: 6 h (the default is live since LIVE-DELAY-1)
+  assert.equal(svg.getAttribute("aria-label"), `Average speed per 5 minutes in the last 6 hours. Highest: 10.0 MB/s. The highest point is an average over 5 minutes. ${HIGHEST_NOTE}`); // stored range: 6 h (the default is live since LIVE-DELAY-1)
   assert.deepEqual(svg.children[0].children.map((l) => l.getAttribute("y1")), ["24", "48", "72"], "grid lines");
   // WP WEB-FIX-20.2: the points carry the hit/miss split, so two series;
   // the internet band's top line is the total.
   const total = svg.children.find((c) => c.getAttribute("class") === "line net");
   assert.equal(total.getAttribute("d"), "M0 96 L300 0 L600 48");
-  assert.equal(q(s, "stats-graph").querySelector(".ax").textContent, "6 h agohighest 10.0 MB/snow");
+  assert.equal(q(s, "stats-graph").querySelector(".ax").textContent, "6 h agohighest 10.0 MB/s (5 min avg)now");
+  // WP APP-DL-STATS-1: the captions' tooltip says why "highest" can top the limit.
+  assert.equal(q(s, "stats-graph").querySelector(".ax").title, HIGHEST_NOTE);
   await until(() => speed(s) !== null, "speed line");
   assert.equal(speed(s), "30.0 MB/s · 8.8 GB loaded so far");
   assert.equal(q(s, "stats-range").getAttribute("aria-label"), "Statistics range");

@@ -542,6 +542,105 @@ export function seriesLabel(series, maxBytesPerSecond) {
 }
 
 /**
+ * WP APP-DL-STATS-1: why the graph's "highest" can be above the upstream
+ * "Limit" caption although both use the same 1024 base ("MB/s" = MiB/s):
+ * a point is the average over its own period (5 s in the live view's newest
+ * minute) of everything the cache served, HITs included, and nginx logs a
+ * request when it ENDS; the cap (ADR-0015) applies to MISS downloads only
+ * and holds over minutes. Appended to the graph's accessible name and shown
+ * as the axis caption's tooltip (Android: the graph's content description).
+ */
+export const HIGHEST_NOTE =
+  "Each point is the average over its period of everything the cache served, cache hits included, counted when each request ended. The download limit caps only what comes from the internet and holds over minutes, so a short point can be above it.";
+
+/**
+ * WP APP-DL-STATS-1: a bucket length in the graph's short words ("5 s",
+ * "1 min", "1 day").
+ * @param {number} bucketSeconds
+ * @returns {string}
+ */
+export function bucketShort(bucketSeconds) {
+  if (!Number.isInteger(bucketSeconds) || bucketSeconds <= 0) return "";
+  if (bucketSeconds < 60) return `${bucketSeconds} s`;
+  if (bucketSeconds < 3600) return `${Math.round(bucketSeconds / 60)} min`;
+  if (bucketSeconds < 86400) return `${Math.round(bucketSeconds / 3600)} h`;
+  return `${Math.round(bucketSeconds / 86400)} day`;
+}
+
+/**
+ * WP APP-DL-STATS-1: the period the graph's highest point averages over: a
+ * live point's own `bucket_seconds` (the live series mixes 5, 15 and 60 s
+ * points), else the series' bucket. That is the bucket's LENGTH: the newest
+ * (still running) bucket may cover less, and the server then divides by the
+ * seconds elapsed in it. On a tie the FIRST (oldest) highest point counts
+ * (`>`, not `>=`), as for the graph's maximum. `null` without points.
+ * @param {{bucket_seconds?: number, points?: Array<{bytes_per_second?: number, bucket_seconds?: number}>}} series
+ * @returns {number | null}
+ */
+export function highestBucketSeconds(series) {
+  const points = series && Array.isArray(series.points) ? series.points : [];
+  let best = null;
+  for (const p of points) {
+    const v = p && finiteNonNegative(p.bytes_per_second) ? p.bytes_per_second : 0;
+    if (best === null || v > best.v) best = { v, p };
+  }
+  if (best === null) return null;
+  const own = best.p && Number.isInteger(best.p.bucket_seconds) && best.p.bucket_seconds > 0 ? best.p.bucket_seconds : null;
+  if (own !== null) return own;
+  return Number.isInteger(series.bucket_seconds) && series.bucket_seconds > 0 ? series.bucket_seconds : null;
+}
+
+/**
+ * WP APP-DL-STATS-1: the part after the axis's "highest X": which period
+ * that point averages (" (5 s avg)"), or "" when unknown.
+ * @param {object} series
+ * @returns {string}
+ */
+export function highestSuffix(series) {
+  const word = bucketShort(highestBucketSeconds(series));
+  return word ? ` (${word} avg)` : "";
+}
+
+/**
+ * WP APP-DL-STATS-1 (review): the period for screen readers (the axis
+ * captions are decoration): "The highest point is an average over 5 s.",
+ * or "" when unknown.
+ * @param {object} series
+ * @returns {string}
+ */
+export function highestPeriodText(series) {
+  const word = bucketSpoken(highestBucketSeconds(series));
+  return word ? `The highest point is an average over ${word}.` : "";
+}
+
+/**
+ * WP APP-DL-STATS-1 (re-check nit): a bucket length in words for screen
+ * readers ("5 seconds", "1 minute", "5 minutes", "1 hour", "1 day"); the
+ * visible caption keeps `bucketShort`. "" for no length.
+ * @param {number} bucketSeconds
+ * @returns {string}
+ */
+export function bucketSpoken(bucketSeconds) {
+  if (!Number.isInteger(bucketSeconds) || bucketSeconds <= 0) return "";
+  const unit = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
+  if (bucketSeconds < 60) return unit(bucketSeconds, "second");
+  if (bucketSeconds < 3600) return unit(Math.round(bucketSeconds / 60), "minute");
+  if (bucketSeconds < 86400) return unit(Math.round(bucketSeconds / 3600), "hour");
+  return unit(Math.round(bucketSeconds / 86400), "day");
+}
+
+/**
+ * WP APP-DL-STATS-1: the graph's accessible name: `seriesLabel`, the
+ * highest point's period, then `HIGHEST_NOTE` (Android twin `graphLabel`).
+ * @param {object} series
+ * @param {number} maxBytesPerSecond
+ * @returns {string}
+ */
+export function graphLabel(series, maxBytesPerSecond) {
+  return [seriesLabel(series, maxBytesPerSecond), highestPeriodText(series), HIGHEST_NOTE].filter(Boolean).join(" ");
+}
+
+/**
  * WP GRAPH-ZOOM: the series without its empty lead-in. A zero-filled range
  * whose traffic all fell into the last stretch would be a flat line with a
  * spike at the edge; the graph shows only the span that has data, starting

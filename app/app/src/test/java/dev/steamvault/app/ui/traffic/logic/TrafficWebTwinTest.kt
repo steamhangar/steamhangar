@@ -110,6 +110,44 @@ class TrafficWebTwinTest {
         )
     }
 
+    /** WP APP-DL-STATS-1: the "highest" caption's period and the note next to
+     * the limit are the web's (Kotlin side: `TrafficViewTest`). */
+    @Test
+    fun `highest caption period and note`() {
+        assertQuoted("lib/traffic-view.js", listOf(HIGHEST_NOTE))
+        assertFragments(
+            "lib/traffic-view.js",
+            listOf(
+                "if (bucketSeconds < 60) return `\${bucketSeconds} s`;",
+                "if (bucketSeconds < 3600) return `\${Math.round(bucketSeconds / 60)} min`;",
+                "if (bucketSeconds < 86400) return `\${Math.round(bucketSeconds / 3600)} h`;",
+                "return `\${Math.round(bucketSeconds / 86400)} day`;",
+                "return word ? ` (\${word} avg)` : \"\";",
+                // The highest point's own length first (live points), else the series'.
+                "if (own !== null) return own;",
+                // Ties: the first (oldest) highest point, like the Kotlin `v > bestValue`.
+                "if (best === null || v > best.v) best = { v, p };",
+                // The period for screen readers, and the graph's accessible name.
+                "return word ? `The highest point is an average over \${word}.` : \"\";",
+                // The spoken period (TalkBack / screen readers), not the caption's short units.
+                "const word = bucketSpoken(highestBucketSeconds(series));",
+                "const unit = (n, word) => `\${n} \${word}\${n === 1 ? \"\" : \"s\"}`;",
+                "if (bucketSeconds < 60) return unit(bucketSeconds, \"second\");",
+                "if (bucketSeconds < 3600) return unit(Math.round(bucketSeconds / 60), \"minute\");",
+                "if (bucketSeconds < 86400) return unit(Math.round(bucketSeconds / 3600), \"hour\");",
+                "return unit(Math.round(bucketSeconds / 86400), \"day\");",
+                "return [seriesLabel(series, maxBytesPerSecond), highestPeriodText(series), HIGHEST_NOTE].filter(Boolean).join(\" \");",
+            ),
+        )
+        assertFragments(
+            "components/downloads-hero.js",
+            listOf(
+                "`highest \${formatSpeed(geo.maxBytesPerSecond) || \"0 MB/s\"}` + highestSuffix(shown)",
+                "label: graphLabel(shown, geo.maxBytesPerSecond),",
+            ),
+        )
+    }
+
     /** WP GRAPH-LIVE: the live range's keys, words, cadence and endpoint are the web's. */
     @Test
     fun `live view literals`() {

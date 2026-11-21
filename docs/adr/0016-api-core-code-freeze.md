@@ -782,5 +782,34 @@ CAP-503-FIX-1b).
   pauses itself about every two minutes until a marker for its address is
   seen. A device behind the runner's address gets no priority.
 
+## Addendum 2026-11-21 — freeze exception: unswept span in the Downloads figures (WP APP-DL-STATS-1b)
+
+Operator decision 2026-11-21 (Weg A, roadmap APP-DL-STATS-1 / open decision
+DL-STATS-ZERO): the Downloads summary tiles and the job card read 0 while
+the runner downloaded, because they came from the swept tiers only (5-minute
+sweep; operator report 2026-11-01, measured on prod: job #266 ran 6.6
+minutes, its 6.8 GB were swept later). A behaviour change of an api read
+path, not an audit finding, so it needs its own exception. ADR-0025 has the
+design addendum.
+
+- api/ (scope list):
+  - `vault_api/traffic_stitch.py` (new): the pure stitch functions
+    (summary, job "so far", job speed from the ring's "now" window).
+  - `vault_api/live_tier.py`: a bounded per-depot store per 5-minute bucket
+    for the whole ring (`MAX_DEPOT_BUCKET_ENTRIES` 4096, oldest bucket
+    dropped first and marked incomplete), `stitch_view` (one read of the
+    ring for the stitch), `ring_seconds`. The stitched series, `now_view`
+    and every existing figure are unchanged.
+  - `vault_api/traffic.py`: `read_snapshot` (one read transaction),
+    `server_bucket_rows`, `depots_bytes_by_bucket`; no write path changes.
+  - `vault_api/routers/traffic.py`: `GET /v1/throughput` stitches the
+    summary and the job figures; `_job_throughput` collects what each job
+    counts. No response model, route or schema change.
+- Not frozen, listed for completeness: `api/tests/test_app_dl_stats_1b.py`
+  (new), the job-speed assertions of `test_d15b_endpoints.py` and
+  `test_job_size_1.py` (now the ring's window), api/README.md
+  (`GET /v1/throughput`), ADR-0025. Web and Android are unchanged: the
+  fields keep their names and shapes.
+
 Every other frozen-path change still needs its own user decision and note
 here.
