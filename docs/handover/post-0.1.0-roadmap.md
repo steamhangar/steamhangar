@@ -2162,6 +2162,11 @@ AGENT-RC8-COMPAT-1, NITS-AUDIT-OPS-1, SEC-HARDEN-1, PILL-TONE-1,
 FONT-FLOOR-1, TM-CROSS-SITE-1, NGINX-DUP-1 (follow-up
 CORE-LIVE-PARITY-1), NITS-AUDIT-APP-1 with VERIFY-ALL-LABEL-1,
 AUDIT-STATUS-1 (all on `main` at `f98da86`, CI green).
+Found 2026-11-21: **CI-NIGHTLY-1** (deploy/ci; S): the nightly
+`deploy / verify-stack` (full) is red since 2026-11-16 on an unchanged
+commit; 2 of 656 checks fail because newer Docker on the runner prints
+the zero `GlobalIPv6Address` as `invalid IP` in the inspect template
+(`deploy/tests/verify-stack.sh:2303`); local `verify full` passes 656/0.
 Not started: DESIGN-NITS-1, then NEUTRAL-RAMP-1, then DESIGN-MD-1 (in this
 order, each with one goldens round); OLD-SERVER-FALLBACK-1;
 NITS-AUDIT-WEB-1; moving the StatusIconLogic arrow helpers to the test
