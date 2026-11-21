@@ -422,7 +422,8 @@ Scope of the exception, all in WP AGENT-FEAT-1:
 - Not frozen, listed for completeness: `agent/` (payload fields, default
   interval 10m, one-shot states an interval only when told, the one-time
   resend without the fields to a server that answers `422 extra_forbidden`
-  for exactly them, i.e. every vault-api up to `v0.1.0-rc8`), the Windows
+  for exactly them, i.e. every vault-api up to `v0.1.0-rc8`; removed in
+  rc23, AGENT-RC8-COMPAT-1), the Windows
   task (logon trigger, 10 minutes, `VAULT_AGENT_REPORT_INTERVAL` in the env
   file), the systemd units (`OnCalendar=*:0/10`, `OnStartupSec=30s`,
   `--interval 10m`), `deploy/tests/verify-stack.sh` step 6x, tests and docs.

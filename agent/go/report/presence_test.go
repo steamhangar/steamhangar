@@ -36,26 +36,6 @@ func TestWithPresence_CarriesVersionAndInterval(t *testing.T) {
 	}
 }
 
-// Without presence the body is byte-identical to the pre-AGENT-FEAT-1
-// payload: this is what the client resends to an old server.
-func TestPayload_WithoutPresenceIsTheLegacyBody(t *testing.T) {
-	p, _ := basePayload().WithPresence("dev", 10*time.Minute, true)
-	if !p.HasPresence() {
-		t.Fatal("HasPresence() = false after WithPresence")
-	}
-	legacy := p.WithoutPresence()
-	if legacy.HasPresence() {
-		t.Error("HasPresence() = true after WithoutPresence")
-	}
-	if got, want := marshal(t, legacy), `{"client_id":"pc","appids":[440]}`; got != want {
-		t.Errorf("legacy body = %s, want %s", got, want)
-	}
-	// WithoutPresence returns a copy; the original keeps its fields.
-	if p.AgentVersion == nil || p.ReportIntervalSeconds == nil {
-		t.Error("WithoutPresence modified its receiver")
-	}
-}
-
 func TestWithPresence_UnknownIntervalIsNotSent(t *testing.T) {
 	p, notes := basePayload().WithPresence("dev", 10*time.Minute, false)
 	if p.ReportIntervalSeconds != nil {
@@ -174,21 +154,18 @@ func TestPayload_WithLocalAddrsFiltersLikeTheServer(t *testing.T) {
 	}
 }
 
-func TestPayload_HasAndWithoutNameTheOptionalFields(t *testing.T) {
-	p, _ := Payload{ClientID: "pc", AppIDs: []int{440}}.WithPresence("0.1.0", 10*time.Minute, true)
-	p = p.WithLocalAddrs([]string{"10.0.0.42"})
-	for _, name := range OptionalFields {
-		if !p.Has(name) {
-			t.Errorf("Has(%q) = false on a full payload", name)
-		}
-		if p.Without(name).Has(name) {
-			t.Errorf("Without(%q) kept it", name)
+// OptionalFields must name exactly the omitempty JSON keys of Payload:
+// agent/go/client's "server too old" error recognises only these.
+func TestOptionalFieldsAreThePayloadsOmitemptyKeys(t *testing.T) {
+	var got []string
+	typ := reflect.TypeOf(Payload{})
+	for i := 0; i < typ.NumField(); i++ {
+		tag := typ.Field(i).Tag.Get("json")
+		if name, ok := strings.CutSuffix(tag, ",omitempty"); ok {
+			got = append(got, name)
 		}
 	}
-	if !p.Without("local_addrs").Has("agent_version") {
-		t.Error("Without(local_addrs) dropped agent_version too")
-	}
-	if p.Has("appids") {
-		t.Error("Has(appids) = true: appids is not optional")
+	if !reflect.DeepEqual(got, OptionalFields) {
+		t.Errorf("omitempty keys = %q, OptionalFields = %q", got, OptionalFields)
 	}
 }

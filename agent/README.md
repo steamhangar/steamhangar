@@ -491,15 +491,16 @@ unknown" when no version was sent (`GET /v1/clients`, see api/README.md
   log line `report presence note=...` says what was left out and why.
 
 **Against an older vault-api (up to v0.1.0-rc8).** Those servers refuse
-unknown fields (`422`, `extra_forbidden`) and would reject the whole report.
-The agent sends the new fields first; when the `422` names *nothing but*
-`agent_version`/`report_interval_seconds` as unknown, it resends the same
-report once without them and logs that the server is too old. Any other
-`422` (for example a bad `client_id` reported in the same answer) is shown
-as before and not resent. Cost on an old server: one extra request per
-report; nothing is remembered, so the first report after the server upgrade
-carries the fields again. Upgrade order therefore does not matter. (An old
-agent against a new server needs nothing: the fields are optional.)
+unknown fields (`422`, `extra_forbidden`) and reject the whole report. Up to
+rc22 the agent resent the report once without the new fields; since rc23
+(WP AGENT-RC8-COMPAT-1) it does not. The report fails, `vault-agent` exits 1,
+and the log says what to do, for example
+`report send failed error="server returned HTTP 422: vault-api is older than
+this agent and refuses the report field(s) agent_version,
+report_interval_seconds as unknown - update vault-api to v0.1.0-rc17 or
+newer ..."`. Update vault-api first, then the agents. (An old agent against
+a new server needs nothing: the fields are optional.) See "Server version
+required" below.
 
 ### LAN address in every report (WP AGENT-ADDR-1)
 
@@ -531,12 +532,12 @@ twice on the Clients page).
   `report local address note=...` says why something was not detected
   (DNS failure, no route).
 - **Against an older vault-api (up to rc16):** the `422` names
-  `local_addrs` as unknown; the agent resends once without exactly the
-  fields the `422` names (an rc9..rc16 server keeps getting
-  `agent_version`/`report_interval_seconds`, an rc8 server gets the legacy
-  body) and logs `vault-api older than AGENT-ADDR-1`. A `422` whose every
-  error is located under `local_addrs` (a server refusing the addresses
-  themselves) is answered the same way: one resend without `local_addrs`.
+  `local_addrs` as unknown and the report fails with the same "update
+  vault-api to v0.1.0-rc17 or newer" error (no resend since rc23, see
+  "Server version required" below). A PC where no usable address is found
+  sends no `local_addrs` and is still accepted by an rc9..rc16 server. A
+  `422` for the address values themselves (a server with stricter rules
+  than this agent) is shown as is and not resent either.
 
 **Default `--client-id`:** the local hostname (`os.Hostname()`), trimmed,
 with any non-printable character replaced by `-`, truncated to 64
@@ -632,6 +633,19 @@ the web UI's Settings → PCs (agents) list (WP WEB-FEAT-4). An id that
 contains `/` cannot be removed either way: the route does not match it.
 The agent itself has no delete
 command — it stays write-only towards `/v1/agent/installed` by design.
+
+### Server version required (WP AGENT-RC8-COMPAT-1)
+
+This agent needs **vault-api v0.1.0-rc17 or newer** (`client.MinServerVersion`):
+rc17 is the first release that accepts `local_addrs`. Older servers reject
+the optional fields as unknown, and vault-agent no longer resends a rejected
+report without them (the fallback was removed before v0.1.0 final, audit
+U-9). Update the server before the agents. Such a report fails (exit
+code 1 in one-shot mode; `--loop` logs it every interval and keeps
+running) with the log line `report send failed error="server returned HTTP 422:
+vault-api is older than this agent and refuses the report field(s) ... -
+update vault-api to v0.1.0-rc17 or newer ..."`, which names the refused
+fields. Every other `422` is shown unchanged and never resent.
 
 ### Exit codes
 

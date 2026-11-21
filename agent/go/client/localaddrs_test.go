@@ -3,8 +3,8 @@ package client
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
-	"reflect"
 	"sort"
 	"strings"
 	"testing"
@@ -12,7 +12,8 @@ import (
 	"github.com/Riviera822/steamhangar/agent/report"
 )
 
-// WP AGENT-ADDR-1: local_addrs against servers that predate it.
+// WP AGENT-ADDR-1: local_addrs, and (WP AGENT-RC8-COMPAT-1, rc23) what a
+// server that predates it answers now that the agent no longer resends.
 
 // forbidExtras answers like a vault-api whose request model knows only the
 // allowed keys: ONE 422 listing every other key as extra_forbidden (what
@@ -61,68 +62,51 @@ func TestReportInstalled_SendsLocalAddrs(t *testing.T) {
 	if len(bodies) != 1 || bodies[0] != want {
 		t.Fatalf("bodies = %q, want exactly [%s]", bodies, want)
 	}
-	if result.LocalAddrsDropped || result.PresenceDropped {
-		t.Errorf("result = %+v, nothing should be dropped", result)
+	if result.Received != 2 {
+		t.Errorf("result = %+v, want the response parsed", result)
 	}
 }
 
-// rc9..rc16 know the presence fields but not local_addrs: only local_addrs
-// is dropped, the presence fields keep flowing.
-func TestReportInstalled_PreAddrServerKeepsThePresenceFields(t *testing.T) {
+// rc9..rc16 know the presence fields but not local_addrs: one request,
+// a final 422 that names local_addrs and says to update vault-api.
+func TestReportInstalled_PreAddrServerIsNotResentAndSaysUpdate(t *testing.T) {
 	var rs recordingServer
 	srv := rs.start(t, forbidExtras("client_id", "appids", "agent_version", "report_interval_seconds"))
-	result, err := New(srv.URL, "k", testBackoff()).ReportInstalled(context.Background(), newPayload())
-	if err != nil {
-		t.Fatalf("an rc16 server must still get the report: %v", err)
-	}
-	bodies := rs.got()
-	if len(bodies) != 2 {
-		t.Fatalf("server saw %d request(s), want 2: %q", len(bodies), bodies)
-	}
-	if want := `{"client_id":"test-pc","appids":[440,730],"agent_version":"0.1.0","report_interval_seconds":600}`; bodies[1] != want {
-		t.Errorf("resent body = %s, want %s", bodies[1], want)
-	}
-	if !result.LocalAddrsDropped || result.PresenceDropped {
-		t.Errorf("result = %+v, want LocalAddrsDropped only", result)
+	_, err := New(srv.URL, "k", testBackoff()).ReportInstalled(context.Background(), newPayload())
+	tooOld(t, err, "local_addrs")
+	if n := len(rs.got()); n != 1 {
+		t.Errorf("server saw %d request(s), want exactly 1 (no resend)", n)
 	}
 }
 
-// rc8 knows none of the optional fields: one resend with the legacy body.
-func TestReportInstalled_Rc8ServerGetsTheLegacyBody(t *testing.T) {
+// rc8 knows none of the optional fields: all three are named, no resend.
+func TestReportInstalled_Rc8ServerNamesAllThreeFields(t *testing.T) {
 	var rs recordingServer
 	srv := rs.start(t, forbidExtras("client_id", "appids"))
-	result, err := New(srv.URL, "k", testBackoff()).ReportInstalled(context.Background(), newPayload())
-	if err != nil {
-		t.Fatal(err)
-	}
-	bodies := rs.got()
-	if len(bodies) != 2 || bodies[1] != `{"client_id":"test-pc","appids":[440,730]}` {
-		t.Fatalf("bodies = %q, want the legacy body second", bodies)
-	}
-	if !result.LocalAddrsDropped || !result.PresenceDropped {
-		t.Errorf("result = %+v, want both flags", result)
+	_, err := New(srv.URL, "k", testBackoff()).ReportInstalled(context.Background(), newPayload())
+	tooOld(t, err, "agent_version", "local_addrs", "report_interval_seconds")
+	if n := len(rs.got()); n != 1 {
+		t.Errorf("server saw %d request(s), want exactly 1 (no resend)", n)
 	}
 }
 
-// A 422 naming local_addrs for a payload that does not carry it is not the
-// old-server shape: returned as is, no resend.
-func TestReportInstalled_UnknownFieldNotCarriedIsFinal(t *testing.T) {
+// No usable LAN address means no local_addrs field at all (omitempty), so
+// such a report is accepted by an rc9..rc16 server as it always was.
+func TestReportInstalled_WithoutLocalAddrsPreAddrServerAccepts(t *testing.T) {
 	var rs recordingServer
-	srv := rs.start(t, func([]byte) (int, string) {
-		return http.StatusUnprocessableEntity, `{"detail":[{"type":"extra_forbidden","loc":["body","local_addrs"],"msg":"x"}]}`
-	})
-	if _, err := New(srv.URL, "k", testBackoff()).ReportInstalled(context.Background(), presencePayload()); err == nil {
-		t.Fatal("expected the 422")
+	srv := rs.start(t, forbidExtras("client_id", "appids", "agent_version", "report_interval_seconds"))
+	if _, err := New(srv.URL, "k", testBackoff()).ReportInstalled(context.Background(), presencePayload()); err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
 	if n := len(rs.got()); n != 1 {
 		t.Errorf("server saw %d request(s), want 1", n)
 	}
 }
 
-// A server that refuses the addresses themselves (every error under
-// body.local_addrs, any type) gets the report again without them, keeping
-// the presence fields.
-func TestReportInstalled_LocalAddrsValueErrorResendsWithoutThem(t *testing.T) {
+// A server that refuses the address values themselves (an error under
+// body.local_addrs that is not extra_forbidden) is a plain 422: no resend
+// and no "too old" hint, since that server does know the field.
+func TestReportInstalled_LocalAddrsValueErrorIsFinal(t *testing.T) {
 	for _, loc := range []string{`["body","local_addrs"]`, `["body","local_addrs",0]`} {
 		var rs recordingServer
 		srv := rs.start(t, func(body []byte) (int, string) {
@@ -131,48 +115,16 @@ func TestReportInstalled_LocalAddrsValueErrorResendsWithoutThem(t *testing.T) {
 			}
 			return http.StatusOK, okBody
 		})
-		result, err := New(srv.URL, "k", testBackoff()).ReportInstalled(context.Background(), newPayload())
-		if err != nil {
-			t.Fatalf("loc %s: %v", loc, err)
+		_, err := New(srv.URL, "k", testBackoff()).ReportInstalled(context.Background(), newPayload())
+		var apiErr *APIError
+		if !errors.As(err, &apiErr) || apiErr.StatusCode != http.StatusUnprocessableEntity {
+			t.Fatalf("loc %s: err = %v, want the 422 APIError", loc, err)
 		}
-		bodies := rs.got()
-		if want := `{"client_id":"test-pc","appids":[440,730],"agent_version":"0.1.0","report_interval_seconds":600}`; len(bodies) != 2 || bodies[1] != want {
-			t.Errorf("loc %s: bodies = %q, want the resend %s", loc, bodies, want)
+		if len(apiErr.UnknownFields) != 0 || strings.Contains(err.Error(), "update vault-api") {
+			t.Errorf("loc %s: err = %v, want no server-too-old hint", loc, err)
 		}
-		if !result.LocalAddrsDropped || result.PresenceDropped {
-			t.Errorf("loc %s: result = %+v", loc, result)
-		}
-	}
-}
-
-// A 422 that ALSO names another field is a real rejection: not resent.
-func TestReportInstalled_LocalAddrsPlusAnotherErrorIsFinal(t *testing.T) {
-	var rs recordingServer
-	srv := rs.start(t, func([]byte) (int, string) {
-		return http.StatusUnprocessableEntity, `{"detail":[{"type":"value_error","loc":["body","local_addrs",0],"msg":"x"},{"type":"value_error","loc":["body","client_id"],"msg":"x"}]}`
-	})
-	if _, err := New(srv.URL, "k", testBackoff()).ReportInstalled(context.Background(), newPayload()); err == nil {
-		t.Fatal("expected the 422")
-	}
-	if n := len(rs.got()); n != 1 {
-		t.Errorf("server saw %d request(s), want 1", n)
-	}
-}
-
-func TestUnknownOptionalFields(t *testing.T) {
-	cases := []struct {
-		body string
-		want []string
-	}{
-		{`{"detail":[{"type":"extra_forbidden","loc":["body","local_addrs"]}]}`, []string{"local_addrs"}},
-		{rc8ExtraForbidden, []string{"agent_version", "report_interval_seconds"}},
-		{`{"detail":[{"type":"extra_forbidden","loc":["body","local_addrs"]},{"type":"extra_forbidden","loc":["body","local_addrs"]}]}`, []string{"local_addrs"}},
-		{`{"detail":[{"type":"extra_forbidden","loc":["body","local_addrs"]},{"type":"extra_forbidden","loc":["body","lan"]}]}`, nil},
-		{rc8BadClientIDAndExtra, nil},
-	}
-	for _, tc := range cases {
-		if got := unknownOptionalFields([]byte(tc.body)); !reflect.DeepEqual(got, tc.want) {
-			t.Errorf("unknownOptionalFields(%s) = %v, want %v", tc.body, got, tc.want)
+		if n := len(rs.got()); n != 1 {
+			t.Errorf("loc %s: server saw %d request(s), want 1", loc, n)
 		}
 	}
 }
