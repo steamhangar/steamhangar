@@ -768,6 +768,12 @@ certificate that the Windows store trusts then fails with
 that environment, or add your CA to the file it names. `http://` server
 URLs are not affected.
 
+**Troubleshooting an IPv6 server URL** (since the Go 1.27 line,
+GO-LINE-1): an unbracketed IPv6 address such as `http://fd00::5:8080/` is
+refused at the config check (`server URL is not a valid URL: invalid port
+"::5:8080" after host`, Go's `urlstrictcolons=1` default); write it as
+`http://[fd00::5]:8080/`. Host names and IPv4 addresses are not affected.
+
 ## Hosts-file mode (WP 2.3)
 
 The optional, **opt-in** DNS-free deployment mode from `docs/PROJECT_PLAN.md`
