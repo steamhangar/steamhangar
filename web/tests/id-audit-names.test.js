@@ -38,7 +38,7 @@ test("Clients card chips and now box never print a bare id for an unnamed app", 
   const recent = recentChips({ recent_apps: [{ appid: 1465470, name: null, bytes_served: 0 }, { appid: 3419430, name: null, bytes_served: 0 }] });
   assert.deepEqual(recent.chips.map((c) => c.name), [UNKNOWN_APP_NAME, UNKNOWN_APP_NAME]);
   assert.doesNotMatch(JSON.stringify(recent), /1465470|3419430/);
-  const loading = nowBox({ loading_now: { loading: true, bytes_per_second: 0, apps: [{ appid: 3419430, name: null }] } });
+  const loading = nowBox({ live_now: { loading: true, bytes_per_second: 0, apps: [{ appid: 3419430, name: null }] } });
   assert.equal(loading.title, UNKNOWN_APP_NAME);
   assert.doesNotMatch(JSON.stringify(loading), /3419430/);
 });

@@ -138,6 +138,7 @@ const resetBtn = (s) => s.querySelector('[data-role="steamid-reset"]');
 const errLine = (s) => s.querySelector('[data-role="steamid-error"]');
 const errText = (s) => (errLine(s).hidden ? null : errLine(s).textContent);
 const caption = (s) => s.querySelector('[data-role="steamid-caption"]').textContent;
+const captionHidden = (s) => s.querySelector('[data-role="steamid-caption"]').hidden === true;
 
 beforeEach(() => {
   storage.clear();
@@ -161,6 +162,7 @@ test("the Steam section shows a 'Steam library' block, pre-filled from the store
   assert.equal(headings.includes("Library preview"), false);
   assert.equal(input(s).value, STEAMID);
   assert.equal(caption(s), "Overridden here · Takes effect immediately.");
+  assert.equal(captionHidden(s), false, "a caption with text is shown");
   assert.equal(saveBtn(s).hidden, false);
 });
 
@@ -263,7 +265,7 @@ test("MUTATION PIN: Reset (shown only for a db override) sends null and lands on
   assert.equal(resetBtn(s).hidden, true);
 });
 
-test("an older vault-api without the setting: Save hidden, caption says so, Preview kept", async () => {
+test("a settings answer without the setting (malformed): Save hidden, no 'older vault-api' caption (OLD-SERVER-FALLBACK-1), Preview kept", async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async (url, init) => {
     const u = new URL(String(url));
@@ -279,7 +281,8 @@ test("an older vault-api without the setting: Save hidden, caption says so, Prev
     assert.equal(saveBtn(s).hidden, true);
     assert.equal(resetBtn(s).hidden, true);
     assert.equal(input(s).disabled === true, false, "Preview still needs the input");
-    assert.match(caption(s), /does not store a library SteamID64/);
+    assert.equal(caption(s), "", "MUTATION PIN: no version note");
+    assert.equal(captionHidden(s), true, "MUTATION PIN: no empty caption on screen");
     assert.ok(previewBtn(s));
   } finally {
     globalThis.fetch = originalFetch;

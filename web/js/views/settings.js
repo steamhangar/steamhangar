@@ -61,13 +61,14 @@
  *    renders in the load-error state (WP WEB-FIX-1 B2), and says so in demo
  *    mode (B1).
  *  - About — the component table from `GET /v1/about` (WP WEB-FEAT-3),
- *    fetched when this view opens and on Refresh, never polled; a 404 shows
- *    "server too old". The rail's version button opens and focuses it.
+ *    fetched when this view opens and on Refresh, never polled; a failed
+ *    read (a 404 included, OLD-SERVER-FALLBACK-1) is an error line. The
+ *    rail's version button opens and focuses it.
  *  - Expert — a read-only "Storage balance" card at the end of the panel
  *    (WP STORAGE-BALANCE-1, lib/storage-balance.js): kit tiles from the
  *    store's "cache" snapshot (`GET /v1/cache/summary`, already polled for
  *    the rail foot), plus the server's warning. Hidden while there is no
- *    `storage_balance` (an older server).
+ *    `storage_balance` (no summary yet).
  *
  * The settings form is not polled. The store-singleton subscriptions only
  * rewrite the About "checked ... ago" line ("clients") and the Storage
@@ -121,7 +122,6 @@ import { validSteamId64 } from "../lib/steamid.js";
 import { submitSteamKey } from "../lib/steam-key-form.js";
 import {
   INVALID_STEAMID64_MESSAGE,
-  LIBRARY_SETTING_ABSENT_MESSAGE,
   NO_STEAM_KEY_MESSAGE,
   PRIVATE_PROFILE_MESSAGE,
   SAVE_OUTCOME,
@@ -132,10 +132,8 @@ import {
 import { onViewChange } from "../router.js";
 import { store } from "../store-singleton.js";
 import {
-  ABOUT_TOO_OLD_MESSAGE,
   aboutComponents,
   checkedText,
-  classifyAboutError,
   describeComponents,
   describeRelease,
   unchangedSinceText,
@@ -622,7 +620,7 @@ function buildExpertPanel(groups) {
 // Storage balance (WP STORAGE-BALANCE-1): a read-only card at the end of
 // the Expert panel, painted from the store's "cache" snapshot (GET
 // /v1/cache/summary, already polled for the rail foot). Hidden while there
-// is nothing honest to show, including an older server without the field.
+// is nothing honest to show (no summary yet, a malformed field).
 // ---------------------------------------------------------------------
 
 let balanceCard = null;
@@ -989,8 +987,7 @@ function buildSteamLibraryCard() {
     idInput.dataset.role = "setting-value";
   } else {
     // Never disabled: Preview checks whatever is typed, and must work on a
-    // read-only vault and on an older vault-api without this setting too.
-    // Only Save/Reset are gated (WEB-FEAT-1 review S3).
+    // read-only vault too. Only Save/Reset are gated (WEB-FEAT-1 review S3).
     idInput.value = entry ? effectiveAsInputValue(entry) : "";
   }
   const typedId = () => (pinned ? String((entry && entry.effective) || "").trim() : idInput.value.trim());
@@ -1010,27 +1007,20 @@ function buildSteamLibraryCard() {
   resetBtn.dataset.role = "steamid-reset";
   resetBtn.title = "Remove the override — back to the environment or default value";
   const lookupBody = el("div", "lookup");
-  const visibleCaption = el("div", "capslot");
 
   function paintCaption() {
     const current = entryByKey(STEAM_LIBRARY_SETTING_KEY);
     if (pinned) {
       caption.hidden = true;
-      visibleCaption.hidden = true;
       resetBtn.hidden = true;
       return;
     }
-    if (current) {
-      caption.className = "";
-      caption.textContent = `${sourceLabel(current.source)} · ${appliesText(current.applies)}`;
-      if (caption.parentNode !== info.help) info.help.insertBefore(caption, info.help.firstChild);
-      visibleCaption.hidden = true;
-    } else {
-      caption.className = "hint";
-      caption.textContent = `${LIBRARY_SETTING_ABSENT_MESSAGE} Preview still works.`;
-      visibleCaption.replaceChildren(caption);
-      visibleCaption.hidden = false;
-    }
+    // OLD-SERVER-FALLBACK-1: the server of the same release always lists
+    // the setting; without it (a malformed answer) there is no caption and
+    // no "older vault-api" note.
+    caption.textContent = current ? `${sourceLabel(current.source)} · ${appliesText(current.applies)}` : "";
+    caption.hidden = !current;
+    if (caption.parentNode !== info.help) info.help.insertBefore(caption, info.help.firstChild);
     // Same rule as every other setting's Reset (settings-presentation.js's
     // canReset): only a `db` override has anything to clear.
     resetBtn.hidden = ro || !current || !canReset(current);
@@ -1124,7 +1114,7 @@ function buildSteamLibraryCard() {
 
   const row = el("div", "irow");
   row.append(idInput, saveBtn, lookupBtn, resetBtn);
-  idField.append(head, row, info.help, visibleCaption);
+  idField.append(head, row, info.help);
 
   els.steam = { ...els.steam, lookupBody };
   const card = fcard(CARD_TITLES.steamLibrary, idField, idErr, lookupBody);
@@ -1184,9 +1174,9 @@ function buildConnectionCard() {
 // ---------------------------------------------------------------------
 
 /** Module state, survives re-mounts like `state` above. `phase`:
- * "idle" | "loading" | "loaded" | "too_old" | "error". `components` is
- * kept across a failed Refresh (the last good table stays visible under
- * the error line); a "too old" answer clears it. `release` (WP
+ * "idle" | "loading" | "loaded" | "error". `components` is kept across a
+ * failed Refresh (the last good table stays visible under the error
+ * line). `release` (WP
  * RELEASE-SPLIT-1c) is the answer's `release` object, kept and cleared
  * with `components`. */
 const about = { phase: "idle", components: null, release: null, error: null, gen: 0 };
@@ -1219,7 +1209,6 @@ function setRefreshBusy(busy) {
 
 function aboutAnnouncement() {
   if (about.phase === "loaded") return "Component versions refreshed.";
-  if (about.phase === "too_old") return ABOUT_TOO_OLD_MESSAGE;
   if (about.phase === "error") return `Could not refresh: ${about.error}`;
   return "";
 }
@@ -1249,15 +1238,10 @@ async function loadAbout({ announce = false } = {}) {
     about.phase = "loaded";
   } catch (err) {
     if (gen !== about.gen) return;
-    if (classifyAboutError(err) === "too_old") {
-      about.phase = "too_old";
-      about.components = null;
-      about.release = null;
-      about.error = null;
-    } else {
-      about.phase = "error";
-      about.error = errorText(err);
-    }
+    // OLD-SERVER-FALLBACK-1: a 404 is an error like any other (the route
+    // ships with this web, ADR-0022), never a "server too old" note.
+    about.phase = "error";
+    about.error = errorText(err);
   }
   setRefreshBusy(false);
   paintAbout();
@@ -1433,8 +1417,8 @@ function buildAboutTable(components) {
  * WP RELEASE-SPLIT-1c (ADR-0031, ABOUT-VERSION-1 Weg A): the product
  * version as the main line, then a definition list with one entry per
  * component ("Server", "Agent", "App") and "(unchanged since ...)" for a
- * component older than the product. `null` (nothing built) for a server
- * before 1c or a local build.
+ * component older than the product. `null` (nothing built) for a local
+ * build or a malformed answer.
  */
 function buildReleaseBlock(release) {
   const view = describeRelease(release);
@@ -1477,23 +1461,17 @@ function paintAboutChecked() {
 function paintAbout() {
   if (!aboutEls) return;
   const nodes = [];
-  if (about.phase === "too_old") {
-    const note = el("p", "hint", ABOUT_TOO_OLD_MESSAGE);
-    note.dataset.role = "about-too-old";
-    nodes.push(note);
-  } else {
-    if (about.phase === "error") {
-      const line = el("p", "errline", `Could not load component versions: ${about.error}`);
-      line.dataset.role = "about-error";
-      nodes.push(line);
-    }
-    if (about.components) {
-      const release = buildReleaseBlock(about.release);
-      if (release) nodes.push(release);
-      nodes.push(buildAboutTable(about.components));
-    } else if (about.phase === "loading" || about.phase === "idle") {
-      nodes.push(el("p", "empty", "Loading component versions…"));
-    }
+  if (about.phase === "error") {
+    const line = el("p", "errline", `Could not load component versions: ${about.error}`);
+    line.dataset.role = "about-error";
+    nodes.push(line);
+  }
+  if (about.components) {
+    const release = buildReleaseBlock(about.release);
+    if (release) nodes.push(release);
+    nodes.push(buildAboutTable(about.components));
+  } else if (about.phase === "loading" || about.phase === "idle") {
+    nodes.push(el("p", "empty", "Loading component versions…"));
   }
   aboutEls.content.replaceChildren(...nodes);
   paintAboutChecked();

@@ -45,8 +45,7 @@
  * CLIENTS-LIVE-1: the "Loading now" box, its speed, the "Downloading" pill
  * and the "N loading now" tile read each row's `live_now` (the server's live
  * tier, seconds old; `currentLoading` in lib/clients-page.js), so a 5 s
- * poll shows a 5 s old state; a server before rc21 sends only the swept
- * `loading_now` (up to one event-log sweep old), which is the fallback.
+ * poll shows a 5 s old state.
  * Polling the overview also keeps the server's live tier tailing. The list
  * is rebuilt per answer or tick.
  *
@@ -70,7 +69,6 @@
 import { store } from "../store-singleton.js";
 import { createViewPoll } from "../store.js";
 import { api, getStoredApiKey, isDemoMode } from "../api.js";
-import { ERROR_KINDS } from "../errors.js";
 import { onViewChange } from "../router.js";
 import { requestPcRemoval } from "../components/clients-sheet.js";
 import { openAddDeviceSheet } from "../components/add-device-sheet.js";
@@ -90,7 +88,7 @@ import {
 } from "../lib/client-names.js";
 import { createClientCard } from "../components/client-card.js";
 import { createPill } from "../components/pill.js";
-import { FEED_TEXT, feedNote, feedState, isRange, joinNotes, refreshFailedText } from "../lib/traffic-view.js";
+import { feedNote, feedState, isRange, joinNotes, refreshFailedText } from "../lib/traffic-view.js";
 import {
   AGENTLESS_NOTE,
   NO_CLIENTS_TEXT,
@@ -118,10 +116,9 @@ function errorText(err) {
 }
 
 /** Module state; survives re-mounts. `data` is the last overview answer
- * for `range`; `unsupported` is a 404 (a server older than D15b);
- * `noFigures` is the last known verdict "no statistics to range over"
- * (feed disabled or unsupported), kept while an answer is pending. */
-const state = { range: "7d", data: null, error: null, unsupported: false, noFigures: false };
+ * for `range`; `noFigures` is the last known verdict "no statistics to
+ * range over" (feed disabled), kept while an answer is pending. */
+const state = { range: "7d", data: null, error: null, noFigures: false };
 
 /** What agent versions are checked against: `server_version` and (since
  * RELEASE-SPLIT-1b) `clients.agent` of `GET /v1/settings`, read on each
@@ -171,21 +168,13 @@ const poll = createViewPoll({
     if (!data || data.range !== state.range) return;
     state.data = data;
     state.error = null;
-    state.unsupported = false;
     state.noFigures = feedState(data) === "disabled";
     paint();
   },
+  // OLD-SERVER-FALLBACK-1: a 404 is an error like any other (the route
+  // ships with this web, ADR-0022), shown and retried on the next tick.
   onError: (err) => {
-    if (err && err.kind === ERROR_KINDS.NOT_FOUND) {
-      // A server older than D15b: polling again cannot change that answer
-      // (an upgrade restarts vault-api; the next visit to this view asks
-      // again), so the poll stops here.
-      state.unsupported = true;
-      state.noFigures = true;
-      poll.stop();
-    } else {
-      state.error = errorText(err);
-    }
+    state.error = errorText(err);
     paint();
   },
 });
@@ -302,12 +291,11 @@ function paint() {
   if (!els) return;
   const data = state.data;
   let note = null;
-  if (state.unsupported) note = FEED_TEXT.unsupported;
-  else if (state.error && !data) note = `Could not load clients: ${state.error}`;
+  if (state.error && !data) note = `Could not load clients: ${state.error}`;
   else if (data) note = joinNotes(state.error ? refreshFailedText(state.error) : null, feedNote(data));
   els.note.textContent = note || "";
   els.note.hidden = !note;
-  // No statistics (feed disabled, old server): no range selector either.
+  // No statistics (feed disabled): no range selector either.
   els.range.hidden = state.noFigures;
 
   // A rebuild must not take focus from a card's Rename or Remove button.
@@ -319,16 +307,6 @@ function paint() {
   const focusKey = focusRole ? cardKeyOf(active) : null;
   els.list.replaceChildren();
   const agentRows = agentSnapshot();
-  if (state.unsupported) {
-    // No overview: the agent PCs alone, still listed and removable.
-    const only = mergeAgentData([], agentRows);
-    els.sub.textContent = only.length ? clientsSummaryText(only) : "";
-    paintTiles(only.length ? only : null, state.range);
-    const nowMs = Date.now();
-    for (const client of only) els.list.appendChild(buildCard(client, state.range, nowMs));
-    els.agentlessNote.hidden = true;
-    return;
-  }
   if (!data) {
     els.sub.textContent = "";
     paintTiles(null, state.range);

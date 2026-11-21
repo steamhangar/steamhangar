@@ -124,7 +124,10 @@ function respond(status, data) {
   const text = data === undefined ? "" : JSON.stringify(data);
   return { ok: status >= 200 && status < 300, status, json: async () => data, text: async () => text };
 }
-const strip = ({ parent_appid, app_type, group_size_bytes, ...rest }) => rest;
+// "flat": every row ungrouped (parent_appid null), as the server sends a
+// list without content packages (no "older vault-api" mode since
+// OLD-SERVER-FALLBACK-1).
+const strip = (g) => ({ ...g, parent_appid: null, app_type: null, group_size_bytes: g.size_bytes ?? null });
 globalThis.fetch = async (url, init = {}) => {
   const u = new URL(String(url));
   const p = u.pathname;
@@ -242,8 +245,8 @@ test("a package's games tick rebuilds its group card (the failed warning goes aw
   assert.equal(card(s, 22), null, "the package never gets a card of its own");
 });
 
-test("MUTATION PIN -- an older vault-api (no parent_appid / app_type fields) renders the flat list unchanged", async () => {
-  server.mode = "old";
+test("MUTATION PIN -- rows with parent_appid null render the flat list unchanged", async () => {
+  server.mode = "flat";
   server.games = freshGames();
   const s = await openLibrary(4);
   // WP LIB-SORT: the default order is Name A-Z now ("Cosmetics" before "Voice Pack").

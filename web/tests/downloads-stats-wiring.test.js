@@ -17,8 +17,8 @@
  *   - the History filter fetches `?range=` with limit 200, shows fetched
  *     rows the store's poll does not hold, hides older finished jobs, and
  *     has a range-worded empty line;
- *   - a 404 (server older than D15b) shows the update note and stops the
- *     poll; leaving the view stops it too.
+ *   - a 404 is an error like any other (OLD-SERVER-FALLBACK-1), never the
+ *     old "update vault-api" note; leaving the view stops the poll.
  *
  * Harness: fake-dom.js, a routing `fetch` fake, the real store-singleton
  * stopped in `after()`. Assertions compare text, never nodes.
@@ -67,6 +67,7 @@ function throughput(range, state) {
     active_clients_now: state === "ok" ? 2 : null,
     summary: off ? null : {
       bytes_served: 60 * GIB, hit_bytes: 50 * GIB, miss_bytes: 10 * GIB, requests: 100, hits: 83, misses: 17, errors: 0,
+      internet_bytes: 10 * GIB,
       // Request and byte rates differ on purpose: the tile shows the byte rate.
       hit_rate: 0.5, byte_hit_rate: 50 / 60, average_bytes_per_second: 50 * MIB, peak_bytes_per_second: 100 * MIB, active_clients: 3,
     },
@@ -307,14 +308,12 @@ test("MUTATION TARGET: History filter — default All with the fetched rows; 24 
   }
 });
 
-test("MUTATION TARGET: a 404 shows the update note and stops the poll; leaving the view stops it too", async () => {
+test("OLD-SERVER-FALLBACK-1: a 404 is an error like any other (the server's detail, no update note); leaving the view stops the poll", async () => {
   server.status = 404;
   let s = await mount();
-  await until(() => q(s, "stats-note").textContent === "This server does not report traffic statistics yet. Update vault-api to see them.", "unsupported note");
-  assert.equal(q(s, "stats-range").hidden, true, "no range selector for an old server");
-  const n = server.calls.length;
-  await tick(60);
-  assert.equal(server.calls.length, n, "no retries after a 404");
+  await until(() => /Not Found/.test(q(s, "stats-note").textContent), "error note");
+  assert.match(q(s, "stats-note").textContent, /^(Could not load the statistics|Couldn't refresh): Not Found/);
+  assert.doesNotMatch(q(s, "stats-note").textContent, /Update vault-api/);
   server.status = 200;
   s = await mount();
   await until(() => !q(s, "stats-grid").hidden, "a new visit asks again");

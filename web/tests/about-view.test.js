@@ -22,7 +22,6 @@ import {
   ABOUT_CACHE_SECONDS,
   ABOUT_DISPLAY,
   ABOUT_STATUS,
-  ABOUT_TOO_OLD_MESSAGE,
   COMPONENT_NOTES,
   CORE_NOTES,
   DASH,
@@ -30,7 +29,6 @@ import {
   DASH_NOTE,
   aboutComponents,
   checkedText,
-  classifyAboutError,
   commitCell,
   coreComparison,
   describeComponent,
@@ -341,12 +339,8 @@ test("relative time: checkedText uses the OLDEST checked_at and states the 60 s 
   assert.equal(checkedText(null, now), null);
 });
 
-test("MUTATION TARGET: only 404 is 'server too old' (a note); 401 (key refused) and anything else is an error", () => {
-  assert.equal(classifyAboutError({ status: 404 }), "too_old");
-  assert.equal(classifyAboutError({ status: 401 }), "error");
-  assert.equal(classifyAboutError({ status: 500 }), "error");
-  assert.equal(classifyAboutError({ status: 403 }), "error");
-  assert.equal(classifyAboutError(new Error("network")), "error");
-  assert.equal(classifyAboutError(null), "error");
-  assert.match(ABOUT_TOO_OLD_MESSAGE, /older than this web UI/);
+test("OLD-SERVER-FALLBACK-1: no 'server too old' classifier or message is left", async () => {
+  const mod = await import("../js/lib/about-view.js");
+  assert.equal("classifyAboutError" in mod, false);
+  assert.equal("ABOUT_TOO_OLD_MESSAGE" in mod, false);
 });

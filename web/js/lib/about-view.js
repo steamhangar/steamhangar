@@ -50,8 +50,9 @@
  * agent, app). {@link describeRelease} turns it into the block above the
  * table: the product version as the main line ("SteamHangar 0.1.0-rc23"),
  * then one line per component, "unchanged since <version>" when the
- * component is older than the product. A server before 1c (no `release`)
- * and a local build (no component versions) show no block.
+ * component is older than the product. A local build (no component
+ * versions) shows no block; the server always sends `release` (no
+ * pre-1c case since OLD-SERVER-FALLBACK-1).
  *
  * Pure: no DOM, no fetch. Covered in web/tests/about-view.test.js and
  * web/tests/release-split-1c.test.js.
@@ -137,10 +138,6 @@ export const DASH_NOTE = "A dash means the component did not report this value."
 
 /** Components whose note already explains every dash they show. */
 const NOTE_EXPLAINS_DASH = new Set(["vault-proxy", "steamprefill"]);
-
-/** Shown instead of the table when the server has no `GET /v1/about`. */
-export const ABOUT_TOO_OLD_MESSAGE =
-  "This server is older than this web UI and does not report component versions. Update the server to see them here.";
 
 /** Shown for an entry without a usable name (never "unknown"). */
 export const UNNAMED_COMPONENT = "Unnamed component";
@@ -287,21 +284,6 @@ export function checkedText(components, nowMs = Date.now()) {
   );
 }
 
-/**
- * How a failed `GET /v1/about` is shown. Only a 404 is "too old" (a note,
- * not an error): with a VALID key an unknown route answers 404 — the
- * pre-auth body guard (api/README.md "Auth", WP SEC-FIX-4) checks the key
- * first and lets a keyed request through to routing — so a server from
- * before WP VER-2 says 404. A 401 always means the key was refused, on any
- * server version; it is an error like every other status (review fix).
- * @param {{status?: number} | null | undefined} err
- * @returns {"too_old" | "error"}
- */
-export function classifyAboutError(err) {
-  const status = err && typeof err.status === "number" ? err.status : null;
-  return status === 404 ? "too_old" : "error";
-}
-
 // ---------------------------------------------------------------------
 // Product and component versions (WP RELEASE-SPLIT-1c, ADR-0031)
 // ---------------------------------------------------------------------
@@ -329,7 +311,7 @@ export function releaseValueText(version, since) {
 
 /**
  * The block above the component table, or `null` when there is nothing to
- * show (a server before 1c, a local build without component versions).
+ * show (a local build without component versions, a malformed answer).
  * Only release versions are shown; a component without one is left out.
  * `unchangedSince` is the component's version when it is older than the
  * product version (natural pre-release order, `compareReleaseVersions`).

@@ -29,9 +29,10 @@
  * `last_reported_at` or `offline_after` against a clock to decide online vs
  * offline (docs/LEARNINGS.md: two call sites computing the same predicate
  * diverge). `last_reported_at` is used for the "last seen ... ago" WORDS
- * only. A server older than AGENT-FEAT-1 sends no `presence` at all: that
- * reads "Not reported", not a guess (WP WEB-FIX-8: never the word
- * "unknown" for a value that is simply not reported).
+ * only. A `presence` that is not one of the two words reads "Not
+ * reported", not a guess (WP WEB-FIX-8: never the word "unknown" for a
+ * value that is simply not reported). The server of the same release always
+ * sends it (OLD-SERVER-FALLBACK-1: no older-server wording).
  *
  * Pure only — no DOM, no fetch. Covered in web/tests/clients-view.test.js
  * and web/tests/clients-presence.test.js.
@@ -197,17 +198,17 @@ export function presenceLine(client, nowMs = Date.now()) {
 
 /**
  * Counts by the server's presence field. `null` when there is no list yet
- * (no poll landed): nothing honest to count.
+ * (no poll landed): nothing honest to count. `total` counts every row, so a
+ * row without a documented presence word is in `total` only.
  * @param {object[] | null | undefined} clients
- * @returns {{online: number, offline: number, unknown: number, total: number} | null}
+ * @returns {{online: number, offline: number, total: number} | null}
  */
 export function agentsSummary(clients) {
   if (!Array.isArray(clients)) return null;
-  const counts = { online: 0, offline: 0, unknown: 0, total: clients.length };
+  const counts = { online: 0, offline: 0, total: clients.length };
   for (const c of clients) {
     const p = presenceOf(c);
     if (p) counts[p] += 1;
-    else counts.unknown += 1;
   }
   return counts;
 }
@@ -223,8 +224,7 @@ export function agentsSummaryText(clients) {
   const s = agentsSummary(clients);
   if (!s) return null;
   if (s.total === 0) return "Agents: none have reported yet";
-  const base = `Agents: ${s.online} online, ${s.offline} offline`;
-  return s.unknown > 0 ? `${base}, ${s.unknown} without presence (server older than this web UI)` : base;
+  return `Agents: ${s.online} online, ${s.offline} offline`;
 }
 
 // ---------------------------------------------------------------------
@@ -271,9 +271,9 @@ export const CLIENT_GONE_DETAIL_PREFIX = "Unknown client_id";
 
 /**
  * Whether a failed remove means "this PC is already gone": a 404 whose
- * detail is the handler's own text. Any other 404 (an unknown route on a
- * server older than AG-1, a proxy's 404 page) is a real error and is shown
- * on the row. MUTATION TARGET.
+ * detail is the handler's own text. Any other 404 (a proxy's 404 page, an
+ * unmatched route) is a real error and is shown on the row. MUTATION
+ * TARGET.
  * @param {unknown} err ApiError from api.deleteClient
  */
 export function isClientAlreadyGone(err) {

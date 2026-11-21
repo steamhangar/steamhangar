@@ -11,8 +11,6 @@
  * texts below say exactly that and nothing more.
  */
 
-import { ERROR_KINDS } from "../errors.js";
-
 export const SCOPE_OLDER = "older-than-30d";
 export const SCOPE_ALL = "all";
 
@@ -56,12 +54,14 @@ export function historyDeletedText(result) {
   return `History older than 30 days deleted: ${jobs} and the traffic statistics from that time.`;
 }
 
-/** Error line in the dialog. Only a 404 means "server too old" (LEARNINGS,
- * WP WEB-FEAT-3: a 401 is a key problem, never an outdated server). */
+/** The old "server too old" note for a 404. The web no longer shows it
+ * (OLD-SERVER-FALLBACK-1: web and API ship together, ADR-0022); kept for
+ * the Android twin pin (ClientGapsWebTwinTest): the app updates
+ * independently of the server and keeps the note. */
+export const HISTORY_DELETE_UNSUPPORTED_TEXT = "This server cannot delete history yet. Update vault-api to use this.";
+
+/** Error line in the dialog: the server's detail, a 404 included. */
 export function historyDeleteErrorText(err) {
-  if (err && err.kind === ERROR_KINDS.NOT_FOUND) {
-    return "This server cannot delete history yet. Update vault-api to use this.";
-  }
   const detail = err && typeof err.detail === "string" && err.detail ? err.detail : (err && err.message) || "Request failed.";
   return `Could not delete history: ${detail}`;
 }

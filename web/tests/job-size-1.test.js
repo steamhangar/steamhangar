@@ -50,7 +50,7 @@ const firstDownload = (extra = {}) => ({
   ...extra,
 });
 
-/** The pre-JOB-SIZE-1 entry for the same job (preview off / failed / older server). */
+/** The entry for the same job without a size preview (preview off / failed). */
 const unknownDepots = { job_id: 254, appid: 264710, started_at: STARTED, bytes_per_second: null, bytes_since_start: null, exclusive_depots: 0, mapped_depots: 0 };
 
 test("MUTATION TARGET -- JOB-SIZE-1: preview present: speed, '<so far> of ~<expected download>' and the expected-size mark", () => {

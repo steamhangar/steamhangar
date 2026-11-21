@@ -52,21 +52,18 @@ test("MUTATION TARGET: the agents summary counts by the server field, not by tim
   assert.deepEqual(agentsSummary([onlineButOld, offlineButFresh, onlineButOld]), {
     online: 2,
     offline: 1,
-    unknown: 0,
     total: 3,
   });
   assert.equal(agentsSummaryText([onlineButOld, offlineButFresh]), "Agents: 1 online, 1 offline");
 });
 
-test("a server older than AGENT-FEAT-1 (no presence field) reads 'Not reported', never a guess", () => {
+test("a missing or undocumented presence reads 'Not reported', never a guess; no older-server wording (OLD-SERVER-FALLBACK-1)", () => {
   const legacy = { client_id: "c", last_reported_at: iso(1000) };
   assert.equal(presenceOf(legacy), null);
   assert.equal(presenceWord(legacy), "Not reported");
   assert.equal(presenceOf({ presence: "ONLINE" }), null, "only the two documented words count");
-  assert.equal(
-    agentsSummaryText([legacy, onlineButOld]),
-    "Agents: 1 online, 0 offline, 1 without presence (server older than this web UI)",
-  );
+  assert.equal(agentsSummaryText([legacy, onlineButOld]), "Agents: 1 online, 0 offline");
+  assert.deepEqual(agentsSummary([legacy, onlineButOld]), { online: 1, offline: 0, total: 2 }, "no 'unknown' bucket");
 });
 
 test("agents summary: null before the first answer, a plain sentence for an empty list", () => {

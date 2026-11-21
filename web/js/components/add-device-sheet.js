@@ -313,7 +313,9 @@ async function loadDist() {
   } catch (err) {
     if (gen !== dist.gen) return;
     const detail = err && typeof err.detail === "string" && err.detail ? err.detail : (err && err.message) || "request failed";
-    dist.state = { error: err && err.status === 404 ? "this server is older than GET /v1/dist" : detail };
+    // OLD-SERVER-FALLBACK-1: a 404 shows the server's detail like any other
+    // error (the route ships with this web, ADR-0022).
+    dist.state = { error: detail };
   }
   paintDistConsumers();
 }

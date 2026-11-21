@@ -8,8 +8,9 @@
  *   - the confirm button names the chosen variant; confirming sends
  *     `DELETE /v1/history?scope=...`, closes the dialog and refetches the
  *     history list (`GET /v1/jobs?range=`) and the statistics;
- *   - "Keep" sends nothing; a 404 (old server) keeps the dialog open with
- *     the update text in a role=alert line.
+ *   - "Keep" sends nothing; a failed delete (a 404 included,
+ *     OLD-SERVER-FALLBACK-1) keeps the dialog open with the server's detail
+ *     in a role=alert line.
  *
  * Harness: fake-dom.js, a routing `fetch` fake. Text assertions only.
  *
@@ -159,17 +160,15 @@ test("MUTATION TARGET: the default variant sends scope=older-than-30d", async ()
   assert.deepEqual(server.deletes, ["older-than-30d"]);
 });
 
-test("MUTATION TARGET: an old server (404) keeps the dialog open with the update text in a role=alert line", async () => {
+test("MUTATION TARGET: a 404 keeps the dialog open with the server's detail (no 'update vault-api' note) in a role=alert line", async () => {
   server.deleteStatus = 404;
   const s = await mount();
   role(s, "history-delete").dispatchEvent({ type: "click" });
   role(dialog(), "history-delete-yes").dispatchEvent({ type: "click" });
   await until(() => role(dialog(), "history-delete-error").hidden === false, "error shown");
   assert.equal(role(dialog(), "history-delete-error").getAttribute("role"), "alert");
-  assert.equal(
-    role(dialog(), "history-delete-error").textContent,
-    "This server cannot delete history yet. Update vault-api to use this.",
-  );
+  assert.match(role(dialog(), "history-delete-error").textContent, /^Could not delete history: /);
+  assert.doesNotMatch(role(dialog(), "history-delete-error").textContent, /Update vault-api/);
   assert.equal(open(), true);
   role(dialog(), "history-delete-no").dispatchEvent({ type: "click" });
   assert.equal(open(), false);

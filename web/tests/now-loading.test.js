@@ -5,7 +5,7 @@
  * one row per source: the prefill runner with its job and phase (in the
  * pill's words), each device as the Clients page names it with its games,
  * and "Unattributed traffic". No block (no empty heading) while nothing
- * loads, with a feed that is not `ok`, or from an older server.
+ * loads, with a feed that is not `ok`, or without `loading_sources`.
  *
  * Run: node --test "web/tests/*.test.js"   (see web/tests/README.md)
  */
@@ -179,7 +179,7 @@ test("traffic no device explains reads Unattributed traffic", () => {
   assert.equal(rows[1].speed, "2.0 MB/s");
 });
 
-test("no block while nothing loads, with a feed that is not ok, or from an older server", () => {
+test("no block while nothing loads, with a feed that is not ok, or without loading_sources", () => {
   assert.equal(loadingNowModel(mergeNow(answer([]))), null);
   assert.equal(loadingNowModel(mergeNow(answer([RUNNER_DL], { state: "stale" }))), null);
   const old = answer([RUNNER_DL]);
@@ -200,7 +200,7 @@ test("the live view takes the rows from the live answer only", () => {
   const live = { event_feed: feed, current: current(30 * MIB, 30 * MIB, 0), active_clients: 0, active_window_seconds: 17, loading_sources: [RUNNER_DL] };
   const merged = mergeLive(summary, live);
   assert.deepEqual(loadingNowModel(merged).rows.map((r) => r.name), ["SteamHangar"]);
-  // A live answer without the field (older server): no block, never the
+  // A live answer without the field (null or missing): no block, never the
   // summary's rows of another window.
   const older = { ...live };
   delete older.loading_sources;
@@ -223,7 +223,7 @@ test("heroModel carries the block next to the pill and the device count", () => 
 // ---------------------------------------------------------------------------
 
 function paintWith(hero, sources, opts) {
-  hero.paint({ throughput: mergeNow(answer(sources, opts)), series: null, range: "1h", rateCap: null, unsupported: false, error: null, noFigures: false });
+  hero.paint({ throughput: mergeNow(answer(sources, opts)), series: null, range: "1h", rateCap: null, error: null, noFigures: false });
 }
 
 test("the block is a labelled list, one item per source, hidden when idle", () => {
@@ -255,7 +255,7 @@ test("the block is a labelled list, one item per source, hidden when idle", () =
   // Back to loading, then the feed goes away: hidden again.
   paintWith(hero, [RUNNER_DL]);
   assert.equal(block().hidden, false);
-  hero.paint({ throughput: null, series: null, range: "1h", rateCap: null, unsupported: false, error: null, noFigures: false });
+  hero.paint({ throughput: null, series: null, range: "1h", rateCap: null, error: null, noFigures: false });
   assert.equal(block().hidden, true);
   assert.equal(block().querySelectorAll("li").length, 0);
 });

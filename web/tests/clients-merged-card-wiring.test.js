@@ -4,8 +4,7 @@
  * into the overview card.
  *
  *   - a PC that is client and agent shows ONCE, with its presence line;
- *   - an agent the overview does not list gets its own card (and still shows
- *     with an old server that has no overview endpoint);
+ *   - an agent the overview does not list gets its own card;
  *   - a bypass-suspected agent says so on its card;
  *   - Remove on a card opens the shared confirm, sends one DELETE, drops the
  *     card; a failure shows inline on the card; an id with "/" gets a note;
@@ -176,14 +175,6 @@ test("MUTATION TARGET: an agent the overview does not list gets its own card fro
   assert.equal(stat("hitrate").querySelector(".v").textContent, "\u2014");
   assert.equal(stat("hitrate").querySelector(".meter"), null, "no meter without a rate");
   assert.equal(l.querySelector('[data-role="recent"]'), null, "no recent chips without data");
-});
-
-test("with an old server (no overview) the agent PCs are still listed", async () => {
-  server.overviewStatus = 404;
-  const s = await mount();
-  await until(() => s.querySelector('[data-role="clients-note"]').hidden === false, "update note");
-  assert.deepEqual(keys(s), ["agent:desk-pc"]);
-  assert.equal(card(s, "agent:desk-pc").querySelector('[data-role="remove-pc"]') === null, false);
 });
 
 test("MUTATION TARGET: a bypass-suspected agent says so on its card, with the careful explanation", async () => {

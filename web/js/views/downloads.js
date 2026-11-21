@@ -134,7 +134,6 @@
 import { store } from "../store-singleton.js";
 import { createViewPoll, VIEW_POLL_MS } from "../store.js";
 import { api, getStoredApiKey, isDemoMode } from "../api.js";
-import { ERROR_KINDS } from "../errors.js";
 import { createRangeSegs } from "../components/range-segs.js";
 import { createDownloadsHero } from "../components/downloads-hero.js";
 import {
@@ -303,7 +302,7 @@ const state = {
 /** WP D15c: the hero statistics's last answer for `range`
  * (`{throughput, series}`), and the History filter's fetched rows. Module
  * state, so a re-mount keeps the chosen ranges. */
-const traffic = { range: readStoredStatsRange(), throughput: null, series: null, error: null, unsupported: false, noFigures: false };
+const traffic = { range: readStoredStatsRange(), throughput: null, series: null, error: null, noFigures: false };
 /** WP DOWNLOADS-3: `shown` = rows on screen (first page, then +20 per
  * "Show more"); `loaded` = the range fetch has answered at least once, so
  * the subline may count the list. */
@@ -1939,22 +1938,14 @@ const trafficPoll = createViewPoll({
     traffic.throughput = answer.throughput;
     traffic.series = answer.series;
     traffic.error = null;
-    traffic.unsupported = false;
     traffic.noFigures = headerTiles(answer.throughput) === null;
     paintStats();
     paintJobSpeeds();
   },
+  // OLD-SERVER-FALLBACK-1: a 404 is an error like any other (the routes
+  // ship with this web, ADR-0022), shown and retried on the next tick.
   onError: (err) => {
-    if (err && err.kind === ERROR_KINDS.NOT_FOUND) {
-      // A server older than D15b: polling again cannot change that answer
-      // (an upgrade restarts vault-api; the next visit to this view asks
-      // again), so the poll stops here.
-      traffic.unsupported = true;
-      traffic.noFigures = true;
-      trafficPoll.stop();
-    } else {
-      traffic.error = errorText(err);
-    }
+    traffic.error = errorText(err);
     paintStats();
   },
 });
@@ -1982,7 +1973,6 @@ function paintStats() {
     series: traffic.series,
     range: traffic.range,
     rateCap: cap,
-    unsupported: traffic.unsupported,
     error: traffic.error,
     noFigures: traffic.noFigures,
   });

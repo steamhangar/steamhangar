@@ -42,7 +42,7 @@
  * `coverArtUrl(appid, coverUrl)` uses that URL when it is an https URL on
  * one of `STEAM_ASSET_HOSTS` (the same two hosts the CSP's `img-src`
  * allows, api/vault_api/webui.py), and the legacy URL otherwise (null, an
- * older server, an owned-only game, anything malformed). The image's own
+ * owned-only game, anything malformed). The image's own
  * error fallback in the components is unchanged. `headerArtUrl` still uses
  * the legacy path (no server lookup for it).
  *

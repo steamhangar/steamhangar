@@ -408,13 +408,14 @@ test("MUTATION TARGET: Windows — a dev build gets the note, never a command", 
   assert.equal(secretInDom(), false, "the note carries no key");
 });
 
-test("Windows — a server without /v1/dist shows an error line", async () => {
+test("Windows — a 404 from /v1/dist is an error line with the server's detail (no 'older server' wording, OLD-SERVER-FALLBACK-1)", async () => {
   server.distStatus = 404;
   openAddDeviceSheet();
   click(showBtn("windows"));
   await until(() => reveal("windows").querySelector('[data-role="agent-error"]') !== null, "error");
-  assert.match(reveal("windows").querySelector('[data-role="agent-error"]').textContent, /older than GET \/v1\/dist/);
-  assert.match(q("app-download-error").textContent, /older than GET \/v1\/dist/, "the app download says so too");
+  assert.match(reveal("windows").querySelector('[data-role="agent-error"]').textContent, /Not Found/);
+  assert.doesNotMatch(reveal("windows").querySelector('[data-role="agent-error"]').textContent, /older than/);
+  assert.match(q("app-download-error").textContent, /Not Found/, "the app download says so too");
 });
 
 test("MUTATION TARGET: demo mode and a missing key show the note and no option", () => {

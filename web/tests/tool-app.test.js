@@ -95,7 +95,7 @@ test("the tool-app words are the agreed copy", () => {
 // lib/game-status.js
 // ---------------------------------------------------------------------
 
-test("isToolApp: only a strict true flag counts (an older server sends none)", () => {
+test("isToolApp: only a strict true flag counts", () => {
   assert.equal(isToolApp(redist()), true);
   assert.equal(isToolApp(game()), false);
   assert.equal(isToolApp({ appid: 228980, name: null, status: "error" }), false);
@@ -317,7 +317,7 @@ test("sheet wiring: the header uses the tool name, the dash glyph and the tool w
 test("MUTATION TARGET -- downloads: a tool app's job is titled from its games row", () => {
   assert.equal(vaultRowTitle(228980, redist()), "Steamworks Common Redistributables");
   assert.equal(vaultRowTitle(440, game()), "Team Fortress 2");
-  // No games row (or an older server without the flag): no client-side list.
+  // No games row (or a row without the flag): no client-side list.
   assert.equal(vaultRowTitle(228980, undefined), "Unknown app");
   assert.equal(vaultRowTitle(228980, { appid: 228980, name: null, tool_app_name: "X" }), "Unknown app");
 });

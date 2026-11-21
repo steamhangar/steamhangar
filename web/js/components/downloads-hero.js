@@ -43,7 +43,6 @@ import { createRangeSegs } from "./range-segs.js";
 import { createPill } from "./pill.js";
 import {
   DASH,
-  FEED_TEXT,
   STATS_RANGES,
   clientDownloadingRow,
   feedNote,
@@ -99,7 +98,7 @@ export const HERO_LABEL = "Throughput";
  * downloading; the hangar itself downloads only while its prefill runner
  * pulls content in from the internet. `current.runner_bytes_per_second`
  * is the runner's part of the current speed (the live tier's on every range
- * since WP GRAPH-RECENT-1, the swept window's only from an older server);
+ * since WP GRAPH-RECENT-1);
  * WP RUNNER-SPLIT-1 splits it: `runner_hit_bytes_per_second` is what the
  * runner read from the cache (a verify), everything else of the runner's
  * part (MISS, and BYPASS, which is in neither split figure) came from the
@@ -113,8 +112,10 @@ export const HERO_LABEL = "Throughput";
  *   - none -> "Idle" (`notinuse`, neutral);
  *   - no current figure -> no pill.
  *
- * An older server without `runner_hit_bytes_per_second` gives no split: its
- * runner traffic reads "Downloading", as before rc21.
+ * A `runner_hit_bytes_per_second` that is not a real number counts as no
+ * cache reads: the runner traffic reads "Downloading". (The web no longer
+ * plans for an older server, OLD-SERVER-FALLBACK-1; the null check stays as
+ * the input guard, and its line is twin-pinned by DownloadsHeroWebTwinTest.)
  *
  * "Serving" is no status kind of its own: docs/design/status-vocabulary.json
  * is a contract the Android `StatusKind` enum must cover kind for kind
@@ -303,13 +304,13 @@ function tooltip(tile) {
 /**
  * Everything the hero shows, from the statistics state. Pure.
  *
- * `note`: the line under the head row (feed off / stale / loading / an old
- * server / a failed refresh), or `null`. `figures`: `null` when there is
- * nothing to show (no answer yet, feed disabled, server without the
- * endpoints) — the note then stands alone and the range seg is hidden
- * when `noFigures` says the server has no figures at all.
+ * `note`: the line under the head row (feed off / stale / loading / a
+ * failed refresh), or `null`. `figures`: `null` when there is nothing to
+ * show (no answer yet, feed disabled) — the note then stands alone and the
+ * range seg is hidden when `noFigures` says the server has no figures at
+ * all.
  *
- * @param {{throughput?: object|null, rateCap?: string|null, unsupported?: boolean, error?: string|null}} state
+ * @param {{throughput?: object|null, rateCap?: string|null, error?: string|null}} state
  * @returns {{note: string|null, figures: null | {
  *   big: {value: string, unit: string, title: string},
  *   status: null | {kind: string, text: string, tone: string | null},
@@ -319,15 +320,14 @@ function tooltip(tile) {
  *   tiles: Array<{key: string, label: string, caption: string|null, value: string, unit: string, title: string, meter: number|null}>
  * }}}
  */
-export function heroModel({ throughput = null, rateCap = null, unsupported = false, error = null } = {}) {
+export function heroModel({ throughput = null, rateCap = null, error = null } = {}) {
   const t = throughput;
   let note;
-  if (unsupported) note = FEED_TEXT.unsupported;
-  else if (error && !t) note = `Could not load the statistics: ${error}`; // twin-pinned (TrafficWebTwinTest)
+  if (error && !t) note = `Could not load the statistics: ${error}`; // twin-pinned (TrafficWebTwinTest)
   else if (t) note = joinNotes(error ? refreshFailedText(error) : null, feedNote(t));
   else note = "Loading statistics…";
 
-  const tiles = unsupported ? null : headerTiles(t, rateCap);
+  const tiles = headerTiles(t, rateCap);
   if (!tiles) return { note, figures: null };
   const byKey = new Map(tiles.map((tile) => [tile.key, tile]));
   const summary = t.summary || {};
@@ -386,12 +386,13 @@ export const LEGEND_INTERNET = "From the internet";
  * cache, e.g. a verify) was served from the cache; the rest (clients' and
  * the runner's misses, bypasses) came from the internet. The internet band
  * sits on top, so the top line is the total and the scale (and the axis's
- * "highest") is the total's. A point without `runner_hit_bytes` (a server
- * before rc21) counts all runner traffic as from the internet, as before.
+ * "highest") is the total's. A `runner_hit_bytes` that is not a real number
+ * counts as 0 (input guard; the line is twin-pinned by
+ * DownloadsHeroWebTwinTest).
  *
- * `null` when any point lacks the split (an older server's tiers): the
- * graph then draws the single total line. Coordinates as `seriesGeometry`.
- * Pure.
+ * `null` when any point's `bytes_served` or `hit_bytes` is not a real
+ * number (malformed input): the graph then draws the single total line.
+ * Coordinates as `seriesGeometry`. Pure.
  * @param {Array<{bytes_per_second: number, bytes_served?: number, hit_bytes?: number, runner_hit_bytes?: number}>} points
  * @param {{width: number, height: number}} box
  * @returns {null | {served: {line: string, area: string}, internet: {line: string, area: string}, maxBytesPerSecond: number}}
@@ -436,12 +437,12 @@ export const NO_TRAFFIC_TEXT = "No traffic in this range";
  * Pure.
  * @param {object | null | undefined} series
  * @param {string} range the range the user has selected
- * @param {{unsupported?: boolean, nowMs?: number}} [opts]
+ * @param {{nowMs?: number}} [opts]
  * @returns {null | {line: string, area: string | null, label: string, axis: string[], idle?: boolean, note?: string,
  *   split?: null | {served: {line: string, area: string}, internet: {line: string, area: string}}}}
  */
-export function graphModel(series, range, { unsupported = false, nowMs = Date.now() } = {}) {
-  if (unsupported || !series || feedState(series) === "disabled" || series.range !== range) return null;
+export function graphModel(series, range, { nowMs = Date.now() } = {}) {
+  if (!series || feedState(series) === "disabled" || series.range !== range) return null;
   // WP GRAPH-ZOOM: only the span that has data; the axis caption follows it.
   const shown = { ...series, points: trimSeries(series.points) };
   const geo = seriesGeometry(shown.points, { width: GRAPH_W, height: GRAPH_H });
@@ -665,7 +666,7 @@ export function createDownloadsHero({ range, onRangeChange }) {
 
   /**
    * @param {{throughput: object|null, series: object|null, range: string, rateCap: string|null,
-   *   unsupported: boolean, error: string|null, noFigures: boolean}} state
+   *   error: string|null, noFigures: boolean}} state
    */
   function paint(state) {
     // An answer for another range is never painted (the view drops it), so
@@ -674,12 +675,11 @@ export function createDownloadsHero({ range, onRangeChange }) {
     const model = heroModel({
       throughput,
       rateCap: state.rateCap,
-      unsupported: state.unsupported,
       error: state.error,
     });
     note.textContent = model.note || "";
     note.hidden = !model.note;
-    // No figures at all (feed disabled, or a server without the endpoints):
+    // No figures at all (feed disabled):
     // no range to choose either. While an answer is pending the last known
     // verdict holds, so a range click never hides the control it came from.
     seg.el.hidden = !!state.noFigures;
@@ -721,7 +721,7 @@ export function createDownloadsHero({ range, onRangeChange }) {
       mini.appendChild(span);
     }
     tiles.replaceChildren(...f.tiles.map(buildTile));
-    paintGraph(graphModel(state.series, state.range, { unsupported: state.unsupported }));
+    paintGraph(graphModel(state.series, state.range));
   }
 
   return { el: root, rangeEl: seg.el, paint };

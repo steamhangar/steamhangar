@@ -9,8 +9,9 @@
  *     "loading now";
  *   - the range selector refetches with the new range and an answer for the
  *     old range is dropped (gated fetch);
- *   - a 404 (server older than D15b) shows the "update vault-api" note;
- *   - no statistics (feed disabled, 404): the range selector is hidden;
+ *   - a 404 is an error like any other (OLD-SERVER-FALLBACK-1: web and API
+ *     ship together), never the old "update vault-api" note;
+ *   - no statistics (feed disabled): the range selector is hidden;
  *   - a failed refresh after an answer keeps the cards and says so;
  *   - the poll stops when the view is left;
  *   - the nav has a Clients button right after Library (index.html).
@@ -48,18 +49,18 @@ function feed(state) {
   return { enabled: state !== "disabled", state, last_sweep_at: state === "disabled" ? null : iso(40 * 60_000), sweep_interval_minutes: 5, traffic_since: null };
 }
 const AGENT = {
-  key: "agent:gaming-pc", kind: "agent", client_id: "gaming-pc", addresses: ["10.0.0.42"], connected: true,
+  key: "agent:gaming-pc", kind: "agent", client_id: "gaming-pc", display_name: "gaming-pc", addresses: ["10.0.0.42"], connected: true,
   agent_presence: "online", cache_active: true, last_active: iso(2 * 60_000), last_seen_in_cache_log: iso(2 * 60_000),
   last_reported_at: iso(5 * 60_000), installed_appids: [440, 570], installed_app_count: 2,
   stats: { bytes_served: GIB, hit_bytes: 0.75 * GIB, miss_bytes: 0.25 * GIB, requests: 4, hits: 3, misses: 1, hit_rate: 0.75 },
-  loading_now: { loading: true, bytes_per_second: 30 * MIB, apps: [{ appid: 440, name: "Some Game", bytes_per_second: 30 * MIB }], unattributed_bytes_per_second: 0 },
+  live_now: { loading: true, bytes_per_second: 30 * MIB, apps: [{ appid: 440, name: "Some Game", bytes_per_second: 30 * MIB }], unattributed_bytes_per_second: 0 },
   recent_apps: [{ appid: 440, name: "Some Game", bytes_served: GIB, last_seen: iso(2 * 60_000) }],
   recent_unattributed_bytes: 0,
 };
 const ADDR = {
-  ...AGENT, key: "addr:10.0.0.77", kind: "address", client_id: null, addresses: ["10.0.0.77"], connected: false,
+  ...AGENT, key: "addr:10.0.0.77", kind: "address", client_id: null, display_name: "10.0.0.77", addresses: ["10.0.0.77"], connected: false,
   agent_presence: null, cache_active: false, last_reported_at: null, installed_appids: null, installed_app_count: null,
-  loading_now: { loading: false, bytes_per_second: 0, apps: [], unattributed_bytes_per_second: 0 }, recent_apps: [],
+  live_now: { loading: false, bytes_per_second: 0, apps: [], unattributed_bytes_per_second: 0 }, recent_apps: [],
 };
 const RUNNER = {
   ...ADDR, key: "runner", kind: "runner", addresses: ["172.18.0.1"], connected: true, cache_active: true,
@@ -72,9 +73,9 @@ function overview(range, state = "ok") {
   }
   const strip = (c) =>
     state === "disabled"
-      ? { ...c, stats: null, loading_now: null, recent_apps: null, recent_unattributed_bytes: null, cache_active: null }
+      ? { ...c, stats: null, live_now: null, recent_apps: null, recent_unattributed_bytes: null, cache_active: null }
       : state === "stale"
-        ? { ...c, loading_now: null, cache_active: null }
+        ? { ...c, live_now: null, cache_active: null }
         : c;
   const clients = state === "disabled" ? [AGENT].map(strip) : [AGENT, ADDR].map(strip);
   return { event_feed: feed(state), range, tier: "1h", range_start: null, active_window_minutes: 15, clients };
@@ -343,13 +344,16 @@ test("an agent with the server's version shows no warning and a calm 0 tile (CLI
   await until(() => store.snapshot("clients").length === 0, "agent row gone from the store");
 });
 
-test("MUTATION TARGET: a server without the endpoint (404) gets the update note, no cards", async () => {
+test("OLD-SERVER-FALLBACK-1: a 404 is an error like any other — the server's detail, the last cards kept, no 'update vault-api' note", async () => {
+  let s = await mount();
+  await until(() => s.querySelectorAll(".clcard").length === 2, "cards");
   server.status = 404;
-  const s = await mount();
-  await until(() => s.querySelector('[data-role="clients-note"]').hidden === false, "note");
-  assert.equal(text(s, '[data-role="clients-note"]'), "This server does not report traffic statistics yet. Update vault-api to see them.");
-  assert.equal(s.querySelectorAll(".clcard").length, 0);
-  assert.equal(s.querySelector('[data-role="clients-range"]').hidden, true, "no range selector for an old server");
+  s = await mount();
+  await until(() => /Not Found/.test(text(s, '[data-role="clients-note"]')), "error note");
+  assert.equal(text(s, '[data-role="clients-note"]'), "Couldn't refresh: Not Found");
+  assert.doesNotMatch(text(s, '[data-role="clients-note"]'), /Update vault-api/);
+  assert.equal(s.querySelectorAll(".clcard").length, 2, "MUTATION PIN: the cards stay (no 'older server' state that drops them)");
+  assert.equal(s.querySelector('[data-role="clients-range"]').hidden, false, "the range selector stays");
   assert.equal(s.querySelector('[data-role="open-pcs"]'), null, "no Manage PCs (WP CLIENTS-1)");
   assert.equal(s.querySelector('[data-role="add-device"]') === null, false, "Add a device still there");
 });

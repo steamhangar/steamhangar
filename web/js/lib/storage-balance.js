@@ -6,8 +6,9 @@
  * "cache" snapshot (the raw `GET /v1/cache/summary` body).
  *
  * The figures come from `storage_balance` in that body (api/README.md,
- * "Storage balance"). An older server does not send it: `storageBalanceView`
- * then returns `null` and the card stays hidden — never zeros.
+ * "Storage balance"). Without a summary yet, or with a malformed object,
+ * `storageBalanceView` returns `null` and the card stays hidden — never
+ * zeros. (No older-server case since OLD-SERVER-FALLBACK-1.)
  */
 
 import { formatBytesGBOrZero } from "./format.js";
@@ -53,8 +54,7 @@ function signedSize(bytes) {
 
 /**
  * The card's content, or `null` when there is nothing honest to show (no
- * summary yet, an older server without `storage_balance`, or a malformed
- * object).
+ * summary yet, or a missing or malformed object).
  *
  * @param {object | null | undefined} summary the raw summary body
  * The "Unexplained" tile is only there when the residual is not 0;

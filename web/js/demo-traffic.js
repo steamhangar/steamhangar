@@ -111,7 +111,7 @@ export function demoSeries(range, nowMs = Date.now(), sinceMs = null) {
       requests: Math.round(clients / (1.4 * MIB)),
       runner_bytes: runner,
       // WP RUNNER-SPLIT-1: golden-neutral, the demo runner downloads (all
-      // MISS), so the graph's two bands and the pill read as before rc21.
+      // MISS), so the graph's two bands and the pill read "Downloading".
       runner_hit_bytes: 0,
       runner_miss_bytes: runner,
       bytes_per_second: bps,

@@ -4095,3 +4095,39 @@ Operator decision 2026-11-21 (Weg A): the "Not cached" card word takes
 so word, pill and dot agree for both grey states; the card word rule is
 recorded in `docs/design/rc20/README.md`. Pins: `game-card-completeness`,
 `css-contrast` (`--none` word 4.5:1 or more on `--surface` and `--bg`).
+
+## WP OLD-SERVER-FALLBACK-1 (2026-11-21) — no "older server" fallbacks in the web (audit U-1)
+
+Web and API ship together in vault-api's image (ADR-0022 addendum
+2026-11-21), so the web assumes the API of its own release. Several earlier
+sections of this file describe behaviour this package removed; they stay
+as the record of their package. What changed:
+
+- A 404 is an error like any other: no "unsupported" phase for "Check
+  updates" (the button and the "Updates" chip are always there; a press
+  toasts the server's detail), no "update vault-api" note on Downloads and
+  Clients (the statistics poll keeps retrying; the Clients cards stay with
+  "Couldn't refresh"), no "server too old" note in Settings → About, for
+  history delete, for client names or for `GET /v1/dist`.
+- No "field missing" branches: the "Updates" chip is not optional; the
+  "From internet" tile is the server's `internet_bytes` only; the Clients
+  "loading now" reads `live_now` only (never the swept `loading_now`); the
+  card title is the server's `display_name` (dash without it); the update
+  status line always says automatic or manual; `isCoreFileDisabled` reads
+  `reason` only; a settings answer without `steam_library_steamid` is a
+  neutral error, not "needs a newer version"; the agents summary has no
+  "without presence (server older than this web UI)" part.
+- The caret-only split button (`.lib-split.solo`, `.split-lbl`) is gone.
+- Kept for Android twin pins (the app updates independently and keeps its
+  fallbacks), each with a comment and a web test that asserts the exact
+  literal: `FEED_TEXT.unsupported` (traffic-view.js, pinned in
+  `traffic-view.test.js`), `RENAME_UNSUPPORTED_TEXT` (client-names.js) and
+  `HISTORY_DELETE_UNSUPPORTED_TEXT` (history-delete.js), both pinned in
+  `client-names.test.js`.
+- Fixtures follow the real API: overview rows carry `display_name` and
+  `live_now`, throughput summaries `internet_bytes`, update status
+  `scheduled`. The twelve Downloads harnesses that used to answer the
+  statistics routes with a 404 now answer them with a real feed-off
+  fixture (`throughput-fixture.js`), so no test depends on an error path
+  to end its poll; they leave the Downloads view in `after()`, which stops
+  the poll.

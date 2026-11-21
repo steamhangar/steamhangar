@@ -25,6 +25,7 @@
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import { createFakeDom } from "./fake-dom.js";
+import { throughputFixture } from "./throughput-fixture.js";
 
 const dom = createFakeDom();
 globalThis.document = dom.document;
@@ -86,6 +87,9 @@ globalThis.fetch = async (url) => {
     }
     return respond(200, { configured: true, game_count: 1, games: [{ appid: 90, name: "Owned Ninety" }] });
   }
+  // Statistics: a real, feed-off answer (never a 404, OLD-SERVER-FALLBACK-1).
+  const stats = throughputFixture(new URL(String(url)));
+  if (stats) return respond(200, stats);
   return respond(404, { detail: "Not Found" });
 };
 
@@ -93,7 +97,11 @@ const { store } = await import("../js/store-singleton.js");
 const { renderDownloads, NAME_LOADING_TEXT } = await import("../js/views/downloads.js");
 const { ownedLibrary } = await import("../js/owned-singleton.js");
 
-after(() => store.stop());
+after(async () => {
+  store.stop();
+  // The statistics poll runs while the view is mounted: leave the view.
+  (await import("../js/router.js")).navigateTo("library");
+});
 
 const tick = (ms = 15) => new Promise((r) => setTimeout(r, ms));
 async function until(pred, label, timeoutMs = 2000) {

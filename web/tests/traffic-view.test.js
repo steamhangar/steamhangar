@@ -59,6 +59,7 @@ const throughput = (state, extra = {}) => ({
       ? null
       : {
           bytes_served: 60 * GIB, hit_bytes: 50 * GIB, miss_bytes: 10 * GIB, requests: 100, hits: 83, misses: 17, errors: 0,
+          internet_bytes: 10 * GIB,
           // Request rate and byte rate differ on purpose (the tile uses bytes).
           hit_rate: 0.5, byte_hit_rate: 0.833, average_bytes_per_second: 50 * MIB, peak_bytes_per_second: 100 * MIB, active_clients: 3,
         },
@@ -105,6 +106,13 @@ test("feed notes: none when ok; disabled names the setting; never-swept the inte
   assert.equal(feedNote(throughput("never-swept"), NOW), FEED_TEXT.neverSwept(5));
   assert.match(feedNote(throughput("stale"), NOW), /last read the cache's event log 40 min ago\. Current values show a dash/);
   assert.equal(feedNote({ event_feed: feed("stale", { last_sweep_at: null }) }, NOW), FEED_TEXT.staleNever);
+  // OLD-SERVER-FALLBACK-1: no web code shows it any more; the literal stays
+  // for the Android app, which keeps its own older-server note.
+  assert.equal(
+    FEED_TEXT.unsupported,
+    "This server does not report traffic statistics yet. Update vault-api to see them.",
+    "kept for twin pin (TrafficWebTwinTest)",
+  );
 });
 
 test("MUTATION TARGET: header tiles — disabled shows no tiles at all (never zeros)", () => {
@@ -142,16 +150,16 @@ test("MUTATION TARGET: header tiles — ok shows every figure; stale dashes only
   assert.equal(z["hit-rate"], DASH);
 });
 
-test("MUTATION TARGET: TILE-INTERNET — the tile is the server's all-scope miss bytes, runner included, with a fallback for older servers", () => {
+test("MUTATION TARGET: TILE-INTERNET — the tile is the server's all-scope miss bytes, runner included; no fallback from other fields (OLD-SERVER-FALLBACK-1)", () => {
   const base = throughput("ok");
   const tile = (summary) =>
     headerTiles(throughput("ok", { summary })).find((x) => x.key === "internet");
   const runner = { bytes_served: 4 * GIB, hit_bytes: 3 * GIB, miss_bytes: GIB, requests: 9, hits: 6, misses: 3, errors: 0 };
   assert.equal(tile({ ...base.summary, internet_bytes: 11 * GIB, prefill_runner: runner }).value, "11.0 GB");
-  assert.equal(tile({ ...base.summary, prefill_runner: runner }).value, "11.0 GB", "older server: client misses + runner misses");
-  assert.equal(tile(base.summary).value, "10.0 GB", "no runner figures: client misses");
+  assert.equal(tile(base.summary).value, "10.0 GB");
   assert.equal(tile({ ...base.summary, internet_bytes: 0 }).value, "0 GB", "a real zero prints");
-  assert.equal(tile({ ...base.summary, miss_bytes: undefined }).value, DASH);
+  assert.equal(tile({ ...base.summary, internet_bytes: undefined, prefill_runner: runner }).value, DASH, "MUTATION PIN: never rebuilt from miss_bytes");
+  assert.equal(tile({ ...base.summary, internet_bytes: null }).value, DASH);
   assert.match(tile(base.summary).title, /came from the internet, SteamHangar's own prefill downloads included/);
   assert.equal(headerTiles(throughput("ok")).length, 8, "2x4 grid");
 });
@@ -184,7 +192,7 @@ test("MUTATION TARGET: D15-RUNNER — saved, hit rate and active clients say the
   assert.match(tiles["hit-rate"].title, /prefill downloads are not counted/);
   assert.match(tiles.clients.title, /SteamHangar's own prefill downloads are not counted/);
   assert.doesNotMatch(tiles.clients.title, /count as one of them/);
-  // Older server (no prefill_runner) or an idle runner: no detail line.
+  // No prefill_runner figures or an idle runner: no detail line.
   assert.equal(Object.fromEntries(headerTiles(base).map((t) => [t.key, t])).loaded.detail, null);
   const idle = throughput("ok", { summary: { ...base.summary, prefill_runner: { ...withRunner.summary.prefill_runner, bytes_served: 0 } } });
   assert.equal(Object.fromEntries(headerTiles(idle).map((t) => [t.key, t])).loaded.detail, null);

@@ -22,8 +22,8 @@
  *     Settings' Save (`lib/owned-library.js`'s `saveLibrarySteamId`: JSON
  *     string, only a real change is sent). A failed lookup saves nothing;
  *     0 games (a private profile) still saves, since the id is valid. A
- *     read-only vault or an older vault-api without the setting keeps the
- *     lookup-only behaviour and says the id was not saved. The input is
+ *     read-only vault keeps the lookup-only behaviour and says the id was
+ *     not saved. The input is
  *     pre-filled from the stored value in the step-1 settings snapshot.
  *     The Library reads the setting on every open, and `finish()` reloads
  *     anyway, so the next library open lists the owned games.

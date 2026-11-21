@@ -168,7 +168,11 @@ export function formatRate(rate) {
   return `${Math.round(Math.min(rate, 1) * 100)}%`;
 }
 
-/** Notes for the feed states and an old server (one place for the words). */
+/** Notes for the feed states (one place for the words). `unsupported` (an
+ * older server answering 404) is no longer used by the web since
+ * OLD-SERVER-FALLBACK-1 (web and API ship together, ADR-0022); kept for the
+ * Android twin pin (TrafficWebTwinTest): the app updates independently of
+ * the server and keeps that note. */
 export const FEED_TEXT = Object.freeze({
   disabled:
     "Traffic statistics are off: the server does not read the cache's event log. Set VAULT_EVENT_LOG and VAULT_EVENT_LOG_PATH in the server's .env to see speeds, hit rate and machines without an agent.",
@@ -462,26 +466,22 @@ export function jobSpeedNote(entry) {
 }
 
 /**
- * WP TILE-INTERNET: all-scope miss bytes. The server's `internet_bytes`;
- * an older server without it falls back to client misses plus the runner's
- * misses; `null` when neither is known (shown as a dash).
+ * WP TILE-INTERNET: all-scope miss bytes, the server's `internet_bytes`;
+ * `null` when it is not a real number (shown as a dash). No fallback from
+ * other fields since OLD-SERVER-FALLBACK-1: the field ships with this web.
  * @param {object} summary
  * @returns {number | null}
  */
 export function internetBytes(summary) {
   if (!summary) return null;
-  if (finiteNonNegative(summary.internet_bytes)) return summary.internet_bytes;
-  const runner = summary.prefill_runner;
-  if (!finiteNonNegative(summary.miss_bytes)) return null;
-  if (runner && finiteNonNegative(runner.miss_bytes)) return summary.miss_bytes + runner.miss_bytes;
-  return runner ? null : summary.miss_bytes;
+  return finiteNonNegative(summary.internet_bytes) ? summary.internet_bytes : null;
 }
 
 /**
  * WP D15-RUNNER: "of which X by the prefill runner" under "Loaded" (WP
  * RUNNER-NAME-1: "X by SteamHangar", the product's name); `null`
- * when the server sent no runner figures (older vault-api) or the runner
- * loaded nothing in the range.
+ * when the runner loaded nothing in the range (or the figures are not real
+ * numbers).
  * @param {object} summary
  * @returns {string | null}
  */
@@ -719,8 +719,8 @@ export function jobSpeedText(entry, state, { verifying = false, nowMs = Date.now
   if (!entry || state !== "ok") return null;
   if (entry.bytes_per_second === null || entry.bytes_per_second === undefined) {
     if (entry.exclusive_depots !== 0) return null;
-    // `mapped_depots` (server >= MAP-FROM-MANIFEST-1) tells "no depots known"
-    // from "all depots shared"; an older server omits it and keeps the old line.
+    // `mapped_depots` (MAP-FROM-MANIFEST-1) tells "no depots known" from
+    // "all depots shared".
     return Number(entry.mapped_depots) > 0
       ? "Speed not measured: this game's depots are shared with other apps."
       : "Speed not measured yet: the server does not know this game's depots yet.";
@@ -866,8 +866,8 @@ export function mergeLive(summary, live) {
  * pill's runner figure and "Loading now" taken from its `now` block (the
  * live tier, one window) instead of the last sweep, so the header agrees
  * with the graph's newest point (which the server stitches from the same
- * ring). Unchanged without a `now` block (feed not `ok`, a server before
- * rc21, `null`). Pure; the input is not modified.
+ * ring). Unchanged without a `now` block (feed not `ok`, `null`). Pure;
+ * the input is not modified.
  * @param {object | null | undefined} throughput
  * @returns {object | null | undefined}
  */

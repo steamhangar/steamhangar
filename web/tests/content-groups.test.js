@@ -54,8 +54,10 @@ test("groupGames: one row per parent, packages attached and removed from the top
   assert.deepEqual([...parentOf.entries()], [[101, 100], [102, 100], [103, 100]]);
 });
 
-test("MUTATION PIN -- an older vault-api response (no parent_appid field at all) renders flat, row for row", () => {
-  const old = LIST.map(({ parent_appid, app_type, ...rest }) => rest);
+// OLD-SERVER-FALLBACK-1: the ADR-0022 "pre-TOOL-APPS-2 response" test is
+// Android-only now (the web ships with its API); the web pins the null case.
+test("MUTATION PIN -- a response whose rows all have parent_appid null renders flat, row for row", () => {
+  const old = LIST.map((r) => ({ ...r, parent_appid: null }));
   const { rows, parentOf } = groupGames(old);
   assert.equal(rows.length, old.length);
   rows.forEach((r, i) => assert.strictEqual(r, old[i]));

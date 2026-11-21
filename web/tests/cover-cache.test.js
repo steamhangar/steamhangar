@@ -47,7 +47,7 @@ test("coverCandidates: stored copy, server CDN cover, legacy -- in that order", 
   assert.deepEqual(coverCandidates(3527290, HASHED, CACHED), [CACHED, HASHED, LEGACY]);
 });
 
-test("coverCandidates without a stored copy or server cover (older server, demo)", () => {
+test("coverCandidates without a stored copy or server cover (owned-only row, demo)", () => {
   assert.deepEqual(coverCandidates(3527290, HASHED, null), [HASHED, LEGACY]);
   assert.deepEqual(coverCandidates(3527290, null, undefined), [LEGACY]);
   assert.deepEqual(coverCandidates(3527290, undefined, CACHED), [CACHED, LEGACY]);

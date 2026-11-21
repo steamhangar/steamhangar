@@ -157,7 +157,7 @@ test("WP PAUSE-ALL-GC-1: a finished dry-run GC job does not claim it collected a
   assert.equal(jobStatusWord(job(1, "done", { type: "gc", gc_execute: false })), "GC dry run (nothing deleted)");
   assert.equal(jobStatusWord(job(1, "done", { type: "gc", gc_execute: true })), "Garbage collected");
   assert.equal(jobStatusWord(job(1, "done", { type: "gc", gc_execute: null })), "Garbage collected", "unknown mode keeps the old word");
-  assert.equal(jobStatusWord(job(1, "done", { type: "gc" })), "Garbage collected", "older server without the field");
+  assert.equal(jobStatusWord(job(1, "done", { type: "gc" })), "Garbage collected", "a row without the field");
   // Only "done" changes: the other outcomes of a dry run keep their words.
   assert.equal(jobStatusWord(job(1, "error", { type: "gc", gc_execute: false })), "Garbage collection failed");
   assert.equal(jobStatusWord(job(1, "running", { type: "gc", gc_execute: false })), "Collecting garbage");

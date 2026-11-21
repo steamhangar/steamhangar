@@ -20,11 +20,10 @@
  * status once and resumes polling if a check is still running — including a
  * scheduled one this browser did not start.
  *
- * **Older vault-api (no UPD-1).** Both routes 404 there. A 404 on either
- * marks the feature `unsupported`; the view hides the button and the status
- * line. The "Updates" chip is gated separately and data-driven
- * (`hasUpdateField`): it shows only when `GET /v1/games` rows actually carry
- * `update_available`.
+ * **Same release only (OLD-SERVER-FALLBACK-1).** The web ships inside
+ * vault-api's image (ADR-0022), so both routes always exist; a 404 is an
+ * error like any other (the press shows the server's detail, a status read
+ * keeps the last answer), never a "feature unsupported" state.
  *
  * Pure decision logic and a timer-injected runner, no DOM — unit-tested in
  * web/tests/update-check.test.js; `views/library.js` is the DOM glue.
@@ -44,18 +43,11 @@ export const UPDATE_POLL_INTERVAL_MS = 2000;
 export const UPDATE_POLL_MAX_TICKS = 150;
 
 export const UPDATE_PHASE = Object.freeze({
-  UNKNOWN: "unknown", // status not read yet (button hidden until known)
-  UNSUPPORTED: "unsupported", // vault-api without the routes (404)
+  UNKNOWN: "unknown", // status not read yet (button loading until known)
   DISABLED: "disabled", // oracle off (enabled: false)
   IDLE: "idle",
   RUNNING: "running",
 });
-
-/** Does this `GET /v1/games` list come from a vault-api that reports
- * update state at all? Gates the "Updates" chip (older vault-api: hidden). */
-export function hasUpdateField(games) {
-  return Array.isArray(games) && games.some((g) => g && typeof g.update_available === "boolean");
-}
 
 /** True when a `GET /v1/games` tick flipped any row's `update_available`.
  * The flag is not part of the card's structural key (`dispKind`), so the
@@ -127,23 +119,19 @@ export const UPDATE_GAVE_UP_TEXT =
  * @param {number} [nowMs]
  */
 export function updateStatusLine(phase, status, nowMs = Date.now()) {
-  if (phase === UPDATE_PHASE.UNKNOWN || phase === UPDATE_PHASE.UNSUPPORTED) return "";
+  if (phase === UPDATE_PHASE.UNKNOWN) return "";
   if (phase === UPDATE_PHASE.DISABLED) return UPDATE_DISABLED_TEXT;
   if (phase === UPDATE_PHASE.RUNNING) return "Checking cached games for updates…";
   if (!status) return "";
   // `scheduled` (UPD-1 final contract): oracle on AND a schedule window set,
-  // i.e. the vault also checks by itself. Shown only when the field exists.
-  const mode =
-    status.scheduled === true ? " · automatic checks on" : status.scheduled === false ? " · manual checks only" : "";
+  // i.e. the vault also checks by itself. Always sent by the server of the
+  // same release (OLD-SERVER-FALLBACK-1: no "field missing" case).
+  const mode = status.scheduled === true ? " · automatic checks on" : " · manual checks only";
   const finished = formatAgo(status.last_finished_at, nowMs);
   if (finished) return `Updates last checked ${finished}${mode}`;
   const started = formatAgo(status.last_started_at, nowMs);
   if (started) return `Last update check started ${started} and did not finish${mode}`;
   return `Updates not checked yet${mode}`;
-}
-
-function isNotFound(err) {
-  return !!err && err.kind === ERROR_KINDS.NOT_FOUND;
 }
 
 function errorMessage(err) {
@@ -224,20 +212,13 @@ export function createUpdateCheckRunner({
     timer = null;
     ticks += 1;
     let s = null;
-    let err = null;
     try {
       s = await fetchStatus();
-    } catch (e) {
-      err = e;
+    } catch {
+      // A failed read (network, 5xx, any error) keeps the last answer and
+      // polls again, bounded by maxTicks.
     }
     if (my !== gen) return; // detached (or restarted) while the read was out
-    if (isNotFound(err)) {
-      stopPolling();
-      phase = UPDATE_PHASE.UNSUPPORTED;
-      announce = false;
-      emit();
-      return;
-    }
     if (s && !s.running) {
       stopPolling();
       status = s;
@@ -268,8 +249,8 @@ export function createUpdateCheckRunner({
     snapshot,
     isBusy: () => starting || phase === UPDATE_PHASE.RUNNING,
 
-    /** Library view mounted: read the status once (support probe + "last
-     * checked"), resume polling if a check is running. */
+    /** Library view mounted: read the status once ("last checked"), resume
+     * polling if a check is running. */
     async attach() {
       active = true;
       const my = gen;
@@ -278,12 +259,9 @@ export function createUpdateCheckRunner({
         s = await fetchStatus();
       } catch (err) {
         if (!active || my !== gen) return;
-        if (isNotFound(err)) {
-          phase = UPDATE_PHASE.UNSUPPORTED;
-          announce = false;
-        } else if (phase === UPDATE_PHASE.UNKNOWN) {
-          // Unreachable for now (network, 5xx): offer the button anyway, a
-          // press reports the real reason.
+        if (phase === UPDATE_PHASE.UNKNOWN) {
+          // Unreachable for now (network, 5xx, any other error): offer the
+          // button anyway, a press reports the real reason.
           phase = UPDATE_PHASE.IDLE;
         } else if (phase === UPDATE_PHASE.RUNNING) {
           // Left and came back mid-run, and this read failed: keep polling
@@ -315,7 +293,7 @@ export function createUpdateCheckRunner({
 
     /**
      * The button press.
-     * @returns {Promise<{skipped: true} | {result: "started"|"already_running"|"disabled"|"unsupported"} | {result: "error", message: string}>}
+     * @returns {Promise<{skipped: true} | {result: "started"|"already_running"|"disabled"} | {result: "error", message: string}>}
      */
     async run() {
       if (starting || phase === UPDATE_PHASE.RUNNING) return { skipped: true };
@@ -326,11 +304,6 @@ export function createUpdateCheckRunner({
         body = await startCheck();
       } catch (err) {
         starting = false;
-        if (isNotFound(err)) {
-          phase = UPDATE_PHASE.UNSUPPORTED;
-          emit();
-          return { result: "unsupported" };
-        }
         emit();
         return { result: "error", message: errorMessage(err) };
       }

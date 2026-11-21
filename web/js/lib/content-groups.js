@@ -12,14 +12,13 @@
  *   row of the same list that is itself top-level. A package whose parent is
  *   not in the list, a self reference, a parent that is itself a package, a
  *   tool app (`tool_app`) or an owned-only row stays an ordinary card. A
- *   missing or null `parent_appid` (an older vault-api) means ungrouped, so
- *   an old response renders exactly as before.
+ *   null `parent_appid` means ungrouped.
  * - The group card is the parent's own row plus: `packages` (the raw child
  *   rows), `update_available` true when the parent or any package has it,
  *   `installed_on` the union by client id. The group's size is the server's
  *   `group_size_bytes` on the parent row (WP TOOL-APPS-2: the union of the
  *   members' depots, each depot counted once — never the sum of the per-app
- *   sizes); a server without that field shows the parent's own size.
+ *   sizes); a null `group_size_bytes` shows the parent's own size.
  *   `status`, `size_bytes`, `last_prefill_at` and every other field stay the
  *   parent's own, so the card's status is the parent's status.
  * - A package "failed" when it would show as Failed on its own card
@@ -117,8 +116,8 @@ export function isGroup(game) {
 }
 
 /** The size a card shows: for a group the server's `group_size_bytes`
- * (the depot union); a server without that field, or a plain row, shows the
- * row's own `size_bytes`. No extra request either way. */
+ * (the depot union); a null one, or a plain row, shows the row's own
+ * `size_bytes`. No extra request either way. */
 export function displaySizeBytes(game) {
   if (isGroup(game) && typeof game.group_size_bytes === "number") return game.group_size_bytes;
   return game?.size_bytes ?? null;

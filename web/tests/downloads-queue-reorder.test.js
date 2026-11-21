@@ -16,6 +16,7 @@
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import { createFakeDom, fakeKeyEvent } from "./fake-dom.js";
+import { throughputFixture } from "./throughput-fixture.js";
 
 const dom = createFakeDom();
 globalThis.document = dom.document;
@@ -97,6 +98,9 @@ globalThis.fetch = async (url, init = {}) => {
     ORDER.splice(Math.min(position, ORDER.length), 0, id);
     return respond(200, { job_id: id, status: "queued", outcome: "immediate", detail: "", queue_position: ORDER.indexOf(id) });
   }
+  // Statistics: a real, feed-off answer (never a 404, OLD-SERVER-FALLBACK-1).
+  const stats = throughputFixture(new URL(String(url)));
+  if (stats) return respond(200, stats);
   return respond(404, { detail: "Not Found" });
 };
 
@@ -109,10 +113,12 @@ const { reorderIds, keyTargetIndex, dropIndex, withQueuePositions } = await impo
 const { partitionJobs } = await import("../js/lib/job-partition.js");
 const { planJobsUpdate } = await import("../js/lib/downloads-render-plan.js");
 
-after(() => {
+after(async () => {
   releaseGates();
   store.stop();
   setConnectionLost(false);
+  // The statistics poll runs while the view is mounted: leave the view.
+  (await import("../js/router.js")).navigateTo("library");
 });
 
 const tick = (ms = 25) => new Promise((r) => setTimeout(r, ms));

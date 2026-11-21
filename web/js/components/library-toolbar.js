@@ -67,7 +67,7 @@ function icon(markup) {
 /**
  * The page head: title, subline and the split button. "Check updates" (the
  * primary half) is always rendered; views/library.js paints its state
- * (loading, busy, disabled, hidden only on a vault-api without the route).
+ * (loading, busy, disabled).
  * The caret menu holds the one action that DOWNLOADS, "Check & update all
  * cached games", so it is never the default.
  * @param {{checkUpdatesLabel: string, checkAndUpdateLabel: string}} labels
@@ -86,9 +86,7 @@ function buildHead(labels) {
   more.setAttribute("aria-haspopup", "menu");
   more.setAttribute("aria-label", "More update actions");
   more.title = "More update actions";
-  // Visible only while the primary half is absent (older vault-api).
-  const moreLabel = el("span", "split-lbl", "Updates");
-  more.append(moreLabel, icon(CARET_SVG));
+  more.append(icon(CARET_SVG));
   const menu = el("div", "pop menu");
   menu.setAttribute("role", "menu");
   menu.setAttribute("aria-label", "Update actions");

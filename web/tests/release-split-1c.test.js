@@ -3,8 +3,8 @@
  *
  *   - `describeRelease` (lib/about-view.js): product version as the main
  *     line, Server/Agent/App with "(unchanged since <version>)" for a
- *     component older than the product; nothing for a server before 1c or a
- *     local build;
+ *     component older than the product; nothing for a local build or a
+ *     missing `release`;
  *   - Settings → About renders it above the component table as a
  *     definition list (DOM wiring, fake-dom);
  *   - twin pin: the Android strings (`settings_about_release_*`) carry the
@@ -82,8 +82,8 @@ test("MUTATION TARGET: 'unchanged since' follows the natural version order, not 
   assert.equal(rc17.rows[0].unchangedSince, "0.1.0-rc9");
 });
 
-test("describeRelease: nothing for a server before 1c or a local build; junk versions are left out", () => {
-  assert.equal(describeRelease(undefined), null, "server before 1c: no `release`");
+test("describeRelease: nothing for a missing release or a local build; junk versions are left out", () => {
+  assert.equal(describeRelease(undefined), null, "no `release`");
   assert.equal(describeRelease(null), null);
   assert.equal(describeRelease(NO_COMPONENTS), null, "local build: no component versions");
   assert.equal(describeRelease({ version: "0.1.0", components: [] }), null);
@@ -216,7 +216,7 @@ test("About: the product line and a definition list of the components above the 
   assert.deepEqual(content.children.map((c) => c.className), ["about-release", "about-table"]);
 });
 
-test("About: no release block for a local build or a server before 1c; the table stays", async () => {
+test("About: no release block for a local build or a missing release; the table stays", async () => {
   server.about = { components: COMPONENTS, release: NO_COMPONENTS };
   let s = await mountAbout();
   assert.equal(s.querySelector('[data-role="about-release"]'), null);
