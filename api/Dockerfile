@@ -168,11 +168,14 @@ RUN set -eux; \
 
 # Runtime dependencies only -- requirements-dev.txt (pytest, httpx) is
 # deliberately not installed: the test suite runs in CI/dev, not in production.
-# --no-cache-dir keeps the wheel cache out of the layer.
+# --no-cache-dir keeps the wheel cache out of the layer. --require-hashes
+# (SEC-HARDEN-1, audit S-8): every file pip downloads must match a hash in
+# requirements.txt, and a requirement without a hash fails the build instead
+# of silently installing whatever the index serves.
 # Repo-root-relative source path (see the header note on the build context).
 COPY api/requirements.txt /tmp/requirements.txt
 RUN set -eux; \
-    pip install --no-cache-dir -r /tmp/requirements.txt; \
+    pip install --no-cache-dir --require-hashes -r /tmp/requirements.txt; \
     rm -f /tmp/requirements.txt
 
 COPY --from=steamprefill /opt/steamprefill/SteamPrefill /opt/steamprefill/SteamPrefill
@@ -189,12 +192,18 @@ COPY api/vault_api /app/vault_api
 # image (WP 5.5, ghcr.io) -- there is no repo checkout on the pulling host to
 # mount web/ from, so packaging it INTO the image is the only option that
 # still works after publish. web/ is a repo-root sibling of api/, hence the
-# build-context move documented at the top of this file. The chown -R
-# .../app below (RUN block) already covers this path -- no extra chown needed
-# here.
+# build-context move documented at the top of this file. Root-owned, like
+# all of /app and the SteamPrefill binary (SEC-HARDEN-1, audit S-3): uid 101
+# only reads code and static files, so it gets no write access to them.
 COPY web /app/web
 
-# Mount points, all owned by the service user:
+# Mount points, all owned by the service user. These data paths are the ONLY
+# ones chowned (SEC-HARDEN-1, audit S-3): /app (code, web UI, dist), the
+# /opt/steamprefill directory itself and the SteamPrefill binary stay
+# root:root, so a compromised uid 101 cannot rewrite the code it runs or the
+# binary vault-runner execs. deploy/compose.yaml additionally runs vault-api
+# and vault-runner with a read-only root filesystem (tmpfs /tmp); every
+# path below is a volume there.
 #   /data                     -> SQLite database (own named volume)
 #   /opt/steamprefill/Config  -> SteamPrefill's session + selection state (own
 #                                named volume; this is where the Steam login
@@ -239,9 +248,28 @@ COPY web /app/web
 # then writes core-settings.env into it (VAULT_CORE_SETTINGS_FILE).
 RUN set -eux; \
     mkdir -p /data /opt/steamprefill/Config /opt/steamprefill/home /vault/cache/depot /vault/tmp /var/lib/vault-settings; \
-    chown -R 101:101 /data /opt/steamprefill /vault /app /var/lib/vault-settings; \
+    chown -R 101:101 /data /opt/steamprefill/Config /opt/steamprefill/home /vault /var/lib/vault-settings; \
     chmod 0755 /var/lib/vault-settings; \
     test "$(stat -c '%u:%g %a' /var/lib/vault-settings)" = "101:101 755"; \
+    # SEC-HARDEN-1 (S-3): SteamPrefill writes `app.log` into its CURRENT
+    # directory (measured: "Access to the path '/app/app.log' is denied" once
+    # /app was root-owned, and a read-only root refuses it too). Two cwds are
+    # real: /app (the image WORKDIR, i.e. the documented `docker compose exec
+    # vault-runner .../SteamPrefill select-apps` login) and /opt/steamprefill
+    # (prefill.run_prefill runs it with cwd = the binary's directory). Both
+    # names point at one file on the /tmp tmpfs, which keeps the log's old
+    # lifetime (the container's, not a volume's). prefill.run_prefill cuts it
+    # at every run (rotate_steamprefill_app_log: this run plus one .old) and
+    # vault-runner creates it as uid 101 at start, so its RAM stays bounded
+    # and a root login appends to a file uid 101 can still write.
+    ln -s /tmp/steamprefill-app.log /app/app.log; \
+    ln -s /tmp/steamprefill-app.log /opt/steamprefill/app.log; \
+    # SEC-HARDEN-1 (S-3): code and binary stay root-owned and not
+    # world-writable (build-time guard, so a later chown cannot slip back in).
+    # The two data directories under /opt/steamprefill are the exceptions;
+    # symlinks always show mode 0777 and are owner-checked only.
+    test -z "$(find /app /opt/steamprefill \( -path /opt/steamprefill/Config -o -path /opt/steamprefill/home \) -prune -o \( ! -user 0 -o \( -perm /002 ! -type l \) \) -print)"; \
+    test "$(stat -c '%u:%g %a' /opt/steamprefill/SteamPrefill)" = "0:0 755"; \
     # Assert the two halves of the HOME fix agree with each other and with the
     # directory that actually exists -- a build-time guard, because getting this
     # wrong is silent until someone tries to prefill.
@@ -257,11 +285,11 @@ RUN set -eux; \
 # image simply serves nothing (GET /v1/dist then points at the GitHub
 # Release). Copied AFTER the chown above, as defence in depth: the files
 # and the directory itself stay root:root, so uid 101 cannot write into
-# them. It is NOT a hard guarantee: /app is owned by 101 (chown above), so
-# a compromised uid 101 could rename /app/dist away and create its own --
-# the handler's lstat (regular file, no symlink) then still refuses links
-# but would serve that process's files. Release cost: ~9 MB APK + ~27 MB
-# of agent binaries, uncompressed.
+# them. Since SEC-HARDEN-1 (audit S-3) /app itself is root-owned too, so a
+# compromised uid 101 can no longer rename /app/dist away and create its
+# own (the gap this comment used to name); the read-only root filesystem
+# in deploy/compose.yaml closes it a second time. Release cost: ~9 MB APK +
+# ~27 MB of agent binaries, uncompressed.
 COPY api/dist /app/dist
 
 ENV PYTHONUNBUFFERED=1 \
@@ -287,6 +315,12 @@ ENV PYTHONUNBUFFERED=1 \
     # WP DIST-1a: see the COPY above. Image-internal, like VAULT_WEB_DIR;
     # compose does not forward it.
     VAULT_DIST_DIR=/app/dist \
+    # SEC-HARDEN-1 (audit S-3): no .env loading inside the image. config.py
+    # loads a .env file (python-dotenv) unless this is `off`; the shipped
+    # containers take their settings from the container environment only,
+    # i.e. from what deploy/compose.yaml forwards. Image-internal; compose
+    # does not forward it.
+    VAULT_DOTENV=off \
     DOTNET_CLI_TELEMETRY_OPTOUT=1
 
 # VAULT_API_KEY is deliberately NOT given a default here. vault-api raises

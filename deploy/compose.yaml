@@ -929,6 +929,18 @@ services:
       # Runs as uid 101 on an unprivileged port and touches nothing but its own
       # volumes -- it needs no Linux capabilities at all.
       - ALL
+    # SEC-HARDEN-1 (audit S-3): read-only root filesystem. Everything this
+    # process writes is on a volume above (/vault, /data incl. covers and the
+    # manifest archive, /var/lib/vault-settings, /opt/steamprefill/home);
+    # the image's code (/app) is root-owned anyway (api/Dockerfile). /tmp is
+    # the one scratch path: Python's tempfile and SQLite's temp files land
+    # there (KBs in queue mode). tmpfs is RAM and counts against the
+    # container's memory, so it is capped; the cap is the same as
+    # vault-runner's because in VAULT_PREFILL_MODE=subprocess this container
+    # runs SteamPrefill itself (see vault-runner below for the sizing).
+    read_only: true
+    tmpfs:
+      - /tmp:size=256m
     logging: *vault-logging
 
   # ===========================================================================
@@ -1124,6 +1136,25 @@ services:
       # restricts this container's NETWORK egress -- this is the orthogonal,
       # already-uncontroversial half of "runs with the least it needs".
       - ALL
+    # SEC-HARDEN-1 (audit S-3): read-only root filesystem, like vault-api.
+    # SteamPrefill writes only its Config/ and HOME (both volumes above);
+    # /tmp takes the prefill output log (prefill.run_prefill's temp file,
+    # deleted after each run), SteamPrefill's own app.log (through the
+    # image's /opt/steamprefill/app.log and /app/app.log links) and .NET's
+    # runtime scratch files. The SteamPrefill binary and /opt/steamprefill
+    # are root-owned (api/Dockerfile).
+    # Size (RAM, only what is written counts): the output file is small, at
+    # most 10.9 KB over all 309 prefill jobs of the operator's install
+    # (stored run_result_json, measured 2026-11-21). app.log is cut at every
+    # run start (prefill.rotate_steamprefill_app_log keeps this run plus one
+    # .old), so it holds at most two runs. Its size is an estimate, not a
+    # measurement: SteamPrefill writes the details of each failed request
+    # there, and the worst run seen had 22213 failed requests; at about 2 KB
+    # each that is ~45 MB per run, ~90 MB for two. 256m leaves headroom
+    # above that; a full tmpfs would make SteamPrefill's log writes fail.
+    read_only: true
+    tmpfs:
+      - /tmp:size=256m
     # Bounded time to shut down cleanly on SIGTERM (docker compose stop /
     # down, or a restart), reviewed here because ADR-0012 §4's own nitpick
     # asks for it explicitly: an orphaned SteamPrefill behind a stopped
@@ -1223,6 +1254,16 @@ services:
       # listen port, 8888, is unprivileged) -- there is no capability this
       # process ever legitimately holds.
       - ALL
+    # SEC-HARDEN-1 (audit S-3): read-only root filesystem. The entrypoint
+    # renders the config and the filter file into /run/tinyproxy/ and
+    # tinyproxy writes its pid file there, so that directory is a tmpfs owned
+    # by the proxy account (uid 100, gid 101, asserted at build time in
+    # deploy/proxy/Dockerfile). The template in /etc/tinyproxy/ stays on the
+    # read-only image.
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /run/tinyproxy:uid=100,gid=101,mode=0755
     logging: *vault-logging
 
   # ===========================================================================
@@ -1285,6 +1326,15 @@ services:
       - SETUID
       - SETGID
       - CHOWN
+    # SEC-HARDEN-1 (audit S-3): read-only root filesystem. The entrypoint
+    # (root) renders /run/vault-dns/dnsmasq.conf (it mkdirs the directory)
+    # and dnsmasq writes /run/dnsmasq.pid before it drops to its own account,
+    # so /run is a root-owned tmpfs. dnsmasq writes nothing else (no DHCP
+    # leases, logs go to stdout).
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /run:mode=0755
     logging: *vault-logging
 
 volumes:

@@ -27,8 +27,9 @@
 ##   MockWebServer (HeldCertificate/HandshakeCertificates) to construct a
 ##   PublicDomainProfile pointed at it and prove an https->http redirect
 ##   never reaches a second server.
-## - androidx.security:security-crypto 1.1.0-alpha06 is pinned over the
-##   older stable 1.0.0 specifically for the `MasterKey` builder API used
+## - androidx.security:security-crypto 1.1.0 (1.1.0-alpha06 until
+##   SEC-HARDEN-1, see below) is pinned over the older stable 1.0.0
+##   specifically for the `MasterKey` builder API used
 ##   in EncryptedCredentialStore.kt — 1.0.0's `MasterKeys` helper is
 ##   deprecated in favour of it. This WAS a documented exception to
 ##   "stable only" (no GA 1.1.0 existed at WP 4b.2's time), not an
@@ -59,6 +60,16 @@
 ##   source changes (class list unchanged), but "expected" is not
 ##   "verified on-device", and a credential-storage dependency is exactly
 ##   the wrong place to skip that step.
+##
+##   SEC-HARDEN-1 (audit 2026-11-20, S-7; operator 2026-11-21: fix every
+##   finding): bumped to the GA 1.1.0 (`securityCrypto` below), with no
+##   source change -- the WP 4b.9 class check above is the API evidence.
+##   STILL OPEN: the on-device check the recommendation asks for (an
+##   existing install written by alpha06 must still read its stored API key
+##   after the update). CI proves only compile, lint and the JVM tests,
+##   none of which reach a real Keystore. The whole library is deprecated
+##   upstream; the later replacement (own Keystore AES-GCM or Tink) is the
+##   roadmap's follow-up to S-7.
 ##
 ## WP 4b.3 addition (Steam identity — OpenID + GetOwnedGames on-device):
 ## - androidx.browser 1.8.0 is the current stable release, used ONLY for
@@ -137,7 +148,7 @@ junit = "4.13.2"
 kotlinxSerializationJson = "1.7.3"
 kotlinxCoroutines = "1.9.0"
 okhttp = "4.12.0"
-securityCrypto = "1.1.0-alpha06"
+securityCrypto = "1.1.0"
 androidxBrowser = "1.8.0"
 coil = "2.7.0"
 workRuntime = "2.9.1"

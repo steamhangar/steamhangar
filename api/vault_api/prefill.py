@@ -82,6 +82,7 @@ import os
 import re
 import subprocess
 import sqlite3
+import stat
 import tempfile
 import time
 from dataclasses import dataclass, field
@@ -306,6 +307,71 @@ _STOP_REASONS = {"cancel": FAILURE_CANCELLED, "pause": FAILURE_PAUSED}
 #: wrong container.
 ABORT_REASON_VAULT_API = "vault-api is shutting down"
 
+#: SteamPrefill's own log file. It writes it into its CURRENT directory,
+#: which :func:`run_prefill` sets to the binary's directory. In the
+#: vault-api image that name is a link onto the /tmp tmpfs
+#: (``/tmp/steamprefill-app.log``, api/Dockerfile, SEC-HARDEN-1), and
+#: SteamPrefill appends to it.
+STEAMPREFILL_APP_LOG = "app.log"
+#: Suffix of the one kept previous log (SEC-HARDEN-1).
+STEAMPREFILL_APP_LOG_OLD_SUFFIX = ".old"
+
+
+def rotate_steamprefill_app_log(workdir: str) -> None:
+    """Keep SteamPrefill's ``app.log`` to this run plus the one before, and
+    leave a fresh, empty log owned by the calling user behind.
+
+    SEC-HARDEN-1 (review of S-3): the log lives on a tmpfs, i.e. in RAM, and
+    SteamPrefill appends to it, so without a cut it grows until the
+    container restarts. Called at the start of every run and once when
+    vault-runner starts: an existing log file is renamed to ``<file>.old``
+    (replacing an older one), then an empty one is created. Creating it here,
+    as uid 101, is what keeps a later ``docker exec -u root`` login harmless:
+    root then appends to the 101-owned file instead of creating a root-owned
+    one that uid 101 could neither append to nor rename (sticky /tmp). A
+    process that still holds the old file open (an interactive login) keeps
+    writing into ``.old``. The name in ``workdir`` may be a link (the
+    image's): exactly ONE link hop is followed (``os.readlink``), and rename
+    and create act on the file it names. If that is itself a link, or
+    anything but a regular file or nothing, the log is left alone with a
+    warning, so no chain of links can steer the rename elsewhere. Never
+    raises: a log that cannot be rotated is no reason to fail a prefill.
+    """
+    name = os.path.join(workdir, STEAMPREFILL_APP_LOG)
+    try:
+        if os.path.islink(name):
+            target = os.path.join(workdir, os.readlink(name))
+        else:
+            target = name
+        info = os.lstat(target)
+    except FileNotFoundError:
+        info = None
+    except OSError as exc:
+        logger.warning("Could not inspect SteamPrefill's %s: %s", name, exc)
+        return
+    if info is not None:
+        if not stat.S_ISREG(info.st_mode):
+            logger.warning(
+                "SteamPrefill's %s (%s) is not a regular file; not rotated.",
+                name, target,
+            )
+            return
+        try:
+            os.replace(target, target + STEAMPREFILL_APP_LOG_OLD_SUFFIX)
+        except OSError as exc:
+            logger.warning("Could not rotate SteamPrefill's %s: %s", target, exc)
+            return
+    try:
+        # O_EXCL: never opens (or follows) a name someone else created in
+        # between; an existing one is simply left as it is.
+        fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
+    except FileExistsError:
+        return
+    except OSError as exc:
+        logger.warning("Could not create SteamPrefill's %s: %s", target, exc)
+        return
+    os.close(fd)
+
 
 def run_prefill(
     appid: int,
@@ -407,6 +473,7 @@ def run_prefill(
     # so an earlier token with the same text would be the one removed.
     command.extend(["--max-threads", str(max_threads)])
     workdir = os.path.dirname(os.path.abspath(executable))
+    rotate_steamprefill_app_log(workdir)
 
     # Output goes to a temp FILE rather than a pipe on purpose: a prefill run
     # can emit a lot of progress output, and a PIPE that nobody drains while we

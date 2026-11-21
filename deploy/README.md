@@ -219,6 +219,19 @@ docker exec -it steamhangar-vault-runner \
     /opt/steamprefill/SteamPrefill select-apps
 ```
 
+Run the login as the container's own user (the default): do not add
+`-u root`. SteamPrefill writes its own `app.log` (into
+`/tmp/steamprefill-app.log`, a tmpfs, since SEC-HARDEN-1), and the login and
+any prefill running at the same time share that one file. vault-runner
+creates it as uid 101 when it starts and again right after each rotation,
+so a root login normally only appends to it. If a root login still creates
+it (a race with the runner's start or a rotation, or a runner that could not
+create it), uid 101 can neither write nor rotate that root-owned file, and
+every following prefill fails until the container restarts. Each prefill
+starts a fresh `app.log` and keeps the previous one as `app.log.old`
+(`/tmp/steamprefill-app.log.old`), so read it soon after a failed run;
+a container restart empties both.
+
 Enter your account name and password when prompted, then confirm with Steam
 Guard: either approve the sign-in in the Steam Mobile App or type the Steam
 Guard code. Then exit the app selector (vault-api overwrites the app
@@ -254,7 +267,19 @@ Note that `vault-api`'s `Config/` volume mount was removed in WP S-2 (queue
 mode has no use for it — see `deploy/compose.yaml`'s comment on that
 service's volumes for the evidence), so this fallback command only produces
 a persistent session if you also restore that mount; the supported path for
-this compose file is the `vault-runner` login above.
+this compose file is the `vault-runner` login above. Since SEC-HARDEN-1
+vault-api runs with a read-only root filesystem, so without that mount the
+command above does not just lose the session, it fails: SteamPrefill cannot
+write `Config/` into the image. Restore the mount in a
+`compose.override.yaml` next to `compose.yaml` before running it (subprocess
+mode needs it for every prefill anyway):
+
+```yaml
+services:
+  vault-api:
+    volumes:
+      - vault-steamprefill:/opt/steamprefill/Config
+```
 
 Until you do this, everything else works — `/v1/games`, `/v1/mapping`,
 `/v1/cache/*`, the cache itself — and only *prefill jobs* fail, with an
@@ -1826,6 +1851,17 @@ What this deployment assumes, stated plainly so it can be checked:
   master needs root to bind :80 and runs its workers as uid 101. vault-proxy
   never runs as root at any point (its listen port, 8888, is unprivileged),
   so unlike vault-core it has no privilege-drop dance to do at all.
+- **Read-only root filesystems (SEC-HARDEN-1).** vault-api, vault-runner,
+  vault-proxy and vault-dns run with `read_only: true`. They write only to
+  their volumes and to tmpfs mounts: `/tmp` on all four (capped at 256 MiB
+  on vault-api and vault-runner), `/run/tinyproxy`
+  (uid 100) on vault-proxy, `/run` on vault-dns. In the vault-api image the
+  code (`/app`) and the SteamPrefill binary are root-owned; uid 101 owns only
+  the data paths. SteamPrefill's own `app.log` goes to
+  `/tmp/steamprefill-app.log` in vault-runner, cut at every prefill start
+  (one `.old` kept) and gone after a container restart; see "First run" for
+  the login. A `compose.override.yaml` that makes one of these services write
+  somewhere else needs a volume or a `tmpfs` entry for that path.
 - **vault-api has no default route to the internet** (WP EG-1, ADR-0011) —
   see [Egress lock](#egress-lock-vault-api-loses-its-default-route-out)
   above for the full mechanism and how to verify it yourself.

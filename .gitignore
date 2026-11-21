@@ -5,6 +5,15 @@ steamvault_projektplan.md
 # (api/.env, deploy/.env, ...). Only the committed *.env.example templates
 # ever enter the repo.
 .env
+# SEC-HARDEN-1 (audit S-9): the variants too (.env.local, .env.prod,
+# prod.env, ...), and key material. The negation keeps the committed
+# templates (api/.env.example, deploy/.env.example) tracked; it must stay
+# after the two env patterns.
+.env.*
+*.env
+!*.env.example
+*.pem
+*.key
 
 # Phase 0 PoC (poc/) — throwaway artifacts, never committed
 poc/nginx/

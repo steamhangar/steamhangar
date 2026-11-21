@@ -321,6 +321,20 @@ def log_build_info(build: BuildInfo) -> None:
         )
 
 
+def log_api_key_strength(api_key: str) -> None:
+    """SEC-HARDEN-1 (audit S-4): one WARNING at startup for a short
+    ``VAULT_API_KEY`` (below ``config.MIN_RECOMMENDED_API_KEY_LENGTH``).
+    Never refuses to boot and never logs the key or its length."""
+    if config.api_key_is_short(api_key):
+        logging.getLogger(__name__).warning(
+            "VAULT_API_KEY is shorter than %d characters. It also signs every "
+            "cover URL, and a leaked cover URL allows offline guessing of a "
+            "short key. Generate a long random key, e.g. `openssl rand "
+            "-base64 36`, and update every client (threat model section 7).",
+            config.MIN_RECOMMENDED_API_KEY_LENGTH,
+        )
+
+
 def log_schema_version(db_path: str) -> None:
     """VERSION-HEALTH-1: name the database schema version once at startup,
     next to the build line, so a rollout check can read both from
@@ -372,6 +386,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     build = build_info()
     log_build_info(build)
+    log_api_key_strength(settings.vault_api_key)
 
     init_db(settings.db_path)
     log_schema_version(settings.db_path)

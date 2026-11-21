@@ -349,7 +349,10 @@ whole file) — a device cannot browse a depot's contents; it can only
 request a chunk it already knows the hash/path of, learned in the ordinary
 course of that device's own Steam client asking for it. `location ^~ /tmp/ {
 return 404; }` additionally denies the in-flight temp-file path
-defensively.
+defensively, and since SEC-HARDEN-1 (audit S-6) a catch-all
+`location / { return 404; }` answers every request outside `/depot/`, the
+runner mark, `/health` and `/lancache-heartbeat`, so a file that lands
+next to `cache/depot/` is not served either.
 
 ### Who can read it
 
@@ -1212,7 +1215,12 @@ it to a short or
 guessable string is not stopped by any code path, only by the `.env.example`
 comment recommending `python -c "import secrets;
 print(secrets.token_urlsafe(36))"` (the `VAULT_API_KEY` entry in
-`deploy/.env.example`). Every
+`deploy/.env.example`) and, since SEC-HARDEN-1 (audit S-4), by one
+startup WARNING for a key shorter than 24 characters
+(`config.MIN_RECOMMENDED_API_KEY_LENGTH`, logged by
+`main.log_api_key_strength`; the key itself is never logged). It warns
+rather than refuses because existing installs and the test suites use
+shorter keys. Every
 router except `health` requires it (§1, verified router-by-router); `GET
 /v1/health` is the sole, deliberate exception, returning a fixed
 `{"status": "ok"}` body with no data (`api/vault_api/routers/health.py`).
@@ -1228,6 +1236,18 @@ itself (not a proxy). A leaked URL exposes one public cover image until the
 cover changes or the key is rotated; it does not reveal the key. These URLs
 do appear in uvicorn's access log and in the browser's developer tools
 (network tab).
+**A leaked cover URL is an offline oracle for a weak key (audit S-4).**
+The signature's other inputs are not secret: the appid is in the URL, and
+the stored file's SHA-256 is the cover response's `ETag` (and the hash of
+a public Steam image anyone can download). With one URL an attacker can
+test candidate keys against the 128-bit signature offline, at HMAC speed,
+with no request to the server and so no log line. A long random key (the
+`.env.example` recipes give 48 characters, about 288 bits) makes this
+infeasible; a short or guessable key does not, which is what the startup
+WARNING above is for. Signing covers with a key derived from, but not equal
+to, `VAULT_API_KEY` would not help against guessing (the attacker guesses
+the root key either way); a separate random signing secret would, and stays
+an option if the warning proves insufficient.
 Outside `/v1`, besides the web UI's static files, `GET /auth/steam/app-return`
 (WP D11, ADR-0004 addendum 5) is public: it reads no key, no database and no
 network, and only echoes a validated query behind the fixed

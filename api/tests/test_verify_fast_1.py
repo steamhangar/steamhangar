@@ -48,7 +48,7 @@ CI = REPO_ROOT / ".github" / "workflows" / "ci.yml"
 
 pytestmark = pytest.mark.skipif(shutil.which("sh") is None, reason="needs a POSIX sh")
 
-GROUP_4 = "4-settings 3.5-runner 4a 4b 4c 4d".split()
+GROUP_4 = "4-settings 3.5-runner 4a 4b 4c 4d 4e".split()
 GROUP_5 = "5a 5a2 5b 5c 5d 5e 5f 5g 5h 5i 5j".split()
 GROUP_6 = "6a 6b 6c 6d 6e 6f 6g 6h 6i 6i-core 6s 6v 6w 6x 6j 6k 6l".split()
 ALL = ["1", "2", "3", *GROUP_4, *GROUP_5, *GROUP_6, "7", "8", "9", "10", "11"]

@@ -833,6 +833,23 @@ render_and_test() {
                 probe 404 "VER-2 no /vault-version location"  http://127.0.0.1/vault-version
                 probe 404 "VER-2 version file outside the document root" http://127.0.0.1/logs/vault-core-version.json
                 probe 400 "VER-2 no traversal to the version file" --path-as-is http://127.0.0.1/../logs/vault-core-version.json
+                # SEC-HARDEN-1 (audit S-6): the catch-all `location /`. Without
+                # it `root cache` serves a stray file next to cache/depot/ (200:
+                # root plants it 0644 in its own 0755 cache/). The probes above
+                # already show /depot/, /health and the runner mark still answer
+                # through their own locations; the heartbeat is checked here.
+                stray=/vault/cache/sec-harden-1-stray.txt
+                printf "stray\n" > "$stray"
+                if [ -f "$stray" ]; then
+                    probe 404 "S-6 stray file next to cache/depot/ is not served" http://127.0.0.1/sec-harden-1-stray.txt
+                else
+                    echo "FAIL: could not plant the S-6 stray file $stray"
+                    status=1
+                fi
+                rm -f "$stray"
+                probe 404 "S-6 bare / goes to the catch-all"  http://127.0.0.1/
+                probe 404 "S-6 /depot without the slash"      http://127.0.0.1/depot
+                probe 200 "S-6 heartbeat still answers"       http://127.0.0.1/lancache-heartbeat
                 server_hdr=$(curl -s -m 5 -o /dev/null -D - http://127.0.0.1/health | tr -d "\r" | sed -n "s/^[Ss]erver:[[:space:]]*//p")
                 if [ "$server_hdr" = "nginx" ]; then
                     echo "guard OK: N5 Server header carries no version ($server_hdr)"

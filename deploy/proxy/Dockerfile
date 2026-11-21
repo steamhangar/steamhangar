@@ -69,9 +69,16 @@ COPY validate-subnet.sh /usr/local/bin/validate-subnet.sh
 # preflight does for vault-core's bind mount. /etc/tinyproxy/ is deliberately
 # NOT chowned: root:root 0755, template root:root 0444, so nothing running in
 # this container can replace the reviewed source.
+# SEC-HARDEN-1 (audit S-3): deploy/compose.yaml runs this container with a
+# read-only root filesystem and mounts a tmpfs over /run/tinyproxy, which
+# hides this directory and its owner; the tmpfs gets `uid=100,gid=101`
+# there instead. The package picks those numbers itself (busybox adduser
+# -S), so the build asserts them: if a package or base bump moves them,
+# the build fails here instead of the proxy failing to write its config.
 RUN set -eux; \
     rm -f /etc/tinyproxy/tinyproxy.conf; \
     chmod 0755 /usr/local/bin/vault-proxy-entrypoint.sh /usr/local/bin/validate-hostname.sh /usr/local/bin/validate-subnet.sh; \
+    test "$(id -u tinyproxy):$(id -g tinyproxy)" = "100:101"; \
     mkdir -p /run/tinyproxy; \
     chown -R tinyproxy:tinyproxy /run/tinyproxy; \
     chown -R root:root /etc/tinyproxy; \

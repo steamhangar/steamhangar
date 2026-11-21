@@ -93,8 +93,8 @@ api/
 │       ├── schedule.py   # GET /v1/schedule (read-only, env-only config)
 │       └── oracle.py     # GET/POST/DELETE /v1/oracle/{appid} (WP 3.9)
 ├── tests/                # pytest (incl. tests/stub_prefill.py — fake CLI)
-├── requirements.txt      # pinned, runtime only, full transitive set
-├── requirements-dev.txt  # pinned, adds test-only deps (pytest, httpx)
+├── requirements.txt      # pinned + hashed, runtime only, full transitive set
+├── requirements-dev.txt  # pinned + hashed, adds test-only deps (pytest, httpx, PyYAML)
 ├── .env.example          # committed template — never commit a real .env
 └── pytest.ini
 ```
@@ -106,27 +106,45 @@ transitive dependency is pinned with `==` (WP SEC-FIX-3). Before that WP only
 the four direct dependencies were pinned and everything below them floated,
 so two image builds from the same commit could install different code. The
 Dockerfile is unchanged; it still runs `pip install -r requirements.txt`,
-which now has nothing left to choose. `requirements-dev.txt` adds pytest and
-httpx on top of it. Their own transitive dependencies (iniconfig, pluggy,
-packaging, httpcore, certifi) are still unpinned. They are test-only and
-never reach the image.
+which now has nothing left to choose. `requirements-dev.txt` adds pytest,
+httpx and PyYAML on top of it.
 
-Direct dependencies: `fastapi`, `starlette`, `uvicorn[standard]`,
-`python-dotenv`. starlette is pinned directly, not only through fastapi,
-because the security fixes live in starlette.
+**Hashes and plain uvicorn (SEC-HARDEN-1, audit S-8).** Both files carry a
+`--hash=sha256:` line for every published file of every pinned version, and
+the Dockerfile installs with `pip install --require-hashes`: a file that
+does not match fails the build. pip switches to hash-checking mode as soon
+as one requirement has a hash and then demands one for every requirement,
+so `requirements-dev.txt` now pins the test tools' transitive dependencies
+(certifi, colorama on Windows, httpcore, iniconfig, packaging, pluggy,
+pygments) as well. uvicorn is installed without the `[standard]` extra:
+nothing in vault-api uses websockets, watchfiles or PyYAML, and without
+uvloop and httptools uvicorn's `auto` loop and HTTP choices resolve to the
+stdlib asyncio loop and the pure-Python h11 parser (h11 was already
+installed). PyYAML moved to `requirements-dev.txt` because only the tests
+need it. pytest moved from 8.3.4 to 9.0.3 (CVE-2025-71176, see below).
 
-**Regenerating.** Edit the direct pins, then resolve universally so that the
-native Windows path ("Running natively" below) keeps its `colorama` /
-`uvloop` markers:
+Direct dependencies: `fastapi`, `starlette`, `uvicorn`, `python-dotenv`.
+starlette is pinned directly, not only through fastapi, because the
+security fixes live in starlette.
+
+**Regenerating.** Edit the direct pins, then resolve universally with hashes
+so that the native Windows path keeps its markers and its hashes (uv 0.12.20
+was used; `uv pip compile` reads the index metadata, it installs nothing):
 
 ```
-printf 'fastapi==X\nstarlette==Y\nuvicorn[standard]==Z\npython-dotenv==W\n' > top.in
-uv pip compile --universal --python-version 3.13 --no-header --no-annotate top.in
+printf 'fastapi==X\nstarlette==Y\nuvicorn==Z\npython-dotenv==W\n' > top.in
+uv pip compile --universal --python-version 3.13 --generate-hashes --no-header --no-annotate top.in
+printf -- '-r top.in\npytest==A\nhttpx==B\npyyaml==C\n' > dev.in
+uv pip compile --universal --python-version 3.13 --generate-hashes --no-header --no-annotate dev.in
 ```
 
-Then paste the output under the file's header comment, keep `uvicorn[standard]`
-as written, run the full suite in a fresh venv, and re-run `pip-audit -r
-requirements.txt`.
+Paste the first output under `requirements.txt`'s header comment. From the
+second output keep only the packages that are not in `requirements.txt`
+(their versions and hashes for the shared packages are the same) and paste
+them under `requirements-dev.txt`'s `-r requirements.txt` line. To bump one
+package without moving the others, pass the current pins as constraints
+(`-c`, without the hash lines). Then run the full suite in a fresh venv and
+re-run `pip-audit -r requirements.txt`.
 
 ### Security audit, 2026-10-01 (WP SEC-FIX-3)
 
@@ -169,11 +187,25 @@ found". `pip-audit -r requirements-dev.txt` still reports
 CVE-2025-71176 / GHSA-6w46-j5rx-g56g in **pytest 8.3.4** (predictable
 `/tmp/pytest-of-<user>` directory, fixed in 9.0.3). pytest is test-only and
 never installed in the image. The major bump is left open on purpose.
+(Closed by SEC-HARDEN-1: `requirements-dev.txt` pins pytest 9.0.3.)
 
 ## Configuration
 
 Read once at startup from environment variables (`vault_api/config.py`).
 Copy `.env.example` to `.env` and adjust:
+
+- **`.env` is a native-run convenience only (SEC-HARDEN-1, audit S-3).**
+  `config.py` loads a `.env` file (python-dotenv, never overriding a real
+  environment variable) unless `VAULT_DOTENV=off`. The vault-api image
+  bakes `VAULT_DOTENV=off`, so vault-api and vault-runner in the shipped
+  stack read the container environment only (what `deploy/compose.yaml`
+  forwards); a native checkout has no marker and keeps loading `api/.env`.
+- **Key length (SEC-HARDEN-1, audit S-4).** A `VAULT_API_KEY` shorter than
+  24 characters starts, but vault-api logs one WARNING at startup (the key
+  itself is never logged). The key also signs every cover URL
+  (`GET /v1/covers/...`), and a leaked cover URL allows offline guessing of
+  a short key (threat model §7). Use the `.env.example` recipe
+  (`openssl rand -base64 36`, 48 characters).
 
 | Variable                        | Required | Default      | Purpose                                                            |
 |---------------------------------|----------|--------------|--------------------------------------------------------------------|
@@ -7174,6 +7206,10 @@ py -m venv .venv
 copy .env.example .env   # then edit VAULT_API_KEY
 .venv\Scripts\python -m uvicorn vault_api.main:create_app --factory --host 0.0.0.0 --port 8000
 ```
+
+Natively, too, every prefill run cuts SteamPrefill's `app.log` in the
+SteamPrefill directory (the binary's folder) to the current run plus one
+`app.log.old` (SEC-HARDEN-1, `prefill.rotate_steamprefill_app_log`).
 
 Verify:
 

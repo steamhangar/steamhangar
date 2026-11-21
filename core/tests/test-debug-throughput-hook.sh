@@ -265,14 +265,24 @@ cmp -s "$work/real-default.expect" "$work/real-default.conf" && ok "real templat
 # same; since rc21 `off` is the opt-out), and compare with this tree's
 # template + hook, same values. main's own render is the reference, so the
 # check stays meaningful after this lands on main.
+# SEC-HARDEN-1: a branch that changes the template itself (a reviewed config
+# change, e.g. S-6's catch-all location) cannot match main's render until it
+# is merged. Then the reference is main's HOOK on THIS template: the hook's
+# off render must still not differ from main's hook's, which is what this
+# check protects.
 repo_root="$(cd "$script_dir/../.." && pwd)"
 if git -C "$repo_root" show main:core/docker/nginx.conf.template > "$work/main-template.conf" 2>/dev/null \
     && git -C "$repo_root" show main:core/docker/31-vault-debug-throughput.sh > "$work/main-hook.sh" 2>/dev/null; then
+    ref_what="main's off render"
+    if ! cmp -s "$work/main-template.conf" "$tmpl"; then
+        cp "$tmpl" "$work/main-template.conf"
+        ref_what="main's hook on this branch's template (the template differs from main)"
+    fi
     VAULT_NGINX_AIO=off VAULT_DEBUG_THROUGHPUT=off sh "$work/main-hook.sh" "$work/main-template.conf" >/dev/null 2>&1 \
-        || bad "main's hook failed on main's template"
+        || bad "main's hook failed on the reference template"
     if cmp -s "$work/main-template.conf" "$work/real-off.conf"; then
-        ok "real template, debug off, AIO=off, workers unset: byte-identical to main's off render"
-    else bad "real template, off: differs from main's off render: $(diff "$work/main-template.conf" "$work/real-off.conf" | head -5)"; fi
+        ok "real template, debug off, AIO=off, workers unset: byte-identical to $ref_what"
+    else bad "real template, off: differs from $ref_what: $(diff "$work/main-template.conf" "$work/real-off.conf" | head -5)"; fi
 else
     echo "skip: no git checkout with a main branch; byte-identity vs main not checked"
 fi

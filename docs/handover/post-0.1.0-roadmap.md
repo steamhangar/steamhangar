@@ -2340,6 +2340,17 @@ Follow-up of CI-CLOCK-1 (review 2026-11-21):
   clock moved +45/+400/+3650 days); move them onto one clock only when a
   package touches them.
 
+Follow-up of SEC-HARDEN-1 (review 2026-11-21), rc23:
+- CRYPTO-DEVICE-1 (operator item, needs a device) S-7 bumped
+  `androidx.security:security-crypto` from `1.1.0-alpha06` to the GA
+  `1.1.0` with no source change (`app/gradle/libs.versions.toml`), proven
+  only by CI (compile, lint, JVM tests; none reach a real Keystore). Check
+  on a phone: install the last release built with alpha06, pair it (the
+  API key is stored by `EncryptedCredentialStore`), update to a 1.1.0
+  build in place, and confirm the app still reads the stored key (no
+  re-pairing prompt, library loads). If it fails, the fallback is a
+  re-pair prompt or the own Keystore AES-GCM / Tink store noted under S-7.
+
 Security:
 - S-1 cross-site cache fill: CROSS-SITE-FILL-1 decided (document only),
   package TM-CROSS-SITE-1.
