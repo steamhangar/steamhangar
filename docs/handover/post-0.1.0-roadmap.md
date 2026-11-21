@@ -2089,6 +2089,26 @@ and VERIFY-COLD-1 is prose in the Sunday-test box of the rc19.3 block.
   (node TAP) and gave no file hint, so the harness still persisted 528 KB.
   Candidate: for TAP output keep the summary plus every `not ok` block and
   drop `ok` lines with their YAML blocks; name the full-output file.
+  **Done 2026-11-21 (rc23), output-trim 0.2.0:** OUTPUT-TRIM-TAP-1 (TAP),
+  follow-up **OUTPUT-TRIM-2** (found in the package: node 24 prints the
+  `spec` reporter even when redirected, so `dev.sh test-web` is spec now;
+  output over ~30 KB reaches the hook already cut with
+  `persistedOutputPath`, now read back for every format; a non-zero exit
+  returns core's result untouched, because core 2.1.319 refused the old
+  `{isError, result: string}` answer and the long failing command lost
+  all output) and **OUTPUT-TRIM-NITS-1** (review: unreadable or still
+  oversized read-back leaves core's result alone, `yamlEnd` stops at a
+  dedent, version 0.2.0). Measured: passing test-web 2,293 lines -> 9.
+  Open: **OUTPUT-TRIM-LIVE-1** live check after the mod rollout Antrag
+  (inline result once the persisted fields are removed, `$.fs.read` on
+  the `tool-results` path, `seq 1 40000; exit 3` shows its output,
+  installed version 0.2.0). Nit: TAP drops `#` comments (a failing test's
+  console output) while spec keeps them (documented).
+  Test nits (OUTPUT-TRIM-NITS-1 re-review): the test "read back but not
+  shorter" (`tests/output-trim.test.ts`, ~450) passes only through the
+  size check because its trailing newline makes `trimText` 1 byte
+  shorter (drop the `+ '\n'`); the stderr part of the size check
+  (`register.ts` ~101) has no test.
 - **DEVSH-VERIFY-ARGS-1 (operator dev.sh, found 2026-11-01):** `dev.sh
   verify <bad id>` stops the dev stack before verify-stack.sh rejects the
   argument (exit 2). Candidate: validate the section list before stopping

@@ -20,7 +20,8 @@
     {
       "name": "output-trim",
       "source": "./output-trim",
-      "description": "Trims long Bash output to head, tail and failure lines; keeps the full output in a file."
+      "version": "0.2.0",
+      "description": "Trims long Bash output to head, tail and failure lines (node test output to its summary and failures); keeps the full output in a file."
     },
     {
       "name": "dev-commands",

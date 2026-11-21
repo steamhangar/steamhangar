@@ -256,3 +256,15 @@ at the end, under a dated heading, one entry each with the WP that proved it.
 - Simulations of Android colour maths must model Compose's 8-bit ARGB
   storage: `copy(alpha = 0.14f)` is 36/255, and each composite rounds to
   8 bits; a float-only model missed the danger pill pin by 0.065.
+
+## 2026-11-21 — rc23 rest (OUTPUT-TRIM-TAP-1, OUTPUT-TRIM-2)
+
+- The plugin test kit (`claude plugin test`) skips core's output-shape
+  validation: an after-run answer the tests accept can still be refused
+  live (core 2.1.319 refused `{isError, result: string}` and the model got
+  no output at all). Only use result shapes the bundled plugin-authoring
+  types document, and pin the shape in a test.
+- Bash output above ~30 KB reaches `tool.call` hooks already cut, with the
+  full text in `persistedOutputPath`; a trimming hook must read that file
+  back or it trims the cut. Node 24's `node --test` prints the `spec`
+  reporter even when output is redirected (no TAP unless asked for).
