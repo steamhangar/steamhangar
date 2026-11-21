@@ -113,7 +113,7 @@ test("G6 MUTATION TARGET: the installed badge's title names EVERY client (the co
       ctx,
     );
     const badge = card.querySelector(".instbadge");
-    assert.equal(badge.title, "Installed but not cached · Demon, Frame, Laptop");
+    assert.equal(badge.title, "Installed, not cached · Demon, Frame, Laptop");
     assert.equal(badge.querySelector(".ibcompact").textContent, "not cached · Demon +2", "visible text unchanged");
     assert.match(card.getAttribute("aria-label"), /Installed on Demon, Frame, Laptop$/);
   }));

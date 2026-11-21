@@ -233,17 +233,16 @@ test("UPD-1 vault-api: the button shows next to the unchanged 'Check & update' b
   assert.deepEqual(statuses, ["lib-owned-text"], "no new live region: results go to the toast");
 });
 
-test("WP WEB-FIX-UPD-VIS: one toolbar row — search, chips, then the buttons; 'Check updates' is the primary button, 'Check & update' the plain one", async () => {
+test("WP WEB-FIX-UPD-VIS / DESIGN-NITS-1: toolbar search, tools, chips (DOM = tab order); 'Check updates' is the primary button, 'Check & update' the plain one", async () => {
   server.mode = "ok";
   server.enabled = true;
   server.statusQueue = [IDLE];
   const s = await openLibrary();
   await until(() => updBtn(s).hidden === false, "button shown");
   const bar = s.querySelector(".lib-bar");
-  assert.deepEqual(bar.children.map((c) => c.className), ["lib-filters", "lib-tools"]);
   // WP MOBILE-1b: the chip row also carries the overflow cue (scue + its state).
-  assert.deepEqual(bar.children[0].children.map((c) => c.className.replace(/ scue( fits| at-start| at-end)*$/, "")), ["search lib-search", "chips lib-chips"]);
-  assert.ok(bar.children[0].children[1].classList.contains("scue"), "overflow cue wired");
+  assert.deepEqual(bar.children.map((c) => c.className.replace(/ scue( fits| at-start| at-end)*$/, "")), ["search lib-search", "lib-tools", "chips lib-chips"]);
+  assert.ok(bar.children[2].classList.contains("scue"), "overflow cue wired");
   // WP LIBRARY-1: the check buttons are one split button in the header.
   const split = s.querySelector(".lib-head").querySelector(".lib-split");
   assert.ok(split, "split button lives in the header");

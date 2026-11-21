@@ -780,7 +780,7 @@ truth; the list is a code change on purpose, not a setting.
 | `POST /v1/prefill/cached` | Never selected, even with cache content of its own |
 | `POST /v1/prefill` | `422`, string `detail`: "App 228980 (Steamworks Common Redistributables) is a Steam tool package, it is cached together with the games that use it. It is never prefilled on its own." The whole body is refused before anything is queued, the same all-or-nothing shape as `PATCH /v1/settings`. An older app/web build that sends one in a bulk request queues nothing and shows that message |
 | `jobs.enqueue_prefill` | Raises `ToolAppNotPrefillable` (a `ValueError`) before writing anything — the last line, so a future enqueue path cannot forget the rule |
-| `GET /v1/games[/{appid}]` | `tool_app: true`, `tool_app_name: "Steamworks Common Redistributables"`. `name`, `status` and every other field stay the raw truth (an old failed job leaves `status: "error"`); the UIs show the tool name, the word "Steam tool package" and the note "cached together with the games that use it", never Failed/Retry, and never an "installed but not cached" warning |
+| `GET /v1/games[/{appid}]` | `tool_app: true`, `tool_app_name: "Steamworks Common Redistributables"`. `name`, `status` and every other field stay the raw truth (an old failed job leaves `status: "error"`); the UIs show the tool name, the word "Steam tool package" and the note "cached together with the games that use it", never Failed/Retry, and never an "Installed, not cached" warning |
 
 **Content packages (WP TOOL-APPS-2a/2b).** A fixed-list tool app is never
 grouped: never a package of a game and never a parent (a package whose

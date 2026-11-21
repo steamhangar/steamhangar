@@ -134,6 +134,6 @@ test("wiring: Maintenance holds Verify, the GC box and a red delete zone whose b
   assert.match(src, /box\.className = danger \? "detail-box detail-box-danger" : "detail-box";/);
   assert.match(src, /function buildDeleteButton\(\) \{[\s\S]*?addEventListener\("click", \(\) => openDeleteConfirm\(\)\)/);
   const css = readFileSync(new URL("../css/app.css", import.meta.url), "utf8");
-  assert.match(css, /\.detail-box-danger\{[^}]*rgba\(255,111,111/);
+  assert.match(css, /\.detail-box-danger\{[^}]*color-mix\(in srgb, var\(--danger\)/); // the red zone (DESIGN-NITS-1: token, was rgba(255,111,111,.35))
   assert.match(css, /\.detail-panel\[hidden\]\{ display:none; \}/);
 });
