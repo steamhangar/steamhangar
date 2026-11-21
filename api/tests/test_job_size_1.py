@@ -86,11 +86,14 @@ def seed(
     settings: Settings,
     now: datetime,
     lines_spec: tuple[tuple, ...] = DEFAULT_LINES,
+    age: timedelta = timedelta(minutes=2),
 ) -> sqlite3.Connection:
     """A swept log with bytes on both expected depots, the DLC depot and a
     depot of another app, plus a running prefill of APPID (first download).
     Lines are ``(status, depot, bytes[, addr])``; the address defaults to the
-    runner, whose marked period is stored."""
+    runner, whose marked period is stored. ``age``: how old the lines are
+    (WP APP-DL-STATS-1b: a job's speed is the ring's ~15-20 s "current speed"
+    window, so a speed test needs lines a few seconds old)."""
     init_db(settings.db_path)
     conn = get_connection(settings.db_path)
     mapping.upsert_mapping(conn, depotid=200, appid=OTHER_APP, name=None)
@@ -101,7 +104,7 @@ def seed(
     )
     conn.commit()
     lines = [
-        event_line(time=iso(now - timedelta(minutes=2)), addr=(rest[0] if rest else RUNNER),
+        event_line(time=iso(now - age), addr=(rest[0] if rest else RUNNER),
                    cache_status=status, depot=str(depot), bytes_sent=str(size))
         for status, depot, size, *rest in lines_spec
     ]
@@ -156,17 +159,18 @@ def test_a_first_download_counts_the_expected_depots_and_reports_the_expected_si
     tmp_path: Path, now: datetime
 ) -> None:
     settings = settings_for(tmp_path)
-    conn = seed(tmp_path, settings, now)
+    conn = seed(tmp_path, settings, now, age=timedelta(seconds=3))
     fetch = Counter()
     try:
         body, job = job_entry(client(settings, fetch))
         window = body["current"]["window_seconds"]
+        live = body["now"]["window_seconds"]  # WP APP-DL-STATS-1b: the ring's window
         assert job["appid"] == APPID
         assert job["expected"] is True
         assert job["expected_depots"] == 2  # 1366541 + 1366544; DLC 1366542 never
         # Only the expected public depots: not the DLC depot (300), not depot 200 (7000).
         assert job["bytes_since_start"] == 1500
-        assert job["bytes_per_second"] == pytest.approx(1500 / window)
+        assert job["bytes_per_second"] == pytest.approx(1500 / live, rel=0.05)
         assert job["expected_size_bytes"] == 4_680_000_000 + 1_000
         assert job["expected_download_bytes"] == 1_820_000_000 + 400
         # The observed fields keep their meaning: the server maps nothing yet.
@@ -290,10 +294,10 @@ def test_a_cache_only_run_has_no_miss_speed(tmp_path: Path, now: datetime) -> No
     (MISS speed) is 0 while the card's speed is the cache's read speed."""
     settings = settings_for(tmp_path)
     spec = (("HIT", 1366541, 1000), ("HIT", 1366544, 500))
-    conn = seed(tmp_path, settings, now, spec)
+    conn = seed(tmp_path, settings, now, spec, age=timedelta(seconds=3))
     try:
         body, job = job_entry(client(settings, Counter()))
-        assert job["bytes_per_second"] == pytest.approx(1500 / body["current"]["window_seconds"])
+        assert job["bytes_per_second"] == pytest.approx(1500 / body["now"]["window_seconds"], rel=0.05)
         assert job["miss_bytes_per_second"] == 0
     finally:
         conn.close()
@@ -319,12 +323,13 @@ def test_a_household_pc_loading_the_same_game_is_not_job_progress(
     """SHOULD-FIX 4: a first download's figures are the runner's only."""
     settings = settings_for(tmp_path)
     spec = DEFAULT_LINES + (("MISS", 1366541, 9000, HOUSEHOLD_PC), ("HIT", 1366544, 4000, HOUSEHOLD_PC))
-    conn = seed(tmp_path, settings, now, spec)
+    conn = seed(tmp_path, settings, now, spec, age=timedelta(seconds=3))
     try:
         body, job = job_entry(client(settings, Counter()))
         window = body["current"]["window_seconds"]
         assert job["bytes_since_start"] == 1500
-        assert job["bytes_per_second"] == pytest.approx(1500 / window)
+        # WP APP-DL-STATS-1b: the ring's window, the runner's bytes only.
+        assert job["bytes_per_second"] == pytest.approx(1500 / body["now"]["window_seconds"], rel=0.05)
         assert job["miss_bytes_per_second"] == pytest.approx(1500 / window)
         assert job["remaining_bytes"] == 1_820_000_400 - 1500
     finally:

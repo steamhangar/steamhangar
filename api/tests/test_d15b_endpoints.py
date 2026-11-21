@@ -194,12 +194,14 @@ def test_a_running_job_gets_the_speed_of_its_exclusive_depots(feed) -> None:
 
     body = client_for(settings).get("/v1/throughput", headers=AUTH).json()
     (job,) = body["jobs"]
-    window = body["current"]["window_seconds"]
     assert job["appid"] == 440
     assert job["name"] == "Game Four Forty"
     assert job["exclusive_depots"] == 1  # depot 300 is shared, not counted
     assert job["mapped_depots"] == 2  # exclusive + shared (WP MAP-FROM-MANIFEST-1)
-    assert job["bytes_per_second"] == pytest.approx(1000 / window)
+    # WP APP-DL-STATS-1b: the speed is the ring's "current speed" window
+    # (~15-20 s); the depot's only line is 2 minutes old, so nothing loads now.
+    assert body["now"]["window_seconds"] <= 20
+    assert job["bytes_per_second"] == 0
     assert job["bytes_since_start"] == 1000
 
 
