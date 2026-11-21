@@ -486,8 +486,9 @@ their open boxes (items 2, 7 and 11) are in section 12. Item 13 stays here.
       included; audit exception to the api/core/dns freeze, ADR-0016); added
       2026-11-21: CI-NIGHTLY-1, ANDROID-INSTALLED-WORDING-1 (+ -NITS-1),
       STATUS-ICON-TEST-HELPERS-1, WEIGHTS-1, ANDROID-SHEET-BG-1 (exact web
-      twins), DOC-LINES-CHECK-1, RC23-RELEASE-NOTES-1; operator item
-      TALKBACK-CHECK-1; all in the roadmap section "Audit 2026-11-20:
+      twins), DOC-LINES-CHECK-1, RC23-RELEASE-NOTES-1, SNACKBAR-LIVE-1;
+      operator item TALKBACK-CHECK-1; candidate for the next rc:
+      ANDROID-TWIN-DETAIL-1 (remaining web-twin gaps of the Android app); all in the roadmap section "Audit 2026-11-20:
       findings"
     - v0.2.0 rename: D18 incl. logo, LAUNCHER-PREP-1
     - v0.3.0 privacy: D22 then LIBRARY-META-1d

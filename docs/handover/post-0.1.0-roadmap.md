@@ -2183,8 +2183,19 @@ bottom bar, cards, filter chips, menus, switch, sheets, dialogs and
 snackbar are exact web twins, and the selected-chip count is accent on
 both sides, which also lifts the web count from 4.29:1 to 7.97:1),
 DOC-LINES-CHECK-1 (C-26: the DOC-DIET-1 proof compares the pinned split
-commits), RC23-RELEASE-NOTES-1. Release gate: tag rc23 only once
+commits), RC23-RELEASE-NOTES-1, SNACKBAR-LIVE-1. Release gate: tag rc23 only once
 NEUTRAL-RAMP-1 and DESIGN-MD-1 are on `main` (the notes name both).
+Follow-ups recorded 2026-11-21: **SNACKBAR-LIVE-1** (rc23, a11y: every
+toast is a polite live region, not only the two Clients toasts);
+**ANDROID-TWIN-DETAIL-1** (android; rc24 candidate) for the twin gaps left
+outside the decided scope: type roles inside tiles, toast and nav pip (web
+`.k` 11px 500, `.v` 24px 500, `.n` 12px; `.toast` 12px padding, 12.5px
+text vs Material 16dp / 14sp; pip 15px), menu corners (`--r-l` / `--r-m`
+vs Material 4dp), sheet corners (`--r-xl` 26px vs 28dp) and drag-handle
+margins, the three-column ClientCard above a 700px list. Not possible with
+material3 1.3.1 (nits, rc23): the AlertDialog scrim colour (the platform
+dialog window dims it) and a 1px `--line` sheet border that follows the
+drag offset (a `modifier` border does not).
 Operator items: CRYPTO-DEVICE-1; **TALKBACK-CHECK-1** (device: grid card
 and list row of an installed-not-cached game whose status is "Not
 cached" speak "Installed on <names>", no second "not cached"; reasoned in
