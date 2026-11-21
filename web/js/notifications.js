@@ -39,9 +39,11 @@
  */
 
 import { diffByKey } from "./diff-utils.js";
+import { ACTIVE_JOB_STATUSES } from "./lib/job-status.js";
 
-/** Job statuses a job can transition FROM to still count as "news" when it
- * lands on done/error. Mirrors api/README.md's `ACTIVE_STATUSES` (WP 3.12):
+/* Job statuses a job can transition FROM to still count as "news" when it
+ * lands on done/error: the shared `ACTIVE_JOB_STATUSES` (lib/job-status.js,
+ * WP ACTIVE-STATUS-1), which mirrors api/README.md's `ACTIVE_STATUSES` (WP 3.12):
  * queued, running and paused are all still "in flight"; cancelled/done/error
  * are terminal and the backend never rewrites a terminal job's status (see
  * "What a cancelled or paused prefill does NOT do" / "the outcome is what
@@ -51,7 +53,6 @@ import { diffByKey } from "./diff-utils.js";
  * guard is the defensive second layer for newly-added job rows (see
  * `forEachTransition` below).
  */
-const JOB_ACTIVE_STATUSES = new Set(["queued", "running", "paused"]);
 
 /**
  * Walk a diffByKey() result as (prev, curr) transition pairs. `updated`
@@ -83,7 +84,7 @@ export function diffJobsForNotifications(prevJobs, currJobs) {
     // was actually active — done/error are terminal and the backend never
     // flips a terminal job back to another terminal status, but failing
     // toward "no event" on unexpected data is cheap insurance.
-    const wasActive = prev ? JOB_ACTIVE_STATUSES.has(prev.status) : true;
+    const wasActive = prev ? ACTIVE_JOB_STATUSES.has(prev.status) : true;
     if (!wasActive) return;
     if (curr.status === "done") {
       events.push({

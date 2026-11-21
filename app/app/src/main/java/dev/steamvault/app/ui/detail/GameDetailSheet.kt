@@ -58,6 +58,7 @@ import dev.steamvault.app.R
 import dev.steamvault.app.net.model.GameDetail
 import dev.steamvault.app.net.model.GameSummary
 import dev.steamvault.app.net.model.JobSummary
+import dev.steamvault.app.polling.PollingIntervals.ACTIVE_JOB_STATUSES
 import dev.steamvault.app.ui.demo.DemoModeBanner
 import dev.steamvault.app.ui.detail.logic.CoOwnerRow
 import dev.steamvault.app.ui.detail.logic.ConfirmedCurrentWording
@@ -261,14 +262,14 @@ fun GameDetailSheet(
     )
 }
 
-/** Appids with a prefill job that is queued/running/paused right now --
- * same active-status set `ui/library/logic/BulkPlan.kt`'s (private)
- * `busyAppidsFromJobs` uses, duplicated here for the same reason
- * `ui/detail/logic/DetailJob.kt`'s kdoc gives for its own second copy of a
- * similar helper: this module needs it standalone, not exported from a
- * screen it otherwise has no dependency on. */
+/** Appids with a prefill job that is queued/running/paused right now
+ * (the shared `PollingIntervals.ACTIVE_JOB_STATUSES`) -- same helper as
+ * `ui/library/logic/BulkPlan.kt`'s (private) `busyAppidsFromJobs`,
+ * duplicated here for the same reason `ui/detail/logic/DetailJob.kt`'s kdoc
+ * gives for its own second copy of a similar helper: this module needs it
+ * standalone, not exported from a screen it otherwise has no dependency on. */
 private fun activeJobAppids(jobs: List<JobSummary>): Set<Int> =
-    jobs.filter { it.type == "prefill" && it.status in setOf("queued", "running", "paused") }
+    jobs.filter { it.type == "prefill" && it.status in ACTIVE_JOB_STATUSES }
         .mapTo(HashSet()) { it.appid }
 
 /** `GameDetail` -> `GameSummary` for the status-logic helpers

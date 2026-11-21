@@ -41,6 +41,7 @@ import { isDamagedOnly } from "./cache-completeness.js";
 import { isToolApp, isNotOwnedApp } from "./game-status.js";
 import { formatBytesGB } from "./format.js";
 import { ERROR_KINDS } from "../errors.js";
+import { ACTIVE_JOB_STATUSES } from "./job-status.js";
 
 // ---------------------------------------------------------------------
 // Wording
@@ -158,8 +159,6 @@ function skippedTotal(report) {
 // ---------------------------------------------------------------------
 // Visibility
 // ---------------------------------------------------------------------
-
-const ACTIVE_JOB_STATUSES = new Set(["queued", "running", "paused"]);
 
 /** True while `jobs` holds a queued, running or paused prefill of `appid`. */
 function hasActivePrefill(appid, jobs) {

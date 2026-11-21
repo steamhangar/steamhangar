@@ -2,6 +2,7 @@ package dev.steamvault.app.ui.library.logic
 
 import dev.steamvault.app.net.model.GameSummary
 import dev.steamvault.app.net.model.JobSummary
+import dev.steamvault.app.polling.PollingIntervals.ACTIVE_JOB_STATUSES
 import dev.steamvault.app.ui.status.StatusKind
 
 /**
@@ -56,7 +57,7 @@ import dev.steamvault.app.ui.status.StatusKind
  * [findLiveJob] — dedupe protection needs the queued case too; mockup
  * parity: a job counts as busy if it is queued, running or paused). */
 private fun busyAppidsFromJobs(jobs: List<JobSummary>): Set<Int> =
-    jobs.filter { it.type == "prefill" && it.status in setOf("queued", "running", "paused") }
+    jobs.filter { it.type == "prefill" && it.status in ACTIVE_JOB_STATUSES }
         .map { it.appid }
         .toSet()
 

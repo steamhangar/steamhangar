@@ -1,8 +1,9 @@
 package dev.steamvault.app.ui.detail.logic
 
 import dev.steamvault.app.net.model.JobSummary
+import dev.steamvault.app.polling.PollingIntervals.ACTIVE_JOB_STATUSES
 
-/**
+/*
  * Which job (if any) drives THIS app's detail-sheet job-control section, and
  * which of pause/resume/cancel apply to it (WP 4b.6 brief: "pause/resume/
  * cancel for this app's live job, reuse DownloadsController patterns/
@@ -27,11 +28,9 @@ import dev.steamvault.app.net.model.JobSummary
  *
  * Pure -- no Compose, no network. Covered by `DetailJobTest`.
  */
-private val TRACKED_STATUSES = setOf("queued", "running", "paused")
-
 /** The prefill job (if any) queued/running/paused for [appid] right now. */
 fun findTrackedJob(jobs: List<JobSummary>, appid: Int): JobSummary? =
-    jobs.firstOrNull { it.appid == appid && it.type == "prefill" && it.status in TRACKED_STATUSES }
+    jobs.firstOrNull { it.appid == appid && it.type == "prefill" && it.status in ACTIVE_JOB_STATUSES }
 
 /**
  * The job that drives the detail HEADER's status icon and word (WP

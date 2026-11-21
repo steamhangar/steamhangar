@@ -5,6 +5,7 @@ import dev.steamvault.app.net.model.GameSummary
 import dev.steamvault.app.net.model.JobSummary
 import dev.steamvault.app.net.model.PrefillJobRef
 import dev.steamvault.app.net.model.ScheduleOut
+import dev.steamvault.app.polling.PollingIntervals.ACTIVE_JOB_STATUSES
 import dev.steamvault.app.ui.library.logic.isCompletable
 import dev.steamvault.app.ui.library.logic.isToolApp
 import dev.steamvault.app.ui.library.logic.knownPct
@@ -64,8 +65,6 @@ object IncompleteWording {
 
 /** Which verb a newly queued job gets in the toast (web `mode`). */
 enum class VerifyMode { VERIFY, COMPLETE }
-
-private val ACTIVE_JOB_STATUSES = setOf("queued", "running", "paused")
 
 /**
  * The incomplete games the Downloads section lists (see the file kdoc),

@@ -85,6 +85,7 @@ import {
   diffClientsForNotifications,
 } from "./notifications.js";
 import { createBackoffState } from "./backoff.js";
+import { ACTIVE_JOB_STATUSES } from "./lib/job-status.js";
 
 export const DEFAULT_INTERVALS = Object.freeze({
   jobsFastMs: 2000,
@@ -92,8 +93,6 @@ export const DEFAULT_INTERVALS = Object.freeze({
   gamesMs: 15000,
   clientsMs: 20000,
 });
-
-const JOB_ACTIVE_STATUSES = new Set(["queued", "running", "paused"]);
 
 /**
  * WP WEB-FIX-20.2: the store loops' retry schedule after a failed poll when
@@ -112,7 +111,7 @@ export const STORE_RETRY_BASE_MS = 2500;
 
 /** Pure: does this `GET /v1/jobs` snapshot contain a still-in-flight job? */
 export function hasActiveJob(jobs) {
-  return Array.isArray(jobs) && jobs.some((j) => JOB_ACTIVE_STATUSES.has(j.status));
+  return Array.isArray(jobs) && jobs.some((j) => ACTIVE_JOB_STATUSES.has(j.status));
 }
 
 /**

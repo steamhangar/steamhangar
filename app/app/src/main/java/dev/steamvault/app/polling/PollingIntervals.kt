@@ -17,11 +17,21 @@ object PollingIntervals {
     const val GAMES_MS = 15000L
     const val CLIENTS_MS = 20000L
 
-    private val JOB_ACTIVE_STATUSES = setOf("queued", "running", "paused")
+    /**
+     * The one app definition of an "active" (in-flight) job status (WP
+     * ACTIVE-STATUS-1, audit C-5): queued, running or paused. Every app
+     * module that asks "is this job still in flight?" uses this set instead
+     * of its own copy. Twin of `web/js/lib/job-status.js`'s
+     * `ACTIVE_JOB_STATUSES` and the server's `ACTIVE_STATUSES`
+     * (api/vault_api/jobs.py); pinned by `ActiveJobStatusesWebTwinTest`
+     * (reads the web file) and `web/tests/job-status-twin.test.js` (reads
+     * this line). Change all three together.
+     */
+    val ACTIVE_JOB_STATUSES: Set<String> = setOf("queued", "running", "paused")
 
     /** Pure: does this `GET /v1/jobs` snapshot contain a still-in-flight job? */
     fun hasActiveJob(jobs: List<JobSummary>): Boolean =
-        jobs.any { it.status in JOB_ACTIVE_STATUSES }
+        jobs.any { it.status in ACTIVE_JOB_STATUSES }
 
     /**
      * Pure: which poll interval applies to the jobs loop given its most

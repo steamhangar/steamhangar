@@ -5,6 +5,7 @@ import dev.steamvault.app.net.model.GameSummary
 import dev.steamvault.app.net.model.JobSummary
 import dev.steamvault.app.net.model.RepairDepotOut
 import dev.steamvault.app.net.model.RepairOut
+import dev.steamvault.app.polling.PollingIntervals.ACTIVE_JOB_STATUSES
 import java.util.Locale
 
 /**
@@ -139,8 +140,6 @@ fun repairDoneText(report: RepairOut): String {
 // ---------------------------------------------------------------------
 // Visibility
 // ---------------------------------------------------------------------
-
-private val ACTIVE_JOB_STATUSES = setOf("queued", "running", "paused")
 
 /** True while [jobs] holds a queued, running or paused prefill of [appid]. */
 private fun hasActivePrefill(appid: Int, jobs: List<JobSummary>): Boolean =
