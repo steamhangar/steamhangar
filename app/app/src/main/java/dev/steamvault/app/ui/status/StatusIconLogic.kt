@@ -121,7 +121,7 @@ fun pillTextColor(tone: StatusTone): Color = when (tone) {
  * translucent tint over a lighter parent would lower it); Raised2 for the
  * neutral pill (web `.kit .pill`). The none pill sat on Raised2 too until
  * WP PILL-TONE-1: its word was 4.46:1 there, under 4.5 for small text;
- * 4.60:1 on its own tint. `StatusIconLogicTest` asserts 4.5:1 or more for
+ * 4.58:1 on its own tint. `StatusIconLogicTest` asserts 4.5:1 or more for
  * every tone. */
 fun pillGroundColor(tone: StatusTone): Color = when (tone) {
     StatusTone.NEUTRAL -> VaultColors.Raised2
@@ -144,8 +144,9 @@ fun backgroundFor(kind: StatusKind): Color = discColorFor(toneFor(kind))
  * (`.sic { color:#08120F }`) for every kind. The muted Dim2 discs
  * (cancelled, notinuse; unverified until WP PILL-TONE-1, now StatusNone,
  * 6.22:1) used the light Text ink until WP CONTRAST-1 (GLYPH-CONTRAST-1,
- * audit 2026-11-20): Text on Dim2 is 2.81:1, under the 3:1 a glyph needs;
- * the dark ink is 5.79:1. Web twin: no `.sic.k-*` rule in theme.css sets
+ * audit 2026-11-20): Text on Dim2 was 2.81:1 then (2.80:1 on today's
+ * ramp), under the 3:1 a glyph needs; the dark ink was 5.79:1 then (5.82:1
+ * on today's ramp, NEUTRAL-RAMP-1). Web twin: no `.sic.k-*` rule in theme.css sets
  * its own `color` any more.
  */
 fun inkFor(@Suppress("UNUSED_PARAMETER") kind: StatusKind): Color = VaultColors.StatusIconInk

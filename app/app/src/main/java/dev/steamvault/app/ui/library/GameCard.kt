@@ -225,7 +225,7 @@ internal fun cardStatusWord(model: GameCardModel, compact: Boolean = false): Str
  * disc -- orange for the update state (WP UPD-6, web `tx-stale`) and
  * "Partially cached" (`tx-partial`), red for Failed (`tx-error`), the
  * StatusNone grey for "Not cached" and "Cached · not verified" (WP
- * PILL-TONE-1, `tx-none` / `tx-unverified`, 5.65:1 on Surface); the muted
+ * PILL-TONE-1, `tx-none` / `tx-unverified`, 5.63:1 on Surface); the muted
  * text colour for Current and the active states, whose dot carries the
  * tone. */
 @Composable

@@ -23,9 +23,9 @@ import androidx.compose.ui.unit.dp
  *
  * Selected state: Material tells the selected segment / chip apart by its
  * container fill only (the scheme's default secondaryContainer; no 3:1
- * edge), the twin of the web `.seg` selected fill (1.27:1 on --surface). Like
+ * edge), the twin of the web `.seg` selected fill (1.26:1 on --surface). Like
  * the web's --dim-2 inset ring, the selected item gets a [VaultColors.Dim2]
- * border: 5.81:1 on Bg, 5.25:1 on Surface (WCAG 1.4.11 state indicator).
+ * border: 5.84:1 on Bg, 5.26:1 on Surface (WCAG 1.4.11 state indicator).
  */
 
 /** OutlinedTextField colours with the 3:1 [VaultColors.LineStrong] unfocused border. */
@@ -60,7 +60,7 @@ fun vaultRangeChipBorder(selected: Boolean): BorderStroke =
  * FilterChip border for the filter chips (the Library chip row and the
  * Filters panel's categories, twins of the web `.fchip`): the default
  * unselected border, and a 1dp [VaultColors.Accent] border on a selected
- * chip like the web `.fchip[aria-pressed="true"]` (10.86:1 on Bg, 9.82:1 on
+ * chip like the web `.fchip[aria-pressed="true"]` (10.85:1 on Bg, 9.78:1 on
  * Surface; Material draws no edge on a selected chip). WP CONTRAST-1.
  */
 @Composable
@@ -75,8 +75,8 @@ fun vaultFilterChipBorder(selected: Boolean): BorderStroke =
 /**
  * Border of a button that stands in for a web select (the Library sort
  * button, web `.sortg select`; the Filters genre / rating pickers, web
- * `.lib-meta select`): [VaultColors.LineStrong], 3.82:1 on Bg, 3.45:1 on
- * Surface, instead of the theme `outline` (Line, 1.38:1 on Surface). Plain
+ * `.lib-meta select`): [VaultColors.LineStrong], 3.83:1 on Bg, 3.45:1 on
+ * Surface, instead of the theme `outline` (Line, 1.37:1 on Surface). Plain
  * OutlinedButtons keep `outline`, like the web `.kit .btn`. WP CONTRAST-1.
  */
 fun vaultFieldButtonBorder(): BorderStroke = BorderStroke(1.dp, VaultColors.LineStrong)
