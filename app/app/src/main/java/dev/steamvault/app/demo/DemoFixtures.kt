@@ -272,6 +272,34 @@ internal fun seedJobs(): MutableList<DemoJob> = mutableListOf(
         startedAt = isoAgo(45L),
         logExcerpt = "[vault-api] worker claimed job 900101\nDownloading depot 4010031 ...",
         ticksLeft = 2,
+        // WP CAP-503-FIX-1b: resumed by the operator during the demo's
+        // client-priority hold (Weg B), so it runs alongside the device.
+        clientOverride = true,
+    ),
+    // WP CAP-503-FIX-1b (web demo twin): a device loads through the cache
+    // ([DemoState.clientPriority]), so vault-api paused this prefill for it
+    // and the queued one waits.
+    DemoJob(
+        id = 900_102,
+        appid = 4_010_070,
+        type = "prefill",
+        status = DemoState.STATUS_PAUSED,
+        createdAt = isoAgo(300L),
+        startedAt = isoAgo(240L),
+        pausedAt = isoAgo(90L),
+        logExcerpt = "[vault-api] worker claimed job 900102\nDownloading depot 4010071 ...",
+        ticksLeft = 2,
+        pauseReason = "client",
+    ),
+    DemoJob(
+        id = 900_103,
+        appid = 4_010_050,
+        type = "prefill",
+        status = DemoState.STATUS_QUEUED,
+        createdAt = isoAgo(30L),
+        startedAt = null,
+        logExcerpt = "[vault-api] queued.",
+        ticksLeft = 2,
     ),
 )
 

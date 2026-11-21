@@ -124,7 +124,16 @@ internal class DemoJob(
     var ticksLeft: Int,
     /** Demo-only: set on a job the user moved (D20); see DemoState.queuedInOrder. */
     var queueOrder: Int? = null,
+    /** WP CAP-503-FIX-1b (schema v34): `"client"` for the job the demo hold
+     * paused; a pause the user makes is `"manual"`. Reported while paused. */
+    var pauseReason: String? = null,
+    /** WP CAP-503-FIX-1b: resumed during the hold, runs alongside the device. */
+    var clientOverride: Boolean = false,
 ) {
+    private fun wirePauseReason(): String? = if (status == "paused") pauseReason ?: "manual" else null
+
+    private fun wireOverride(): Boolean = clientOverride && (status == "queued" || status == "running")
+
     fun toSummary(queuePosition: Int? = null): JobSummary = JobSummary(
         id = id,
         appid = appid,
@@ -140,6 +149,8 @@ internal class DemoJob(
         paused_at = pausedAt,
         stop_request = null,
         queue_position = queuePosition,
+        pause_reason = wirePauseReason(),
+        client_override = wireOverride(),
     )
 
     fun toDetail(queuePosition: Int? = null): JobDetail = JobDetail(
@@ -158,5 +169,7 @@ internal class DemoJob(
         stop_request = null,
         log_excerpt = logExcerpt,
         queue_position = queuePosition,
+        pause_reason = wirePauseReason(),
+        client_override = wireOverride(),
     )
 }

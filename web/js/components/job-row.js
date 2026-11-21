@@ -61,8 +61,10 @@ function nameNode(appid, title) {
  * The Active column's job card: name and job meta, a status pill (the
  * running/updating/verify/paused word on the status-icon disc), the
  * progress bar only with real progress, the speed line (`data-role=
- * job-speed`, painted by the view from the statistics poll), the stop and
- * hold notes, and an empty action row (`data-role=job-acts`) the view fills.
+ * job-speed`, painted by the view from the statistics poll), the hold note,
+ * the client-priority note (`data-role=client-note`, hidden until the view
+ * fills it), the stop note, and an empty action row (`data-role=job-acts`)
+ * the view fills.
  *
  * @param {{job: object, title: string, kind: string, word: string, held?: boolean, holdNote?: string}} options
  * @returns {HTMLDivElement}
@@ -108,6 +110,14 @@ export function createJobCard({ job, title, kind, word, held = false, holdNote =
     note.dataset.role = "hold-note";
     card.appendChild(note);
   }
+
+  // WP CAP-503-FIX-1b: a job that runs alongside a loading device by the
+  // operator's choice says so here (`lib/client-priority.js`); the view
+  // fills and shows it.
+  const clientNote = el("p", "hint holdnote");
+  clientNote.dataset.role = "client-note";
+  clientNote.hidden = true;
+  card.appendChild(clientNote);
 
   const stopNote = el("p", "hint stopnote");
   stopNote.dataset.role = "stop-note";

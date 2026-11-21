@@ -4222,3 +4222,29 @@ Review follow-up: `settings-sections-wiring.test.js` +1 (MUTATION TARGET):
 a click on the row's label text (`.tx`, `data-role="expert-switch-text"`)
 toggles the switch, its storage key and the Expert nav item, the twin of
 the Android row that toggles as a whole.
+
+### WP CAP-503-FIX-1b (rc23): client-priority hold texts in Downloads
+
+`client-priority.test.js` (new): the texts of `lib/client-priority.js`, one
+test per state, expected as string literals: held (a job paused for a
+device names it and the resume time, `resume_at` as local HH:MM), queued
+while holding (one note over the queue; an override-only queue gets none),
+override ("Runs alongside <device> by your choice.", only while holding),
+restored (no device named, no sighting claimed), manual (no text, the view
+keeps its own note), the pausing stop note, the device phrase and the clock.
+`downloads-client-priority-wiring.test.js` (new): the view polls
+`GET /v1/client-priority` only while a job is active, and each state reaches
+the page (paused card note, queue note above the rows, override note on the
+running card, stop note, manual note kept, a client pause turned manual
+repainted from the jobs poll). `downloads-render-plan.test.js`: a
+`pause_reason` or `client_override` change is a text patch, not a rebuild.
+`throughput-fixture.js` answers `/v1/client-priority` (nothing held). The
+Android twin pins the same literals (`ClientPriorityWebTwinTest`).
+Review follow-up: the "pending" texts (no current hold) are neutral ("Paused
+for device priority. ...", "Queued downloads wait for device priority.");
+the wiring test also pins that a failed read after a good one drops the hold
+and that leaving the view stops the hold poll (it waits 5.6 s, the last test
+of the file); the clock is pinned under TZ=Europe/Berlin and UTC. The demo
+holds for the online agent's address (demo job 900002 paused for it, 900003
+queued, 900001 resumed by choice), so the Downloads goldens show the texts;
+the cache-delete and bulk demo tests cancel or count those jobs.

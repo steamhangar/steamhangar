@@ -497,6 +497,42 @@ function buildGames(librarySize = DEFAULT_LIBRARY_SIZE) {
 
 function buildJobs() {
   return [
+    // WP CAP-503-FIX-1b: the demo's client-priority hold (`demoClientPriority`
+    // below): a device loads through the cache, so vault-api paused this
+    // prefill for it and the queued one waits ...
+    {
+      id: 900003,
+      appid: 2010050,
+      type: "prefill",
+      status: "queued",
+      created_at: isoAgo(30_000),
+      started_at: null,
+      finished_at: null,
+      updated: null,
+      up_to_date: null,
+      summary_parse_ok: null,
+      gc_execute: null,
+      paused_at: null,
+      stop_request: null,
+      log_excerpt: "[vault-api] queued.",
+    },
+    {
+      id: 900002,
+      appid: 2010070,
+      type: "prefill",
+      status: "paused",
+      created_at: isoAgo(5 * 60_000),
+      started_at: isoAgo(4 * 60_000),
+      finished_at: null,
+      updated: null,
+      up_to_date: null,
+      summary_parse_ok: null,
+      gc_execute: null,
+      paused_at: isoAgo(90_000),
+      stop_request: null,
+      pause_reason: "client",
+      log_excerpt: "[vault-api] worker claimed job 900002\nDownloading depot 2010071 ...",
+    },
     {
       id: 900001,
       appid: 2010030,
@@ -513,6 +549,9 @@ function buildJobs() {
       stop_request: null,
       log_excerpt:
         "[vault-api] worker claimed job 900001\nDownloading depot 2010031 ...",
+      // ... and this one the operator resumed during the hold (Weg B): it
+      // runs alongside the device by choice.
+      client_override: true,
       // Demo-only bookkeeping (never serialized into a response): how many
       // more GET /v1/jobs polls before this job "finishes". Call-count
       // driven rather than wall-clock so demo mode needs no timers of its
@@ -968,7 +1007,7 @@ function handleGetAbout() {
 let games = buildGames(readLibrarySizePreference());
 let jobs = buildJobs();
 let clients = buildClients();
-let nextJobId = 900002;
+let nextJobId = 900004;
 // Seeded in the /v1/updates section below (its constants must exist first).
 let updateCheck = null;
 
@@ -1013,7 +1052,7 @@ export function resetDemoData({
   clients = buildClients();
   clientNameMap = new Map();
   historySinceMs = null;
-  nextJobId = 900002;
+  nextJobId = 900004;
   updateCheck = seedDemoUpdateCheck();
   resetDemoSettings();
   resetDemoSteamRelay();
@@ -2135,6 +2174,38 @@ function jobSummary(j) {
     paused_at,
     stop_request,
     queue_position: demoQueuePosition(j),
+    // WP CAP-503-FIX-1b (schema v34): "client" for the job the demo hold
+    // paused, else "manual" while paused or pausing; null otherwise. The
+    // override is reported while the job is queued or running.
+    pause_reason: status === "paused" || stop_request === "pause" ? j.pause_reason || "manual" : null,
+    client_override: (status === "queued" || status === "running") && j.client_override === true,
+  };
+}
+
+/** WP CAP-503-FIX-1b: the demo's device loading through the cache (the
+ * online agent `workshop-pc`'s address); it keeps loading for the whole
+ * demo session, so the hold never ends. */
+const DEMO_HOLD_ADDR = "10.10.0.21";
+
+/** WP CAP-503-FIX-1b: `GET /v1/client-priority` (CAP-503-FIX-1a). Holding,
+ * seen just now (the screenshot clock is frozen, so `resume_at` is stable),
+ * named like the real route: the Clients page name, `null` when none is
+ * set (the UI then shows the address). */
+function handleGetClientPriority() {
+  const now = Date.now();
+  const ids = (pred) => jobs.filter(pred).map((j) => j.id).sort((a, b) => a - b);
+  return {
+    enabled: true,
+    holding: true,
+    since: utcIsoSeconds(now - 90_000),
+    last_client_at: utcIsoSeconds(now),
+    resume_at: utcIsoSeconds(now + 120_000),
+    idle_gap_seconds: 120,
+    clients: [{ addr: DEMO_HOLD_ADDR, name: demoAddressName(DEMO_HOLD_ADDR).name, miss_bytes_per_second: 9_400_000 }],
+    paused_job_ids: ids((j) => j.status === "paused" && j.pause_reason === "client"),
+    override_job_ids: ids((j) => (j.status === "queued" || j.status === "running") && j.client_override === true),
+    restored: false,
+    runner_address_unknown: false,
   };
 }
 
@@ -2918,12 +2989,24 @@ export async function demoRequest(method, path, { body, params } = {}) {
     if (!job) throw notFound(`Unknown job id ${id}`);
     // WP PAUSE-ALL-GC-1: a queued job of either type can be paused; a
     // running one only if it is a prefill (a running GC job is 409).
+    // WP CAP-503-FIX-1a: Pause on a job paused for a device makes it a
+    // manual pause (immediate), never a 409.
+    if (job.status === "paused" && job.pause_reason === "client") {
+      job.pause_reason = "manual";
+      return jobControlResponse(job, {
+        status: "paused",
+        outcome: "immediate",
+        detail: "Paused for a client; now paused manually and no longer resumed automatically.",
+      });
+    }
     const pausable =
       (job.status === "queued" && (job.type === "prefill" || job.type === "gc")) ||
       (job.status === "running" && job.type === "prefill");
     if (!pausable) {
       throw conflict(`Job ${id} cannot be paused from status ${job.status}`);
     }
+    job.pause_reason = "manual"; // WP CAP-503-FIX-1b: an operator's pause
+    job.client_override = false; // ends the override (CAP-503-FIX-1a)
     if (job.status === "queued") {
       // WP WEB-FEAT-5: the real API parks a queued prefill at once
       // (`outcome: "immediate"`) — nothing was running, nothing is stopped.
@@ -2948,6 +3031,10 @@ export async function demoRequest(method, path, { body, params } = {}) {
     const job = findJob(id);
     if (!job) throw notFound(`Unknown job id ${id}`);
     if (job.status !== "paused") throw conflict(`Job ${id} is not paused`);
+    // WP CAP-503-FIX-1b: a Resume during the hold (the demo always holds)
+    // overrides it for this job (operator decision 2026-11-21, Weg B).
+    job.pause_reason = null;
+    job.client_override = true;
     job.status = "running";
     job._demoTicksLeft = 2;
     return jobControlResponse(job, {
@@ -3267,6 +3354,9 @@ export async function demoRequest(method, path, { body, params } = {}) {
   }
   if (method === "GET" && path === "/v1/schedule") {
     return handleGetSchedule();
+  }
+  if (method === "GET" && path === "/v1/client-priority") {
+    return handleGetClientPriority();
   }
 
   if (method === "GET" && path === "/v1/steam/key") {

@@ -5,6 +5,7 @@ import dev.steamvault.app.net.model.CacheDeletionOut
 import dev.steamvault.app.net.model.CacheSummaryOut
 import dev.steamvault.app.net.model.ClientsOverviewOut
 import dev.steamvault.app.net.model.ClientOut
+import dev.steamvault.app.net.model.ClientPriorityOut
 import dev.steamvault.app.net.model.DeletePlanOut
 import dev.steamvault.app.net.model.GameDetail
 import dev.steamvault.app.net.model.GameSummary
@@ -76,6 +77,7 @@ class DemoJobsRepository(private val state: DemoState) : JobsRepository {
     override suspend fun pause(id: Int): JobControlOut = state.controlJob(id, JobControlAction.PAUSE)
     override suspend fun resume(id: Int): JobControlOut = state.controlJob(id, JobControlAction.RESUME)
     override suspend fun moveJob(id: Int, position: Int): JobMoveOut = state.moveJob(id, position)
+    override suspend fun clientPriority(): ClientPriorityOut = state.clientPriority()
 }
 
 class DemoCacheRepository(private val state: DemoState) : CacheRepository {
