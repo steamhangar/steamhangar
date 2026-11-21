@@ -2518,6 +2518,16 @@ need no change; C-26 stays with its rc22 nit.
 
 ### Low findings (nits)
 
+Follow-up of the rc23 wave 2 reviews (2026-11-21), rc24:
+- CAP503-NITS-1 (web + app) Android keeps polling `GET /v1/client-priority`
+  every 5 s on a pre-v34 server (404) while a job is active; stop for the
+  rest of the visit after a 404. A past `resume_at` (clock skew, tick lag)
+  still shows "at about HH:MM"; fall back to the no-time text when it is
+  more than ~30 s in the past.
+- DL-STATS-NITS-1 (api) the newest series bucket is averaged over its
+  elapsed seconds, but the caption names the bucket's full length; carry
+  the covered seconds in the series payload so the period is exact.
+
 Follow-up of CI-CLOCK-1 (review 2026-11-21):
 - CLOCK-SEAM-1 (freeze) four api handlers still read the wall clock with
   no injectable seam: `routers/clients.py:189` (`bypass_window_days`),
