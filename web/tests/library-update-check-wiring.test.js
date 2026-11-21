@@ -1,8 +1,8 @@
 /**
  * DOM-wiring pins for "Check updates" in `web/js/views/library.js` (WP
  * UPD-2). The decisions are pinned in update-check.test.js; this file proves
- * the view USES them against the real api.js -> fetch path: button
- * visibility per API generation, the POST, the busy state, polling to the
+ * the view USES them against the real api.js -> fetch path: the button
+ * (always shown, OLD-SERVER-FALLBACK-1; a 404 is an error toast), the POST, the busy state, polling to the
  * end, the games re-read, the badge, the "Updates" chip, the toast, and that
  * leaving the view stops polling.
  *
@@ -94,7 +94,8 @@ const RUNNING = {
 };
 
 const server = {
-  // "ok" = UPD-1 vault-api, "old" = no routes and no fields
+  // "ok" = the update routes answer; "404" = both routes answer 404 (an
+  // error of the same-release server, no longer an "older vault-api")
   mode: "ok",
   enabled: true,
   games: [vaultGame(10, "Vault Ten", { update_available: true }), vaultGame(30, "Vault Thirty")],
@@ -111,16 +112,12 @@ function respond(status, data) {
   const text = data === undefined ? "" : JSON.stringify(data);
   return { ok: status >= 200 && status < 300, status, json: async () => data, text: async () => text };
 }
-const strip = (g) => {
-  const { update_available, update_checked_at, ...rest } = g;
-  return rest;
-};
 globalThis.fetch = async (url, init = {}) => {
   const u = new URL(String(url));
   const p = u.pathname;
   const method = init.method || "GET";
   server.calls.set(`${method} ${p}`, count(`${method} ${p}`) + 1);
-  if (p === "/v1/games") return respond(200, server.mode === "ok" ? server.games : server.games.map(strip));
+  if (p === "/v1/games") return respond(200, server.games);
   if (p === "/v1/jobs") return respond(200, []);
   if (p === "/v1/clients") return respond(200, []);
   if (p === "/v1/cache/summary") return respond(200, { total_bytes: 0, top_consumers: [] });
@@ -198,11 +195,10 @@ test("LIBRARY-2: before GET /v1/updates/status answers, the primary half is show
   navigateTo("library");
   const s = renderLibrary();
   // Synchronously after the build, before any fetch settles.
-  assert.equal(updBtn(s).hidden, false, "the primary half is there from the first paint");
+  assert.notEqual(updBtn(s).hidden, true, "the primary half is there from the first paint");
   assert.equal(updBtn(s).textContent, "Check updates");
   assert.equal(updBtn(s).getAttribute("aria-disabled"), "true");
   assert.equal(s.querySelector(".lib-split").classList.contains("loading"), true);
-  assert.equal(s.querySelector(".lib-split").classList.contains("solo"), false);
   const before = count("POST /v1/updates/check");
   updBtn(s).dispatchEvent({ type: "click" });
   await tick(20);
@@ -216,7 +212,8 @@ test("UPD-1 vault-api: the button shows next to the unchanged 'Check & update' b
   server.enabled = true;
   server.statusQueue = [IDLE];
   const s = await openLibrary();
-  await until(() => updBtn(s).hidden === false, "button shown after the status read");
+  await until(() => updBtn(s).getAttribute("aria-disabled") === "false" && !updLine(s).hidden, "status read answered");
+  assert.notEqual(updBtn(s).hidden, true);
   const btns = s.querySelector(".lib-split").querySelectorAll("button").map((b) => b.dataset.action ?? "more");
   assert.deepEqual(btns, ["check-updates", "more", "check-and-update"]);
   assert.equal(updBtn(s).textContent, "Check updates");
@@ -238,7 +235,7 @@ test("WP WEB-FIX-UPD-VIS / DESIGN-NITS-1: toolbar search, tools, chips (DOM = ta
   server.enabled = true;
   server.statusQueue = [IDLE];
   const s = await openLibrary();
-  await until(() => updBtn(s).hidden === false, "button shown");
+  await until(() => updBtn(s).getAttribute("aria-disabled") === "false", "status read answered");
   const bar = s.querySelector(".lib-bar");
   // WP MOBILE-1b: the chip row also carries the overflow cue (scue + its state).
   assert.deepEqual(bar.children.map((c) => c.className.replace(/ scue( fits| at-start| at-end)*$/, "")), ["search lib-search", "lib-tools", "chips lib-chips"]);
@@ -279,7 +276,7 @@ test("press: POST once (no body), busy while running, polls to the end, re-reads
   server.enabled = true;
   server.statusQueue = [IDLE];
   const s = await openLibrary();
-  await until(() => updBtn(s).hidden === false, "button shown");
+  await until(() => updBtn(s).getAttribute("aria-disabled") === "false", "status read answered");
   server.statusQueue = [RUNNING, { ...IDLE, last_trigger: "manual", last_apps: 2, last_stale: 2 }];
   server.afterRun = () => {
     server.games = server.games.map((g) => ({ ...g, update_available: true }));
@@ -313,7 +310,7 @@ test("MUTATION PIN (detach): leaving Library while a check runs stops the status
   server.enabled = true;
   server.statusQueue = [IDLE];
   const s = await openLibrary();
-  await until(() => updBtn(s).hidden === false, "button shown");
+  await until(() => updBtn(s).getAttribute("aria-disabled") === "false", "status read answered");
   server.statusQueue = [RUNNING];
   updBtn(s).dispatchEvent({ type: "click" });
   await until(() => updBtn(s).getAttribute("aria-disabled") === "true", "busy");
@@ -334,49 +331,27 @@ test("oracle off: button visible but disabled, the line says why", async () => {
   const s = await openLibrary();
   // NITS-WEB-1: wait for THIS test's status answer (the line names it), not
   // just a shown button: the previous test's state also shows the button.
-  await until(() => updBtn(s).hidden === false && /manifest oracle is disabled/.test(updLine(s).textContent), "button shown, oracle-off line");
+  await until(() => /manifest oracle is disabled/.test(updLine(s).textContent), "oracle-off line");
+  assert.notEqual(updBtn(s).hidden, true, "visible, only disabled");
   assert.equal(updBtn(s).disabled, true);
   assert.match(updLine(s).textContent, /manifest oracle is disabled/);
   server.enabled = true;
 });
 
-test("older vault-api (404, no update fields): no button, no line, no 'Updates' chip, no badge — and the old button still works", async () => {
-  server.mode = "old";
+test("OLD-SERVER-FALLBACK-1: a 404 from the update routes is an error — the button and the 'Updates' chip stay, a press toasts the server's detail", async () => {
+  server.mode = "404";
+  const before = statusReads();
   const s = await openLibrary();
-  await until(() => statusReads() > 0 && updBtn(s).hidden === true, "probe answered");
-  // The grid still holds the previous tick's rows; the next games poll
-  // brings the field-less ones.
-  store.refreshNow();
-  await until(() => !chipKeys(s).includes("updates"), "games re-read without the field");
+  await until(() => statusReads() > before, "status read answered 404");
   await tick(30);
-  assert.equal(updBtn(s).hidden, true);
-  assert.equal(updLine(s).hidden, true);
-  assert.equal(chipKeys(s).includes("updates"), false);
-  assert.equal(s.querySelectorAll(".updbadge").length, 0);
-  const oldBtn = s.querySelector('[data-action="check-and-update"]');
-  assert.ok(oldBtn, "'Check & update all cached games' unchanged");
-  assert.equal(oldBtn.hidden === true, false);
-  server.mode = "ok";
-});
-
-test("an 'Updates' filter whose chip vanished (API downgrade) falls back to 'All' instead of an empty grid", async () => {
-  server.mode = "ok";
-  server.games = [vaultGame(10, "Vault Ten", { update_available: true }), vaultGame(30, "Vault Thirty")];
-  const s = await openLibrary();
-  store.refreshNow();
-  await until(() => chip(s, "updates") !== null && chip(s, "updates").querySelector(".n").textContent === "1", "chip with the fresh rows");
-  pressChip(s, "updates");
-  assert.equal(chip(s, "updates").getAttribute("aria-pressed"), "true", "the filter really is active");
-  assert.deepEqual(s.querySelectorAll(".card").map((c) => Number(c.dataset.appid)), [10], "only the flagged card");
-  server.mode = "old";
-  store.refreshNow();
-  await until(() => !chipKeys(s).includes("updates"), "chip gone");
-  assert.deepEqual(
-    s.querySelectorAll(".card").map((c) => Number(c.dataset.appid)).sort((a, b) => a - b),
-    [10, 30],
-    "MUTATION PIN: back to every card, not an empty grid filtered by an invisible chip",
-  );
-  assert.equal(chip(s, "all").getAttribute("aria-pressed"), "true");
+  assert.notEqual(updBtn(s).hidden, true, "MUTATION PIN: a 404 never hides the button");
+  assert.equal(updBtn(s).getAttribute("aria-disabled"), "false", "pressable");
+  assert.equal(chipKeys(s).includes("updates"), true, "the chip does not depend on the routes");
+  updBtn(s).dispatchEvent({ type: "click" });
+  await until(() => count("POST /v1/updates/check") > 0 && toastText.textContent === "Not Found", "error toast");
+  assert.equal(toastEl.classList.contains("warn"), true);
+  assert.equal(updBtn(s).getAttribute("aria-disabled"), "false", "button free again");
+  assert.ok(s.querySelector('[data-action="check-and-update"]'), "'Check & update all cached games' unchanged");
   server.mode = "ok";
 });
 
@@ -387,7 +362,7 @@ test("LIBRARY-1: split caret opens the menu (aria-expanded), Escape closes; the 
   server.enabled = true;
   server.statusQueue = [IDLE];
   const s = await openLibrary();
-  await until(() => updBtn(s).hidden === false, "button shown");
+  await until(() => updBtn(s).getAttribute("aria-disabled") === "false", "status read answered");
   const more = s.querySelector(".split-more");
   const menu = s.querySelector(".lib-split .menu");
   assert.equal(more.getAttribute("aria-label"), "More update actions");
@@ -399,20 +374,6 @@ test("LIBRARY-1: split caret opens the menu (aria-expanded), Escape closes; the 
   dom.document.dispatchEvent({ type: "keydown", key: "Escape", preventDefault() {}, stopPropagation() {} });
   assert.equal(menu.hidden, true);
   assert.equal(dom.document.activeElement, more);
-  assert.equal(s.querySelector(".lib-split").classList.contains("solo"), false);
-});
-
-test("LIBRARY-1: without the primary (older vault-api) the caret stays as the only way to 'Check & update all'", async () => {
-  server.mode = "old";
-  const s = await openLibrary();
-  await tick(30);
-  assert.equal(updBtn(s).hidden, true);
-  assert.equal(s.querySelector(".lib-split").classList.contains("solo"), true);
-  assert.ok(s.querySelector(".split-more"), "caret still there");
-  const label = s.querySelector(".split-more").getAttribute("aria-label");
-  assert.match(label, /^Updates/, "WCAG 2.5.3: the name contains the visible word");
-  assert.ok(s.querySelector('.lib-split [data-action="check-and-update"]'));
-  server.mode = "ok";
 });
 
 test("LIBRARY-1: Select button is labelled, replaces the long-press hint, and toggles select mode", async () => {
@@ -452,14 +413,13 @@ test("LIBRARY-1: the tools live in the toolbar row in order sort, layout, filter
   );
 });
 
-test("LIBRARY-1/2: css pins — popover hidden guard, solo label, one status line with separators", async () => {
+test("LIBRARY-1/2: css pins — popover hidden guard, no caret-only label (OLD-SERVER-FALLBACK-1), one status line with separators", async () => {
   const { readFileSync } = await import("node:fs");
   const strip = (t) => t.replace(/\/\*[\s\S]*?\*\//g, "");
   const app = strip(readFileSync(new URL("../css/app.css", import.meta.url), "utf8"));
   const kit = strip(readFileSync(new URL("../css/kit.css", import.meta.url), "utf8"));
   assert.match(app, /\.pop\[hidden\]\{\s*display:none;/);
-  assert.match(kit, /\.kit \.lib-split \.split-lbl\{ display:none; \}/);
-  assert.match(kit, /\.kit \.lib-split\.solo \.split-lbl\{ display:inline; \}/);
+  assert.doesNotMatch(kit, /split-lbl|\.lib-split\.solo/);
   assert.match(kit, /\.kit \.lib-stat > \*:not\(\[hidden\]\):not\(:empty\) ~ \*:not\(\[hidden\]\):not\(:empty\)::before\{\s*content:"·";/);
   assert.match(kit, /\.kit \.lib-stat\{[^}]*font-size:var\(--fs-3\)[^}]*color:var\(--dim\)/);
 });

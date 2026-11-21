@@ -9,7 +9,7 @@
  *   - 409 / 422 / any other relay failure sends no PATCH and shows the
  *     shared strings;
  *   - 0 games (private profile) still saves and shows the private hint;
- *   - read-only settings or an older vault-api without the setting send no
+ *   - read-only settings or a settings answer without the setting send no
  *     PATCH and say "Not saved";
  *   - the input is pre-filled from the stored value;
  *   - review round (FAIL on test gaps): a failed PATCH (500, 422) says
@@ -31,7 +31,7 @@ import { resetModalStack } from "../js/lib/modal-stack.js";
 import {
   INVALID_STEAMID64_MESSAGE,
   LIBRARY_SETTING_ENV_ONLY_MESSAGE,
-  LIBRARY_SETTING_ABSENT_MESSAGE,
+  LIBRARY_SETTING_MISSING_MESSAGE,
   NO_STEAM_KEY_MESSAGE,
   PRIVATE_PROFILE_MESSAGE,
   SETTINGS_READONLY_MESSAGE,
@@ -270,13 +270,14 @@ test("read-only settings: lookup works, no PATCH, says not saved", async () => {
   assert.ok(step2Text().includes("1 games found."), "the lookup result is still shown");
 });
 
-test("older vault-api without the setting: lookup works, no PATCH, says not saved", async () => {
+test("a settings answer without the setting: lookup works, no PATCH, says not saved (neutral reason, OLD-SERVER-FALLBACK-1)", async () => {
   server.hasSetting = false;
   await toStep2();
   await lookUp(STEAMID);
   assert.equal(ownedCalls().length, 1);
   assert.deepEqual(patches(), [], "MUTATION TARGET: an absent setting must not be PATCHed");
-  assert.equal(saveText(), `Not saved: ${LIBRARY_SETTING_ABSENT_MESSAGE} The lookup above still worked.`);
+  assert.equal(saveText(), `Not saved: ${LIBRARY_SETTING_MISSING_MESSAGE} The lookup above still worked.`);
+  assert.doesNotMatch(saveText(), /newer version|older/);
 });
 
 test("the input is pre-filled from the stored value, and a fresh open clears it", async () => {

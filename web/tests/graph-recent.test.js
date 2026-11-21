@@ -85,7 +85,7 @@ test("MUTATION TARGET: mergeNow takes current, the runner flag and Loading now f
 });
 
 test("mergeNow leaves an answer without a usable now block alone", () => {
-  const old = answer(); // a server before rc21
+  const old = answer(); // no now block
   assert.equal(mergeNow(old), old);
   const nul = answer({ now: null }); // feed not ok on the server
   assert.equal(mergeNow(nul), nul);
@@ -137,7 +137,7 @@ test("MUTATION TARGET: Loading now is worded with the live window, the swept one
   assert.match(tile.title, /^Machines the cache served in the last 18 seconds \(the window of "Current speed"\)\./);
   assert.equal(clientDownloadingRow(live).detail, "2 machines served by the cache in the last 18 s");
   assert.match(devicesLoading(live).title, /^2 machines served by the cache in the last 18 s\./);
-  // Swept (an older server): unchanged words, minutes.
+  // Swept (no now block): unchanged words, minutes.
   const swept = answer();
   assert.equal(activeWindowSeconds(swept), null);
   assert.equal(headerTiles(swept).find((t) => t.key === "clients").detail, "machines with cache traffic in the last 15 min");

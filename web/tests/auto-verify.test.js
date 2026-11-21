@@ -74,7 +74,7 @@ test("the incomplete note says manual only while automatic completion is off", (
   assert.match(incompleteScheduleNote(on), /^These complete automatically in the schedule window /);
   assert.equal(incompleteScheduleNote({ ...on, auto_complete_cached: false }), AUTO_COMPLETE_OFF_NOTE);
   assert.equal(AUTO_COMPLETE_OFF_NOTE, "Manual only — automatic completion is off in Settings.");
-  // An older server without the field kept completing in the window.
+  // A missing value is not read as "off" (only an explicit false is).
   const { auto_complete_cached: _drop, ...old } = on;
   assert.match(incompleteScheduleNote(old), /^These complete automatically/);
   // No window wins: manual only for the window reason.

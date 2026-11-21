@@ -19,6 +19,7 @@
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import { createFakeDom } from "./fake-dom.js";
+import { throughputFixture } from "./throughput-fixture.js";
 
 const dom = createFakeDom();
 globalThis.document = dom.document;
@@ -61,6 +62,9 @@ globalThis.fetch = async (url) => {
   if (u.pathname === "/v1/games") return respond(200, []);
   if (u.pathname === "/v1/clients") return respond(200, CLIENTS);
   if (u.pathname === "/v1/cache/summary") return respond(200, {});
+  // Statistics: a real, feed-off answer (never a 404, OLD-SERVER-FALLBACK-1).
+  const stats = throughputFixture(new URL(String(url)));
+  if (stats) return respond(200, stats);
   return respond(404, { detail: "Not Found" });
 };
 
@@ -70,9 +74,11 @@ await import("../js/components/bypass-banner.js");
 const { setConnectionLost } = await import("../js/connection-status.js");
 const { OFFLINE_CONTROL_TITLE } = await import("../js/lib/connection-watch.js");
 
-after(() => {
+after(async () => {
   store.stop();
   setConnectionLost(false);
+  // The statistics poll runs while the view is mounted: leave the view.
+  (await import("../js/router.js")).navigateTo("library");
 });
 
 const tick = (ms = 20) => new Promise((r) => setTimeout(r, ms));

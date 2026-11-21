@@ -201,7 +201,7 @@ test("MUTATION TARGET -- installedBadgeState: empty installed_on is NONE regardl
   assert.equal(installedBadgeState(game({ installed_on: [], size_bytes: null })), INSTALLED_BADGE.NONE);
 });
 
-test("installedBadgeState: missing installed_on field (older fixture, pre-AG-1) is also NONE, not a throw", () => {
+test("installedBadgeState: missing installed_on field (malformed row) is also NONE, not a throw", () => {
   assert.equal(installedBadgeState(game({})), INSTALLED_BADGE.NONE);
 });
 

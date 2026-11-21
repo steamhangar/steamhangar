@@ -438,3 +438,19 @@ Q8 named the addenda Weg A needs: the threat model (outbound flows, item 2),
 api/README.md and both `.env.example` privacy texts are updated in the same
 package; ADR-0006 (2026-10-13 addendum point 3) and ADR-0011 (the
 2026-10-13 note) carry a pointer note below their existing text.
+
+## Addendum 2026-11-21 — the web drops the "old server" direction (WP OLD-SERVER-FALLBACK-1)
+
+Design §1 "Compatibility, both directions" asked each platform for a test
+that feeds a pre-TOOL-APPS-2 `GET /v1/games` response. Its own last point
+says why the web never needed it: the web UI ships inside vault-api's
+image, so web and API always match. Audit 2026-11-20 finding U-1 found the
+web full of such "older server" branches, and the operator decided Weg A
+(2026-11-21): the web assumes the API of its own release, feature by
+feature, and keeps no older-server fallbacks or strip tests. The web's two
+ADR-0022 tests now feed rows with `parent_appid: null` instead of rows
+without the field (`web/tests/content-groups.test.js`,
+`web/tests/library-groups-wiring.test.js`). The Android app is unchanged:
+it updates independently of the server, so its decoder defaults and its
+pre-TOOL-APPS-2 test stay. The "new server, old client" direction is
+unaffected on both platforms.

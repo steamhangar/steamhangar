@@ -42,7 +42,7 @@ function agentClient(over = {}) {
     last_active: iso(8 * 60_000),
     installed_app_count: 24,
     stats: { bytes_served: 38.2 * GIB, hits: 98, misses: 2, hit_rate: 0.98 },
-    loading_now: { loading: false, bytes_per_second: 0, apps: [] },
+    live_now: { loading: false, bytes_per_second: 0, apps: [] },
     recent_apps: [
       { appid: 1, name: "Satisfactory", bytes_served: 24.8 * GIB },
       { appid: 2, name: "The Riftbreaker", bytes_served: 10.3 * GIB },
@@ -69,7 +69,7 @@ function runnerClient(over = {}) {
     last_active: iso(9 * 60_000),
     installed_app_count: null,
     stats: { bytes_served: 491 * GIB, hits: 77, misses: 23, hit_rate: 0.77 },
-    loading_now: { loading: true, bytes_per_second: 28.8 * MIB, apps: [{ appid: 9, name: "HELLDIVERS 2" }] },
+    live_now: { loading: true, bytes_per_second: 28.8 * MIB, apps: [{ appid: 9, name: "HELLDIVERS 2" }] },
     recent_apps: [{ appid: 9, name: "HELLDIVERS 2", bytes_served: 50 * GIB }],
     recent_unattributed_bytes: 17 * GIB,
     name: null,
@@ -114,9 +114,9 @@ test("MUTATION TARGET: pills by state", () => {
   const runner = pill(runnerClient());
   assert.equal(runner.textContent, "Downloading");
   assert.match(runner.className, /\bpill run\b/);
-  assert.equal(pill(runnerClient({ loading_now: { loading: false, apps: [] } })).textContent, "Online");
-  assert.equal(pill(runnerClient({ connected: false, loading_now: { loading: false, apps: [] } })).textContent, "Offline");
-  assert.equal(pill(runnerClient({ connected: null, loading_now: null })).textContent, "No current data");
+  assert.equal(pill(runnerClient({ live_now: { loading: false, apps: [] } })).textContent, "Online");
+  assert.equal(pill(runnerClient({ connected: false, live_now: { loading: false, apps: [] } })).textContent, "Offline");
+  assert.equal(pill(runnerClient({ connected: null, live_now: null })).textContent, "No current data");
 });
 
 test("MUTATION TARGET: the outdated pill and box appear only when the versions differ", () => {
@@ -162,7 +162,7 @@ test("MUTATION TARGET: idle vs loading box", () => {
   const idle = q(render(agentClient()), "loading-now");
   assert.equal(idle.className, "now idle");
   assert.equal(idle.textContent, "Loading nothing right now");
-  const unknown = q(render(agentClient({ loading_now: null })), "loading-now");
+  const unknown = q(render(agentClient({ live_now: null })), "loading-now");
   assert.equal(unknown.className, "now idle");
   assert.equal(unknown.textContent, "Loading now: —", "no current data: the dash, not 'nothing'");
   const busy = q(render(runnerClient()), "loading-now");
@@ -170,7 +170,7 @@ test("MUTATION TARGET: idle vs loading box", () => {
   assert.equal(text(busy, "b"), "HELLDIVERS 2");
   assert.equal(text(busy, "span"), "Loading into the cache");
   assert.equal(text(busy, ".spd"), "28.8 MB/s");
-  const unlinked = q(render(runnerClient({ loading_now: { loading: true, bytes_per_second: MIB, apps: [] } })), "loading-now");
+  const unlinked = q(render(runnerClient({ live_now: { loading: true, bytes_per_second: MIB, apps: [] } })), "loading-now");
   assert.equal(text(unlinked, "b"), "Content not linked to one game");
 });
 

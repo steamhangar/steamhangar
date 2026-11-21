@@ -45,6 +45,7 @@ function throughput({ state = "ok", current = 40 * MIB, runnerNow = 0, clients =
             bytes_served: 60 * GIB,
             hit_bytes: 50 * GIB,
             miss_bytes: 10 * GIB,
+            internet_bytes: 10 * GIB + (runner && runner.miss_bytes ? runner.miss_bytes : 0),
             byte_hit_rate: 50 / 60,
             average_bytes_per_second: 50 * MIB,
             peak_bytes_per_second: 100 * MIB,
@@ -108,7 +109,7 @@ test("MUTATION PIN (WP WEB-FIX-20.2): heroStatus — runner traffic is Downloadi
   assert.deepEqual(heroStatus({ bytes_per_second: 40 * MIB, runner_bytes_per_second: 6 * MIB }), { kind: "running", text: "Downloading", tone: "run" });
   assert.deepEqual(heroStatus({ bytes_per_second: 6 * MIB, runner_bytes_per_second: 6 * MIB }), { kind: "running", text: "Downloading", tone: "run" });
   assert.deepEqual(heroStatus({ bytes_per_second: 0, runner_bytes_per_second: 0 }), { kind: "notinuse", text: "Idle", tone: null });
-  // An older server without the runner part: traffic is still Serving.
+  // No runner part in the figure: traffic is Serving.
   assert.deepEqual(heroStatus({ bytes_per_second: 1 }), { kind: "cached", text: "Serving", tone: "ok" });
   assert.equal(heroStatus(null), null);
   assert.equal(heroStatus({ bytes_per_second: null }), null);
@@ -152,7 +153,7 @@ test("WP WEB-FIX-20.2: createDownloadsHero draws two series and a legend, or the
   assert.equal(hero.el.querySelector(".sec").textContent, "Throughput");
   const base = { event_feed: { state: "ok" }, range: "6h", bucket_seconds: 300, range_start: null };
   const points = [{ t: iso(600_000), bytes_per_second: 10 * MIB, bytes_served: 10, hit_bytes: 4 }, { t: iso(300_000), bytes_per_second: 20 * MIB, bytes_served: 10, hit_bytes: 10 }];
-  const state = { throughput: throughput(), series: { ...base, points }, range: "6h", rateCap: null, unsupported: false, error: null, noFigures: false };
+  const state = { throughput: throughput(), series: { ...base, points }, range: "6h", rateCap: null, error: null, noFigures: false };
   hero.paint(state);
   const classes = q("stats-graph").querySelectorAll("path").map((p) => p.getAttribute("class"));
   assert.deepEqual(classes, ["area net", "area srv", "line net", "line srv"], "served under internet, lines over fills");
@@ -166,11 +167,12 @@ test("WP WEB-FIX-20.2: createDownloadsHero draws two series and a legend, or the
   assert.equal(q("graph-legend"), null, "no legend without a split");
 });
 
-test("heroModel: no figures before an answer, with the feed off, or for an old server", () => {
+test("heroModel: no figures before an answer or with the feed off; no 'old server' state (OLD-SERVER-FALLBACK-1)", () => {
   assert.deepEqual(heroModel({}), { note: "Loading statistics…", figures: null });
   assert.equal(heroModel({ throughput: throughput({ state: "disabled" }) }).figures, null);
   assert.match(heroModel({ throughput: throughput({ state: "disabled" }) }).note, /^Traffic statistics are off/);
-  assert.match(heroModel({ unsupported: true }).note, /does not report traffic statistics/);
+  assert.equal(heroModel({ unsupported: true }).note, "Loading statistics…", "the old flag is ignored");
+  assert.equal(heroModel({ error: "Not Found" }).note, "Could not load the statistics: Not Found");
 });
 
 test("MUTATION PIN: graphModel — 600x96 geometry, highest caption (Android twin wording), null for another range, idle baseline for an all-zero series", () => {
@@ -206,7 +208,7 @@ test("createDownloadsHero: an idle series paints the grid, a baseline, the axis 
   const hero = createDownloadsHero({ range: "live", onRangeChange() {} });
   const q = (role) => hero.el.querySelector(`[data-role="${role}"]`);
   const series = { event_feed: { state: "ok" }, range: "live", bucket_seconds: 10, range_start: null, points: [] };
-  hero.paint({ throughput: { ...throughput({ current: 0, clients: 0 }), range: "live" }, series, range: "live", rateCap: null, unsupported: false, error: null, noFigures: false });
+  hero.paint({ throughput: { ...throughput({ current: 0, clients: 0 }), range: "live" }, series, range: "live", rateCap: null, error: null, noFigures: false });
   const graph = q("stats-graph");
   assert.equal(graph.hidden, false);
   assert.ok(graph.classList.contains("idle"));
@@ -226,7 +228,7 @@ test("createDownloadsHero: paint fills the card; the pill is rebuilt only when i
   // WP MOBILE-1b: the kit seg also carries the overflow cue (scue + its state).
   assert.equal(hero.rangeEl.className.replace(/ scue( fits| at-start| at-end)*$/, ""), "seg rangesegs");
   assert.ok(hero.rangeEl.classList.contains("scue"), "overflow cue wired");
-  const state = { throughput: throughput(), series: null, range: "6h", rateCap: null, unsupported: false, error: null, noFigures: false };
+  const state = { throughput: throughput(), series: null, range: "6h", rateCap: null, error: null, noFigures: false };
   hero.paint(state);
   assert.equal(q("stats-current").textContent, "40.0MB/s");
   assert.equal(q("stats-pill").textContent, "Serving");
@@ -242,7 +244,7 @@ test("createDownloadsHero: paint fills the card; the pill is rebuilt only when i
   assert.equal(q("stats-pill").textContent, "Idle");
   assert.equal(q("stats-grid").querySelectorAll(".tile").length, 4);
   assert.equal(q("stats-graph").hidden, true, "no series, no graph");
-  hero.paint({ ...state, throughput: null, noFigures: true, unsupported: true });
+  hero.paint({ ...state, throughput: null, noFigures: true });
   assert.equal(q("stats-live").hidden, true);
   assert.equal(hero.rangeEl.hidden, true);
 });

@@ -8,8 +8,8 @@
  *     "unknown"), vault-core OK/Check/Not reported against vault-api,
  *     vault-dns N/A, and every explanation behind a per-row (i)
  *     disclosure button, collapsed by default;
- *   - 404 shows the "server too old" note, not an error; a 401 (key refused,
- *     on any server version) and a 500 are an error line (review fix);
+ *   - a 401 (key refused), a 404 (no "server too old" note since
+ *     OLD-SERVER-FALLBACK-1: web and API ship together) and a 500 are an
  *     error line;
  *   - no polling: one `/v1/about` request per Settings mount, a second only
  *     on Refresh (whose role=status line then says what happened);
@@ -354,21 +354,17 @@ test("About: a dash cell names itself for screen readers ('Not reported'), the d
   assert.equal(real.querySelector("span.sr-only"), null, "a real value needs no extra label");
 });
 
-test("MUTATION TARGET: a 404 shows the 'server too old' note — not an error, no table", async () => {
+test("MUTATION TARGET: a 401, a 404 (OLD-SERVER-FALLBACK-1) and a 500 are all an error line, never a 'server too old' note", async () => {
   server.aboutStatus = 404;
-  const s = await mountSettings();
-  await until(() => s.querySelector('[data-role="about-too-old"]') !== null, "too-old note");
-  assert.match(textOf(s, '[data-role="about-too-old"]'), /older than this web UI/);
-  assert.equal(s.querySelector('[data-role="about-error"]') === null, true, "no error line");
-  assert.equal(s.querySelectorAll("tr.about-row").length, 0, "no table");
-});
-
-test("MUTATION TARGET: a 401 is an error line, never 'server too old' (with a valid key an old server says 404); so is a 500", async () => {
-  server.aboutStatus = 401;
   let s = await mountSettings();
+  await until(() => s.querySelector('[data-role="about-error"]') !== null, "error line on 404");
+  assert.equal(textOf(s, '[data-role="about-error"]'), "Could not load component versions: nope");
+  assert.equal(s.querySelector('[data-role="about-too-old"]') === null, true, "MUTATION PIN: no too-old note");
+  server.aboutStatus = 401;
+  s = await mountSettings();
   await until(() => s.querySelector('[data-role="about-error"]') !== null, "error line on 401");
   assert.match(textOf(s, '[data-role="about-error"]'), /^Could not load component versions: /);
-  assert.equal(s.querySelector('[data-role="about-too-old"]') === null, true, "a refused key is not an old server");
+  assert.equal(s.querySelector('[data-role="about-too-old"]') === null, true);
   server.aboutStatus = 500;
   s = await mountSettings();
   await until(() => s.querySelector('[data-role="about-error"]') !== null, "error line on 500");

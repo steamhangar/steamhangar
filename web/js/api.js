@@ -320,8 +320,8 @@ export const api = {
   cacheSummary: () => request("GET", "/v1/cache/summary", { timeoutMs: LONG_REQUEST_TIMEOUT_MS }),
   clients: () => request("GET", "/v1/clients"),
   // WP D15c: the Clients page and the Downloads header (WP D15b endpoints).
-  // `range` is 24h|7d|30d|all. A server older than D15b answers 404 (kind
-  // `not_found`), which the views read as "not supported by this server".
+  // `range` is 24h|7d|30d|all. A 404 is an error like any other
+  // (OLD-SERVER-FALLBACK-1: the routes ship with this web, ADR-0022).
   clientsOverview: (range) => request("GET", "/v1/clients/overview", { params: { range } }),
   throughput: (range) => request("GET", "/v1/throughput", { params: { range } }),
   throughputLive: () => request("GET", "/v1/throughput/live"),
@@ -351,8 +351,7 @@ export const api = {
     request("PATCH", "/v1/settings", { body, params: confirmRisky ? { confirm_risky: "true" } : undefined }),
   schedule: () => request("GET", "/v1/schedule"),
   // WP UPD-2: the always-on update check (WP UPD-1). No body; never starts a
-  // download. A vault-api older than UPD-1 answers 404 on both (kind
-  // `not_found`), which lib/update-check.js reads as "feature unsupported".
+  // download.
   checkUpdates: () => request("POST", "/v1/updates/check"),
   updatesStatus: () => request("GET", "/v1/updates/status"),
   getSteamKey: () => request("GET", "/v1/steam/key"),

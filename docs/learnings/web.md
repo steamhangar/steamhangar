@@ -130,7 +130,9 @@ at the end, under a dated heading, one entry each with the WP that proved it.
 - With a valid key an unknown /v1 route answers 404 (pre-auth guard), so
   only a 404 means "server too old"; a 401 is always a bad or rotated
   key. A UI that reads 401 as "update the server" sends the operator to
-  the wrong fix (WP WEB-FEAT-3).
+  the wrong fix (WP WEB-FEAT-3). Since OLD-SERVER-FALLBACK-1 (2026-11-21)
+  only Android reads a 404 as "server too old"; the web treats it as an
+  error.
 
 ## 2026-10-09/10 — rc13 night run (CORE-FIX-4d, WEB-FEAT-6, DEPS-1, HYG-1, WEB-FIX-10, AGENT-FIX-3)
 - Without an API phase field, "Updating" and "Verifying" derive from
@@ -190,8 +192,21 @@ at the end, under a dated heading, one entry each with the WP that proved it.
   next branch right after each merge.
 
 ## 2026-10-31 — rc21 (GRAPH-RECENT-1, LOADING-NOW-1)
-- **Optional split fields need a "field missing" fallback and a test that
-  strips them** and expects the old output (older server, Android twin).
+- **No "older server" fallbacks in the web; Android keeps its own**
+  (amended 2026-11-21, OLD-SERVER-FALLBACK-1, audit U-1). Web and API ship
+  together in vault-api's image (ADR-0022), so the web assumes the API of
+  the same release: no "field missing" branches or tests that strip fields
+  to expect an old output, no 404 read as "server too old" or "feature
+  unsupported" (a 404 is an error like any other). A null the API
+  documents (feed off, nothing measured) still gets its dash, and a
+  malformed value its guard. The Android app updates independently of the
+  server, so it keeps its fallbacks and their strip tests; a web literal an
+  Android twin test pins stays in the web file with a "kept for twin pin"
+  comment. Test harnesses that answered 404 for an unrouted endpoint relied
+  on the old "404 stops the poll" path; they now leave the view in
+  `after()`. (Was, rc21: "Optional split fields need a 'field missing'
+  fallback and a test that strips them and expects the old output (older
+  server, Android twin)".)
 - **Async UI flows need a per-flow token.** A dialog flow guarded only by
   its state kind ("CHECKING") accepts a late answer of an earlier, closed
   flow for another game; tie every answer to the flow that sent it

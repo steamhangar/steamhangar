@@ -71,9 +71,8 @@ const KNOWN_STATUSES = new Set(["queued", "running", "paused", "done", "error", 
 /**
  * Queue draw order (WP D20), a total order: rows carrying the server's
  * `queue_position` (0 = runs next, api/README.md "Queue order") come first by
- * position, rows without one follow, and ties break by oldest id. A snapshot
- * from an older API has no `queue_position`, so it renders as the legacy
- * oldest-id-first FIFO.
+ * position, rows without one follow, and ties break by oldest id (a row
+ * whose `queue_position` is null keeps the oldest-id-first FIFO).
  */
 function byQueueOrder(a, b) {
   const pa = Number.isInteger(a.queue_position) ? a.queue_position : null;
@@ -173,7 +172,7 @@ const GC_WORD = Object.freeze({
 /** A finished DRY-RUN GC job (`gc_execute === false`) deleted nothing, so
  * "Garbage collected" would claim the opposite (WP PAUSE-ALL-GC-1, prod
  * 2026-11-01). Only an explicit `false` gets it: an execute job (`true`)
- * and a row without the field (older server) keep "Garbage collected". */
+ * and a row with `gc_execute: null` keep "Garbage collected". */
 export const GC_DRY_RUN_DONE_WORD = "GC dry run (nothing deleted)";
 
 /**

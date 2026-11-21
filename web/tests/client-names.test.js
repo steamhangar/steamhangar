@@ -21,6 +21,7 @@ import {
   isNameAlreadyGone,
   normalizeClientName,
   renameErrorText,
+  RENAME_UNSUPPORTED_TEXT,
   renameHint,
 } from "../js/lib/client-names.js";
 import {
@@ -28,6 +29,7 @@ import {
   historyDeleteButtonText,
   historyDeleteErrorText,
   historyDeletedText,
+  HISTORY_DELETE_UNSUPPORTED_TEXT,
   isHistoryScope,
 } from "../js/lib/history-delete.js";
 import { clientKindText, clientName } from "../js/lib/clients-page.js";
@@ -79,7 +81,7 @@ test("MUTATION TARGET: operator text is wrapped in first-strong isolates in titl
 test("canRename / hasCustomName read the server's fields only", () => {
   assert.equal(canRename({ name_addr: "10.0.0.5" }), true);
   assert.equal(canRename({ name_addr: null }), false);
-  assert.equal(canRename({}), false, "a server older than D15-NAMES: no Rename");
+  assert.equal(canRename({}), false, "no name_addr: no Rename");
   assert.equal(hasCustomName({ name: "Desk" }), true);
   assert.equal(hasCustomName({ name: null }), false);
 });
@@ -95,13 +97,12 @@ test("the hint names the address and, for an agent, the PC name it keeps reporti
   );
 });
 
-test("MUTATION TARGET: only the handler's own 404 means 'already removed'; another 404 is an old server", () => {
+test("MUTATION TARGET: only the handler's own 404 means 'already removed'; another 404 is a plain error (OLD-SERVER-FALLBACK-1)", () => {
   assert.equal(isNameAlreadyGone(notFound("No name stored for '10.0.0.5'")), true);
   assert.equal(isNameAlreadyGone(notFound("Not Found")), false);
-  assert.equal(
-    renameErrorText(notFound("Not Found")),
-    "This server cannot store client names yet. Update vault-api to rename clients.",
-  );
+  assert.equal(renameErrorText(notFound("Not Found")), "Could not save the name: Not Found");
+  // Kept only for the Android twin pin; the web never shows it.
+  assert.equal(RENAME_UNSUPPORTED_TEXT, "This server cannot store client names yet. Update vault-api to rename clients.");
   const bad = new ApiError(ERROR_KINDS.VALIDATION, "x", { status: 422, detail: "name must not be empty" });
   assert.equal(renameErrorText(bad), "Could not save the name: name must not be empty");
 });
@@ -117,9 +118,9 @@ test("MUTATION TARGET: the card title is the server's display_name; the kind lin
   assert.equal(clientName(addr), "frame");
   assert.equal(clientKindText(addr), "No agent · 10.0.0.9 · seen in the cache log");
   assert.equal(clientKindText({ ...addr, name: null, display_name: "10.0.0.9" }), "No agent · seen in the cache log");
-  // A server older than D15-NAMES: no display_name, the old rule.
-  assert.equal(clientName({ kind: "agent", client_id: "DEMON", addresses: [] }), "DEMON");
-  assert.equal(clientName({ kind: "address", addresses: ["10.0.0.9"] }), "10.0.0.9");
+  // No display_name: the dash, no pre-D15-NAMES rule (OLD-SERVER-FALLBACK-1).
+  assert.equal(clientName({ kind: "agent", client_id: "DEMON", addresses: [] }), "\u2014");
+  assert.equal(clientName({ kind: "address", addresses: ["10.0.0.9"] }), "\u2014");
 });
 
 test("history delete: two variants, the safe one first; wording per variant", () => {
@@ -140,5 +141,7 @@ test("history delete: two variants, the safe one first; wording per variant", ()
     historyDeletedText({ scope: "older-than-30d", jobs_deleted: 12 }),
     "History older than 30 days deleted: 12 finished downloads and the traffic statistics from that time.",
   );
-  assert.equal(historyDeleteErrorText(notFound("Not Found")), "This server cannot delete history yet. Update vault-api to use this.");
+  // OLD-SERVER-FALLBACK-1: a 404 is a plain error; the old note stays only for the Android twin pin.
+  assert.equal(historyDeleteErrorText(notFound("Not Found")), "Could not delete history: Not Found");
+  assert.equal(HISTORY_DELETE_UNSUPPORTED_TEXT, "This server cannot delete history yet. Update vault-api to use this.");
 });

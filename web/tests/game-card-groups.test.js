@@ -65,7 +65,7 @@ test("no warning without a failed package; a plain card has no line and an empty
 
 test("MUTATION TARGET -- the size shown is the server's group_size_bytes (parent's own size without the field), and a patch keeps it (and the aria fragment) in sync", () => {
   const unknown = buildCard(group(), { ...ctx, failedPackageCount: 1 });
-  assert.equal(unknown.querySelector(".meta .size").textContent, "2.0 GB", "older server: the parent's own size");
+  assert.equal(unknown.querySelector(".meta .size").textContent, "2.0 GB", "no group_size_bytes: the parent's own size");
   patchCardVolatile(unknown, group(2.4 * GIB), "cached");
   assert.equal(unknown.querySelector(".meta .size").textContent, "2.4 GB");
   assert.equal(unknown.querySelector(".cap .sz").textContent, "2.4 GB");

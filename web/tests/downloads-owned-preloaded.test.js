@@ -10,7 +10,8 @@
  */
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
-import { createFakeDom, fakeClickEvent } from "./fake-dom.js";
+import { createFakeDom } from "./fake-dom.js";
+import { throughputFixture } from "./throughput-fixture.js";
 
 const dom = createFakeDom();
 globalThis.document = dom.document;
@@ -90,6 +91,9 @@ globalThis.fetch = async (url, init = {}) => {
     const j = server.jobs.find((x) => x.id === id);
     return j ? respond(200, { ...j, log_excerpt: server.excerpts[id] ?? null }) : respond(404, { detail: "Unknown job" });
   }
+  // Statistics: a real, feed-off answer (never a 404, OLD-SERVER-FALLBACK-1).
+  const stats = throughputFixture(new URL(String(url)));
+  if (stats) return respond(200, stats);
   return respond(404, { detail: "Not Found" });
 };
 
@@ -98,7 +102,11 @@ const { renderDownloads } = await import("../js/views/downloads.js");
 const { ownedLibrary } = await import("../js/owned-singleton.js");
 const { OWNED_STATUS } = await import("../js/lib/owned-library.js");
 
-after(() => store.stop());
+after(async () => {
+  store.stop();
+  // The statistics poll runs while the view is mounted: leave the view.
+  (await import("../js/router.js")).navigateTo("library");
+});
 
 const tick = (ms = 15) => new Promise((r) => setTimeout(r, ms));
 async function until(pred, label, timeoutMs = 2000) {

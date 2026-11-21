@@ -11,9 +11,9 @@
  *    operator-set name when there is one, else the agent's PC name, else
  *    the address. Without an operator-set name an address client is named
  *    by its address: the event log carries IPs only (no reverse DNS by
- *    design), so the page does not invent one. A server older than
- *    D15-NAMES sends no `display_name`; the title then falls back to the
- *    pre-D15-NAMES rule.
+ *    design), so the page does not invent one. The server builds that name
+ *    (`display_name`, always sent since D15-NAMES; no pre-D15-NAMES
+ *    fallback since OLD-SERVER-FALLBACK-1).
  *  - When an operator-set name replaces the title, the line under it keeps
  *    what it replaced (the agent's PC name, or the address), so the machine
  *    stays recognisable.
@@ -31,8 +31,10 @@
  *    prints.
  *  - "Loading now" (the card's now box, the pill's "Downloading", the
  *    "N loading now" tile) reads `currentLoading`: the server's live
- *    `live_now` (WP CLIENTS-LIVE-1, seconds old), else the swept
- *    `loading_now` (servers before rc21, or no live data for the row).
+ *    `live_now` (WP CLIENTS-LIVE-1, seconds old). No fallback to the swept
+ *    `loading_now` since OLD-SERVER-FALLBACK-1: the server of the same
+ *    release always sends `live_now` (null only with the feed off, when
+ *    `loading_now` is null too).
  */
 
 import { formatAgo } from "./format.js";
@@ -62,17 +64,15 @@ export function isAddressClient(client) {
 }
 
 /**
- * The card's title: the server's `display_name` (an operator-set name wins),
- * else the agent's client_id, or the address.
+ * The card's title: the server's `display_name` (an operator-set name wins
+ * there, else the agent's client_id, else the address); the dash when it is
+ * not a non-empty string.
  * @param {object} client
  * @returns {string}
  */
 export function clientName(client) {
   if (typeof client.display_name === "string" && client.display_name) return client.display_name;
-  if (isAgentClient(client) && typeof client.client_id === "string" && client.client_id) return client.client_id;
-  if (Array.isArray(client.addresses) && client.addresses[0]) return client.addresses[0];
-  const key = typeof client.key === "string" ? client.key : "";
-  return key.startsWith("addr:") ? key.slice(5) : key || DASH;
+  return DASH;
 }
 
 /**
@@ -107,15 +107,15 @@ export function clientKindText(client) {
 
 /**
  * What a client is loading now (WP CLIENTS-LIVE-1): `live_now` from the
- * server's live tier when it sent one, else the swept `loading_now` (up to
- * one event-log sweep old). Same shape either way; `null` = no current data.
+ * server's live tier; `null` = no current data (feed off). The swept
+ * `loading_now` is not read (OLD-SERVER-FALLBACK-1).
  * @param {object} client
  * @returns {object | null}
  */
 export function currentLoading(client) {
   if (!client) return null;
   if (client.live_now) return client.live_now;
-  return client.loading_now || null;
+  return null;
 }
 
 /** Name of an app in a list: the server's name, else the neutral "Unknown app" (never a bare id). */
@@ -310,7 +310,7 @@ export function compareReleaseVersions(a, b) {
  * With a bundled agent the check uses it: `same_build` (component version,
  * build stamp, the server's alias list for identical builds) is current,
  * below `minimum` needs an update, anything else differs. Without one (a
- * server before 1b, a local build) it falls back to the server version.
+ * local build without a bundled agent) it falls back to the server version.
  * @param {unknown} serverVersion
  * @param {unknown} clients
  * @returns {{server: string | null, bundled: string | null, minimum: string | null, same: string[]}}

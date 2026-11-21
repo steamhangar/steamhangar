@@ -35,7 +35,7 @@ import {
   NO_STEAM_KEY_MESSAGE,
   INVALID_STEAMID64_MESSAGE,
   PRIVATE_PROFILE_MESSAGE,
-  LIBRARY_SETTING_ABSENT_MESSAGE,
+  LIBRARY_SETTING_MISSING_MESSAGE,
   LIBRARY_SETTING_ENV_ONLY_MESSAGE,
   SETTINGS_READONLY_MESSAGE,
   SAVE_OUTCOME,
@@ -298,7 +298,7 @@ test("G5 MUTATION PIN: the library SteamID is read from GET /v1/settings only as
   assert.equal(steamIdFromSettings(resp("")), "");
   assert.equal(steamIdFromSettings(resp(76561198042117900)), "", "a JSON number is already rounded — never used");
   assert.equal(steamIdFromSettings(resp(null)), "");
-  assert.equal(steamIdFromSettings({ settings: [{ key: "vault_name", effective: "v" }] }), "", "an older server without the key");
+  assert.equal(steamIdFromSettings({ settings: [{ key: "vault_name", effective: "v" }] }), "", "an answer without the key");
   assert.equal(steamIdFromSettings(null), "");
 });
 
@@ -466,7 +466,7 @@ test("saveLibrarySteamId: INVALID never PATCHes", async () => {
   assert.deepEqual(api.bodies, [], "MUTATION TARGET: the validation guard");
 });
 
-test("saveLibrarySteamId: UNCHANGED, READONLY, ABSENT, ENV_ONLY send nothing; blank is an empty-string override", async () => {
+test("saveLibrarySteamId: UNCHANGED, READONLY, a missing setting (ERROR), ENV_ONLY send nothing; blank is an empty-string override", async () => {
   const api = recordingApi();
   assert.deepEqual(await saveLibrarySteamId(api, settingsWith({ effective: STEAMID, source: "db" }), STEAMID), {
     outcome: SAVE_OUTCOME.UNCHANGED,
@@ -476,8 +476,8 @@ test("saveLibrarySteamId: UNCHANGED, READONLY, ABSENT, ENV_ONLY send nothing; bl
     error: SETTINGS_READONLY_MESSAGE,
   });
   assert.deepEqual(await saveLibrarySteamId(api, settingsWith(null), STEAMID), {
-    outcome: SAVE_OUTCOME.ABSENT,
-    error: LIBRARY_SETTING_ABSENT_MESSAGE,
+    outcome: SAVE_OUTCOME.ERROR,
+    error: LIBRARY_SETTING_MISSING_MESSAGE,
   });
   assert.deepEqual(await saveLibrarySteamId(api, settingsWith({ env_only: true }), STEAMID), {
     outcome: SAVE_OUTCOME.ENV_ONLY,

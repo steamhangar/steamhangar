@@ -5,11 +5,12 @@
  * The runner gets fake timers (a manual queue), a gated fake POST and a
  * scripted fake status reader, so every guarantee is checked without a
  * browser and without waiting on real time:
- *   - POST outcomes started / already_running / disabled / 404 / error
+ *   - POST outcomes started / already_running / disabled / error (a 404
+ *     included: OLD-SERVER-FALLBACK-1, web and API ship together)
  *   - polling stops on running=false and reports the finished status once
  *   - polling gives up after maxTicks
  *   - detach() stops polling, including a read already in flight
- *   - attach() on an older vault-api (404) marks the feature unsupported
+ *   - a 404 is an error like any other, never an "unsupported" state
  *   - a scheduled run seen on attach is polled but not announced
  *
  * Run: node --test "web/tests/*.test.js"   (see web/tests/README.md)
@@ -23,7 +24,6 @@ import {
   UPDATE_POLL_MAX_TICKS,
   createUpdateCheckRunner,
   describeUpdateOutcome,
-  hasUpdateField,
   updateFlagsChanged,
   updateStatusLine,
 } from "../js/lib/update-check.js";
@@ -34,6 +34,7 @@ const notFound = () => new ApiError(ERROR_KINDS.NOT_FOUND, "404", { status: 404,
 function idleStatus(over = {}) {
   return {
     enabled: true,
+    scheduled: false,
     running: false,
     last_trigger: "manual",
     last_started_at: "2026-10-13T10:00:00Z",
@@ -120,11 +121,9 @@ test("labels: the button says 'Check updates' (no download, so a bare check is h
   assert.doesNotMatch(CHECK_UPDATES_LABEL, /&|update all/i);
 });
 
-test("hasUpdateField: true only when a row carries a BOOLEAN update_available", () => {
-  assert.equal(hasUpdateField([{ appid: 1 }]), false);
-  assert.equal(hasUpdateField([{ appid: 1, update_available: null }]), false);
-  assert.equal(hasUpdateField([{ appid: 1 }, { appid: 2, update_available: false }]), true);
-  assert.equal(hasUpdateField(null), false);
+test("OLD-SERVER-FALLBACK-1: no 'unsupported' phase and no field probe are left", () => {
+  assert.equal("UNSUPPORTED" in UPDATE_PHASE, false);
+  assert.deepEqual(Object.values(UPDATE_PHASE).sort(), ["disabled", "idle", "running", "unknown"]);
 });
 
 test("updateFlagsChanged: a flip either way is a change; any other field drift is not", () => {
@@ -174,7 +173,7 @@ test("describeUpdateOutcome: bailed_out / error / aborted / interrupted are non-
   assert.match(describeUpdateOutcome(idleStatus({ last_outcome: "bailed_out" })).message, /oracle did not answer/);
 });
 
-test("updateStatusLine: `scheduled` adds a short automatic/manual hint, only when the field exists", () => {
+test("updateStatusLine: `scheduled` adds a short automatic/manual hint (always: no 'field missing' case, OLD-SERVER-FALLBACK-1)", () => {
   const now = Date.parse("2026-10-13T10:06:00Z");
   assert.equal(
     updateStatusLine(UPDATE_PHASE.IDLE, idleStatus({ scheduled: true }), now),
@@ -184,23 +183,26 @@ test("updateStatusLine: `scheduled` adds a short automatic/manual hint, only whe
     updateStatusLine(UPDATE_PHASE.IDLE, idleStatus({ scheduled: false }), now),
     "Updates last checked 5 min ago · manual checks only",
   );
-  assert.equal(updateStatusLine(UPDATE_PHASE.IDLE, idleStatus(), now), "Updates last checked 5 min ago");
+  assert.equal(
+    updateStatusLine(UPDATE_PHASE.IDLE, idleStatus({ scheduled: undefined }), now),
+    "Updates last checked 5 min ago · manual checks only",
+    "MUTATION PIN: no third, field-missing wording",
+  );
 });
 
-test("updateStatusLine: hidden while unknown/unsupported; explains the oracle when disabled; 'last checked' from last_finished_at", () => {
+test("updateStatusLine: hidden while unknown; explains the oracle when disabled; 'last checked' from last_finished_at", () => {
   const now = Date.parse("2026-10-13T10:06:00Z");
   assert.equal(updateStatusLine(UPDATE_PHASE.UNKNOWN, null, now), "");
-  assert.equal(updateStatusLine(UPDATE_PHASE.UNSUPPORTED, null, now), "");
   assert.match(updateStatusLine(UPDATE_PHASE.DISABLED, idleStatus({ enabled: false }), now), /manifest oracle is disabled/);
   assert.match(updateStatusLine(UPDATE_PHASE.RUNNING, runningStatus(), now), /Checking/);
-  assert.equal(updateStatusLine(UPDATE_PHASE.IDLE, idleStatus(), now), "Updates last checked 5 min ago");
+  assert.equal(updateStatusLine(UPDATE_PHASE.IDLE, idleStatus(), now), "Updates last checked 5 min ago · manual checks only");
   assert.equal(
     updateStatusLine(UPDATE_PHASE.IDLE, idleStatus({ last_finished_at: null, last_outcome: "interrupted" }), now),
-    "Last update check started 6 min ago and did not finish",
+    "Last update check started 6 min ago and did not finish · manual checks only",
   );
   assert.equal(
     updateStatusLine(UPDATE_PHASE.IDLE, idleStatus({ last_started_at: null, last_finished_at: null, last_outcome: null }), now),
-    "Updates not checked yet",
+    "Updates not checked yet · manual checks only",
   );
 });
 
@@ -208,19 +210,13 @@ test("updateStatusLine: hidden while unknown/unsupported; explains the oracle wh
 // Runner
 // ---------------------------------------------------------------------
 
-test("attach: a 404 from GET /v1/updates/status (older vault-api) marks the feature UNSUPPORTED", async () => {
-  const { runner } = makeRunner({ statuses: [() => Promise.reject(notFound())] });
-  assert.equal(runner.snapshot().phase, UPDATE_PHASE.UNKNOWN);
-  await runner.attach();
-  assert.equal(runner.snapshot().phase, UPDATE_PHASE.UNSUPPORTED);
-});
-
-test("attach: a non-404 read failure still offers the button (IDLE), it never claims 'unsupported'", async () => {
-  const { runner } = makeRunner({
-    statuses: [() => Promise.reject(new ApiError(ERROR_KINDS.NETWORK, "down"))],
-  });
-  await runner.attach();
-  assert.equal(runner.snapshot().phase, UPDATE_PHASE.IDLE);
+test("attach: a read failure, a 404 included (OLD-SERVER-FALLBACK-1), still offers the button (IDLE)", async () => {
+  for (const err of [notFound(), new ApiError(ERROR_KINDS.NETWORK, "down")]) {
+    const { runner } = makeRunner({ statuses: [() => Promise.reject(err)] });
+    assert.equal(runner.snapshot().phase, UPDATE_PHASE.UNKNOWN);
+    await runner.attach();
+    assert.equal(runner.snapshot().phase, UPDATE_PHASE.IDLE, err.kind);
+  }
 });
 
 test("attach: enabled=false -> DISABLED; idle -> IDLE with the status kept for the line", async () => {
@@ -278,11 +274,12 @@ test("run: disabled (200, enabled=false) -> DISABLED, no polling", async () => {
   assert.equal(timers.count(), 0);
 });
 
-test("run: 404 on POST -> UNSUPPORTED; another error -> message, phase unchanged, button free again", async () => {
+test("run: an error (a 404 included, OLD-SERVER-FALLBACK-1) -> the server's message, phase unchanged, button free again", async () => {
   const a = makeRunner({ post: () => Promise.reject(notFound()), statuses: [idleStatus()] });
   await a.runner.attach();
-  assert.deepEqual(await a.runner.run(), { result: "unsupported" });
-  assert.equal(a.runner.snapshot().phase, UPDATE_PHASE.UNSUPPORTED);
+  assert.deepEqual(await a.runner.run(), { result: "error", message: "Not Found" });
+  assert.equal(a.runner.snapshot().phase, UPDATE_PHASE.IDLE);
+  assert.equal(a.runner.isBusy(), false);
 
   const b = makeRunner({
     post: () => Promise.reject(new ApiError(ERROR_KINDS.AUTH, "401", { status: 401, detail: "Invalid API key" })),
@@ -409,15 +406,18 @@ test("a scheduled run seen on attach is polled to the end but NOT announced (nob
   assert.equal(done[0].announce, false);
 });
 
-test("a 404 while polling (vault-api downgraded mid-run) -> UNSUPPORTED, polling stops", async () => {
+test("a 404 while polling is a failed read like any other: still RUNNING, polling goes on (OLD-SERVER-FALLBACK-1)", async () => {
   const { runner, timers } = makeRunner({
     post: { status: "started", enabled: true },
-    statuses: [idleStatus(), () => Promise.reject(notFound())],
+    statuses: [idleStatus(), () => Promise.reject(notFound()), idleStatus()],
   });
   await runner.attach();
   await runner.run();
   await timers.flush();
-  assert.equal(runner.snapshot().phase, UPDATE_PHASE.UNSUPPORTED);
+  assert.equal(runner.snapshot().phase, UPDATE_PHASE.RUNNING);
+  assert.equal(timers.count(), 1);
+  await timers.flush();
+  assert.equal(runner.snapshot().phase, UPDATE_PHASE.IDLE);
   assert.equal(timers.count(), 0);
 });
 

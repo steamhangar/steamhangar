@@ -84,9 +84,7 @@
  * `lib/update-check.js`; this file paints them. The "Check & update all
  * cached games" button and its flow are unchanged. Cards show an "Update
  * available" badge from `update_available` (components/game-card.js), and
- * the "Updates" chip appears when the rows carry that field
- * (lib/library-filters.js). An older vault-api (404 on the routes, no field
- * on the rows) shows neither the button, the line nor the chip.
+ * the "Updates" chip filters on it (lib/library-filters.js).
  *
  * **WP WEB-FIX-UPD-VIS (user layout 2026-10-13).** The toolbar is one row,
  * `.lib-bar`: `.lib-filters` (search, chips) on the left and
@@ -623,22 +621,12 @@ function paintUpdateCheck() {
   if (!mounted()) return;
   const { phase, status } = updateCheck.snapshot();
   const btn = els.checkUpdatesBtn;
-  // WP LIBRARY-2: the primary half is always shown; only a vault-api
-  // without the route (404) hides it. Until GET /v1/updates/status answers
-  // it shows as a loading, aria-disabled button.
+  // WP LIBRARY-2: the primary half is always shown (OLD-SERVER-FALLBACK-1:
+  // the route ships with this web, so there is no "hidden" state). Until
+  // GET /v1/updates/status answers it shows as a loading, aria-disabled
+  // button.
   const loading = phase === UPDATE_PHASE.UNKNOWN;
-  const hidden = phase === UPDATE_PHASE.UNSUPPORTED;
-  btn.hidden = hidden;
   els.checkSplit.classList.toggle("loading", loading);
-  // Without the primary button the split's caret stays as the only way to
-  // "Check & update all cached games" (older vault-api).
-  els.checkSplit.classList.toggle("solo", hidden);
-  // WCAG 2.5.3: while solo the caret shows the word "Updates", so the
-  // accessible name must contain it.
-  const moreLabel = hidden ? "Updates, more actions" : "More update actions";
-  const more = els.checkSplit.querySelector(".split-more");
-  more.setAttribute("aria-label", moreLabel);
-  more.title = moreLabel;
   const busy = updateCheck.isBusy();
   // While busy: aria-disabled, never `disabled` — a disabled button drops
   // keyboard focus to <body> (LEARNINGS, WP WEB-FEAT-1); the runner's own
@@ -670,8 +658,6 @@ async function onCheckUpdates() {
     showToast(UPDATE_DISABLED_TEXT, { warn: true, duration: CHECK_UPDATE_WARN_TOAST_MS });
   } else if (res.result === "already_running") {
     showToast("An update check is already running — its result follows when it finishes.");
-  } else if (res.result === "unsupported") {
-    showToast("This vault-api has no update check yet — update vault-api to use it.", { warn: true });
   } else if (res.result === "error") {
     showToast(res.message, { warn: true });
   }
@@ -689,10 +675,6 @@ function renderChips() {
   const counts = chipCounts(metaFiltered().games, { query: state.query, liveJobsByAppid });
   // WP WEB-FIX-20.2: an unknown count is not zero.
   if (!state.gamesKnown) for (const c of counts) c.count = COUNT_LOADING_TEXT;
-  // WP UPD-2: an optional chip (e.g. "Updates") can disappear when the API
-  // stops carrying its field; never leave the grid filtered by a chip the
-  // user can no longer see or press.
-  if (!counts.some((c) => c.key === state.filterKey)) state.filterKey = "all";
   paintChips(els.chips, counts, state.filterKey);
 }
 
@@ -1796,7 +1778,7 @@ export function renderLibrary() {
   // WP WEB-FEAT-1: the one "view open" fetch of the stored SteamID64 and its
   // owned list. The other caller of load() is the Reload button.
   ownedLibrary.load();
-  // WP UPD-2: status read on view open (support probe, "last checked",
+  // WP UPD-2: status read on view open ("last checked",
   // resume polling of a running check). No timer while the view is closed.
   updateCheck.attach();
   return section;

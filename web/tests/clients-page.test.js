@@ -39,6 +39,7 @@ const agent = (extra = {}) => ({
   key: "agent:gaming-pc",
   kind: "agent",
   client_id: "gaming-pc",
+  display_name: "gaming-pc",
   addresses: ["10.0.0.42"],
   connected: true,
   agent_presence: "online",
@@ -47,7 +48,7 @@ const agent = (extra = {}) => ({
   installed_appids: [440, 570],
   installed_app_count: 2,
   stats: { bytes_served: GIB, hit_bytes: 0.75 * GIB, miss_bytes: 0.25 * GIB, requests: 2048, hits: 1536, misses: 512, hit_rate: 0.75 },
-  loading_now: { loading: true, bytes_per_second: 30 * MIB, apps: [{ appid: 440, name: "Some Game", bytes_per_second: 30 * MIB }], unattributed_bytes_per_second: 0 },
+  live_now: { loading: true, bytes_per_second: 30 * MIB, apps: [{ appid: 440, name: "Some Game", bytes_per_second: 30 * MIB }], unattributed_bytes_per_second: 0 },
   recent_apps: [{ appid: 440, name: "Some Game", bytes_served: GIB, last_seen: "2026-10-13T20:06:00Z" }],
   recent_unattributed_bytes: 0,
   ...extra,
@@ -57,6 +58,7 @@ const address = (extra = {}) =>
     key: "addr:10.0.0.77",
     kind: "address",
     client_id: null,
+    display_name: "10.0.0.77",
     addresses: ["10.0.0.77"],
     agent_presence: null,
     installed_appids: null,
@@ -64,10 +66,11 @@ const address = (extra = {}) =>
     ...extra,
   });
 
-test("names: an agent by its client_id, an address client by its address (no invented name)", () => {
+test("names: the server's display_name (an agent by its client_id, an address by its address); no client-side rule (OLD-SERVER-FALLBACK-1)", () => {
   assert.equal(clientName(agent()), "gaming-pc");
   assert.equal(clientName(address()), "10.0.0.77");
-  assert.equal(clientName(address({ addresses: [] })), "10.0.0.77", "falls back to the key");
+  assert.equal(clientName(agent({ display_name: undefined })), "\u2014", "MUTATION PIN: no pre-D15-NAMES fallback to client_id");
+  assert.equal(clientName(address({ display_name: "" })), "\u2014", "nor to the address");
 });
 
 test("MUTATION TARGET: an address client is 'No agent · seen in the cache log' and never called a PC", () => {
@@ -129,8 +132,8 @@ test("last active and the page summary", () => {
 test("summaryTiles: the four fixed tiles come from the cards only (CLIENTS-4)", () => {
   const tiles = summaryTiles(
     [
-      agent({ connected: true, loading_now: { loading: true }, stats: { bytes_served: 2 * GIB, hits: 3, misses: 1, hit_rate: 0.75 } }),
-      address({ connected: false, loading_now: { loading: false }, stats: { bytes_served: GIB, hits: 1, misses: 3, hit_rate: 0.25 } }),
+      agent({ connected: true, live_now: { loading: true }, stats: { bytes_served: 2 * GIB, hits: 3, misses: 1, hit_rate: 0.75 } }),
+      address({ connected: false, live_now: { loading: false }, stats: { bytes_served: GIB, hits: 1, misses: 3, hit_rate: 0.25 } }),
     ],
     "7d",
   );
@@ -165,7 +168,7 @@ test("summaryTiles: the Agents tile counts outdated agents only against a known 
 });
 
 test("summaryTiles: no statistics shows dashes and says why, never zeros", () => {
-  const tiles = summaryTiles([address({ connected: true, loading_now: { loading: false }, stats: null })], "7d");
+  const tiles = summaryTiles([address({ connected: true, live_now: { loading: false }, stats: null })], "7d");
   assert.deepEqual(tiles.map((t) => t.key), ["connected", "loaded", "hitrate", "agents"]);
   assert.equal(tiles[0].detail, "Nothing loading now");
   assert.deepEqual([tiles[1].value, tiles[1].detail], ["\u2014", "No traffic statistics"]);

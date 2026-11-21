@@ -50,7 +50,7 @@ test("normalizeQuery trims and lowercases", () => {
   assert.equal(normalizeQuery(undefined), "");
 });
 
-test("FILTER_DEFS: the only update chip is the optional 'updates' one (WP UPD-2), never a mockup 'stale'/'upd' key", () => {
+test("FILTER_DEFS: the only update chip is the 'updates' one (WP UPD-2), never a mockup 'stale'/'upd' key", () => {
   assert.equal(
     FILTER_DEFS.some((f) => f.key === "stale" || f.key === "upd"),
     false,
@@ -58,12 +58,16 @@ test("FILTER_DEFS: the only update chip is the optional 'updates' one (WP UPD-2)
   const upd = FILTER_DEFS.find((f) => f.key === "updates");
   assert.ok(upd, "the 'updates' chip exists");
   assert.equal(upd.label, "Updates");
-  assert.equal(upd.optional, true);
+  // OLD-SERVER-FALLBACK-1: no chip is optional any more.
+  assert.equal(FILTER_DEFS.some((f) => "optional" in f), false);
 });
 
-test("WP UPD-2: chipCounts lists 'Updates' ONLY when the rows carry update_available (older vault-api: six chips)", () => {
-  const keysOld = chipCounts(GAMES, { query: "", liveJobsByAppid: LIVE }).map((c) => c.key);
-  assert.deepEqual(keysOld, ["all", "cached", "none", "installed", "downloading", "failed"]);
+test("OLD-SERVER-FALLBACK-1: chipCounts always lists 'Updates' (0 when nothing is flagged, an empty library included)", () => {
+  const all7 = ["all", "cached", "none", "installed", "downloading", "failed", "updates"];
+  const flagless = chipCounts(GAMES.map((g) => ({ ...g, update_available: false })), { query: "", liveJobsByAppid: LIVE });
+  assert.deepEqual(flagless.map((c) => c.key), all7);
+  assert.equal(flagless.find((c) => c.key === "updates").count, 0);
+  assert.deepEqual(chipCounts([], { query: "", liveJobsByAppid: LIVE }).map((c) => c.key), all7);
   const withField = GAMES.map((g) => ({ ...g, update_available: g.appid === 1 }));
   const counts = chipCounts(withField, { query: "", liveJobsByAppid: LIVE });
   assert.deepEqual(counts.map((c) => c.key), ["all", "cached", "none", "installed", "downloading", "failed", "updates"]);
@@ -74,7 +78,7 @@ test("WP UPD-2: the 'Updates' chip stays while a search hides every row that car
   const withField = GAMES.map((g) => ({ ...g, update_available: g.appid === 1 }));
   const counts = chipCounts(withField, { query: "copper", liveJobsByAppid: LIVE });
   const upd = counts.find((c) => c.key === "updates");
-  assert.ok(upd, "chip presence depends on the whole list, not the query");
+  assert.ok(upd, "a search never hides the chip");
   assert.equal(upd.count, 0);
 });
 

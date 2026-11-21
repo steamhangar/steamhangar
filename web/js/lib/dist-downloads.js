@@ -32,9 +32,8 @@
  * APK carry their own version, which may be older than the server's (an
  * unchanged client is reused from the release that built it). The index
  * states it as `clients.<agent|app>.build`; names and release URLs of a
- * client's files use that version ({@link clientFilesVersion}), and a server
- * without `clients` (before 1b, a local build) uses its own version as
- * before.
+ * client's files use that version ({@link clientFilesVersion}), and a
+ * local build (no client builds) or a malformed index uses its own version.
  *
  * Pure: no DOM, no storage, no fetch.
  */

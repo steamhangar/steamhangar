@@ -2,8 +2,8 @@
  * WP STORAGE-BALANCE-1: `web/js/lib/storage-balance.js` (pure) and its
  * wiring into the Settings Expert panel (`views/settings.js`).
  *
- *   - an older server (no `storage_balance`), no summary, or a malformed
- *     object: `null`, and the card stays hidden (never zeros);
+ *   - no `storage_balance`, no summary, or a malformed object: `null`, and
+ *     the card stays hidden (never zeros);
  *   - the tiles carry plain words, the figures and depot counts; the
  *     planned size is in the current-builds note; an "Unexplained" tile
  *     (signed) only while the residual is not 0;
@@ -48,13 +48,13 @@ function balance(extra = {}) {
 // Pure presentation
 // ------------------------------------------------------------------
 
-test("MUTATION TARGET: an older server without storage_balance (or no summary) is null, never zeros", () => {
+test("MUTATION TARGET: a summary without storage_balance (or no summary) is null, never zeros", () => {
   assert.equal(storageBalanceView(undefined), null);
   assert.equal(storageBalanceView(null), null);
   assert.equal(
     storageBalanceView({ total_bytes: 1, top_consumers: [], unmapped_depots: { count: 0, size_bytes: 0 }, free_disk_bytes: 1 }),
     null,
-    "the pre-STORAGE-BALANCE-1 summary shape",
+    "a summary without the field",
   );
   assert.equal(storageBalanceView({ storage_balance: null }), null);
   assert.equal(storageBalanceView({ storage_balance: balance({ present_bytes: "60" }) }), null, "a non-number field");
@@ -196,12 +196,12 @@ async function until(pred, label, timeoutMs = 2000) {
 }
 const card = (s) => s.querySelector('div.fcard[data-group="storage-balance"]');
 
-test("MUTATION TARGET: wiring: hidden for an older server, filled from the cache poll, warning box, back to hidden", async () => {
+test("MUTATION TARGET: wiring: hidden without the field, filled from the cache poll, warning box, back to hidden", async () => {
   await until(() => store.snapshot("cache") !== undefined, "first cache poll");
   const s = renderSettings();
   dom.appRoot.replaceChildren(s);
   await until(() => card(s) !== null, "expert panel built");
-  assert.equal(card(s).hidden, true, "older server: no card");
+  assert.equal(card(s).hidden, true, "no field: no card");
   assert.equal(card(s).querySelectorAll("div.tile").length, 0);
 
   server.summary = { ...OLD_SUMMARY, storage_balance: balance() };

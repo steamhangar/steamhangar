@@ -66,10 +66,10 @@ export const PRIVATE_PROFILE_MESSAGE =
 
 export const STEAM_LIBRARY_SETTING_KEY = "steam_library_steamid";
 
-/** An older vault-api (before WP API-FEAT-1) has no such setting. Shared by
- * the Settings caption and onboarding step 2's "not saved" line. */
-export const LIBRARY_SETTING_ABSENT_MESSAGE =
-  "This vault-api does not store a library SteamID64 yet (it needs a newer version).";
+/** A settings answer without the setting (malformed, or no answer yet):
+ * onboarding step 2's "not saved" reason. No "older vault-api" wording since
+ * OLD-SERVER-FALLBACK-1: the server of the same release always lists it. */
+export const LIBRARY_SETTING_MISSING_MESSAGE = "The server's settings do not list the library SteamID64.";
 export const SETTINGS_READONLY_MESSAGE = "This vault's settings are read-only.";
 export const LIBRARY_SETTING_ENV_ONLY_MESSAGE =
   "The library SteamID64 is set by the server environment; change it there.";
@@ -323,13 +323,12 @@ export const SAVE_OUTCOME = Object.freeze({
   UNCHANGED: "unchanged",
   /** The vault's settings are read-only: no PATCH was sent. */
   READONLY: "readonly",
-  /** Older vault-api without the setting: no PATCH was sent. */
-  ABSENT: "absent",
   /** The setting is env-only on this server: no PATCH was sent. */
   ENV_ONLY: "env-only",
   /** The typed text is neither blank nor a valid SteamID64: no PATCH. */
   INVALID: "invalid",
-  /** The PATCH failed. */
+  /** The settings answer does not list the setting (no PATCH was sent), or
+   * the PATCH failed. */
   ERROR: "error",
 });
 
@@ -350,7 +349,7 @@ export const SAVE_OUTCOME = Object.freeze({
 export async function saveLibrarySteamId(apiClient, settingsResponse, typed) {
   const entries = settingsResponse && Array.isArray(settingsResponse.settings) ? settingsResponse.settings : [];
   const entry = entries.find((e) => e && e.key === STEAM_LIBRARY_SETTING_KEY);
-  if (!entry) return { outcome: SAVE_OUTCOME.ABSENT, error: LIBRARY_SETTING_ABSENT_MESSAGE };
+  if (!entry) return { outcome: SAVE_OUTCOME.ERROR, error: LIBRARY_SETTING_MISSING_MESSAGE };
   if (entry.env_only) return { outcome: SAVE_OUTCOME.ENV_ONLY, error: LIBRARY_SETTING_ENV_ONLY_MESSAGE };
   if (settingsResponse.readonly) return { outcome: SAVE_OUTCOME.READONLY, error: SETTINGS_READONLY_MESSAGE };
   const value = typeof typed === "string" ? typed.trim() : "";

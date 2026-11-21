@@ -63,24 +63,24 @@ test("MUTATION TARGET: placement follows the API's expert flag, not only the key
   assert.equal(EXPERT_GROUPS.flatMap((g) => placed.expert[g.id]).length, 0);
 });
 
-test("isPinned: env-pinned and env-only rows; an older server without `editable` keeps its inputs", () => {
+test("isPinned: env-pinned and env-only rows", () => {
   assert.equal(isPinned(e("a", { editable: false, source: "env" })), true);
   assert.equal(isPinned(e("a", { env_only: true })), true);
   assert.equal(isPinned(e("a", { editable: true, source: "env" })), false);
-  const old = { key: "a", source: "env", env_only: false };
-  assert.equal(isPinned(old), false, "pre-D16b env values were overridable");
 });
 
 test("envNote / shadowNote / core-file-disabled wording", () => {
   assert.equal(envNote(e("vault_name", { env_var: "VAULT_NAME", source: "env", editable: false })), "Set via env (VAULT_NAME)");
   assert.equal(envNote(e("x", { source: "env", editable: false })), "Set via env");
-  const core = e("upstream_max_conns", { editable: false, target: "core", env_var: "VAULT_UPSTREAM_MAX_CONNS" });
-  assert.equal(isCoreFileDisabled(core), true, "core target, not editable, not from env");
+  const core = e("upstream_max_conns", { editable: false, target: "core", env_var: "VAULT_UPSTREAM_MAX_CONNS", reason: "core_file_disabled" });
+  assert.equal(isCoreFileDisabled(core), true, "the API's reason");
   assert.match(envNote(core), /^Applies to vault-core only via env in this build \(VAULT_UPSTREAM_MAX_CONNS\)\./);
-  assert.equal(isCoreFileDisabled({ ...core, source: "env" }), false, "a real env pin stays 'set via env'");
   assert.equal(isCoreFileDisabled(e("vault_name", { editable: false, reason: "core_file_disabled" })), true, "the API's reason wins");
-  assert.equal(isCoreFileDisabled({ ...core, reason: null }), false, "with a reason field, only core_file_disabled counts");
+  assert.equal(isCoreFileDisabled({ ...core, reason: null }), false, "only core_file_disabled counts");
   assert.equal(isCoreFileDisabled({ ...core, reason: "env" }), false);
+  // OLD-SERVER-FALLBACK-1: no guess from the row's shape without a reason.
+  const { reason, ...noReason } = core;
+  assert.equal(isCoreFileDisabled(noReason), false, "MUTATION PIN: a core-shaped row without reason is not guessed");
   assert.equal(shadowNote(e("a")), null);
   assert.equal(shadowNote(e("a", { shadowed: true })), "A value stored in Settings is overridden by env.");
   assert.match(shadowNote(e("webhook_url", { shadowed: true, env_only: true })), /ignored/);

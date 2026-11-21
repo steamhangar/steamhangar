@@ -10,7 +10,7 @@
  *    pre-release order, the same as component-versions.py and the Kotlin twin);
  *  - same_build (aliases rc18..rc21.1 -> rc17) never warns; below the
  *    minimum says so; another build differs; a newer agent differs too;
- *  - no bundled agent (server before 1b, local build): the CLIENTS-3 rule
+ *  - no bundled agent (a local build): the CLIENTS-3 rule
  *    against the server version, unchanged;
  *  - downloads: an agent reused from rc17 on an rc22 server gets rc17 names
  *    and the rc17 release URL, and a URL of another release is refused.

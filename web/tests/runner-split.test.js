@@ -6,7 +6,8 @@
  * says "Downloading" only for runner traffic that is not all cache HITs and
  * "Verifying" (the existing `verify` status kind, no new kind) for a runner
  * that only reads from the cache; the graph counts runner HITs as "served
- * from cache". An older server without the split keeps the old behaviour.
+ * from cache". A split that is not a real number counts as no cache reads
+ * (input guard; no older-server case since OLD-SERVER-FALLBACK-1).
  *
  * Run: node --test "web/tests/*.test.js"   (see web/tests/README.md)
  */
@@ -113,7 +114,7 @@ test("the other pill states are unchanged by the split", () => {
   assert.equal(heroStatus(current(5, 5, Number.NaN, 0)).text, PILL_DOWNLOADING);
 });
 
-test("backward compatible: a server before rc21 (no split) keeps Downloading for runner traffic", () => {
+test("input guard: a missing or null split counts as no cache reads — runner traffic is Downloading", () => {
   assert.equal(heroStatus({ bytes_per_second: 6 * MIB, runner_bytes_per_second: 6 * MIB }).text, PILL_DOWNLOADING);
   assert.equal(heroStatus({ bytes_per_second: 6 * MIB, runner_bytes_per_second: 6 * MIB, runner_hit_bytes_per_second: null }).text, PILL_DOWNLOADING);
 });
@@ -130,7 +131,7 @@ test("mergeNow and mergeLive carry the split into the pill (live window, not the
 test("the built hero swaps the pill between Downloading and Verifying (kind changes, so it is rebuilt)", () => {
   const hero = createDownloadsHero({ range: "1h", onRangeChange() {} });
   const pill = () => hero.el.querySelector('[data-role="stats-pill"]');
-  const paint = (cur) => hero.paint({ throughput: mergeNow(answer(cur)), series: null, range: "1h", rateCap: null, unsupported: false, error: null, noFigures: false });
+  const paint = (cur) => hero.paint({ throughput: mergeNow(answer(cur)), series: null, range: "1h", rateCap: null, error: null, noFigures: false });
   paint(current(20 * MIB, 20 * MIB, 0, 20 * MIB));
   assert.equal(pill().dataset.kind, "running");
   assert.ok(pill().textContent.includes(PILL_DOWNLOADING));

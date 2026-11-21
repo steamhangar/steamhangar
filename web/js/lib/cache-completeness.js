@@ -350,8 +350,8 @@ export function incompleteScheduleNote(schedule) {
   if (!schedule || typeof schedule !== "object") return null;
   const hasWindow = schedule.enabled === true && typeof schedule.window === "string" && schedule.window.trim();
   if (!hasWindow) return MANUAL_ONLY_NOTE;
-  // WP AUTO-VERIFY-1: only an explicit false (an older server omits the
-  // field and always completed in the window).
+  // WP AUTO-VERIFY-1: only an explicit false (a missing or malformed value
+  // is not read as "off").
   if (schedule.auto_complete_cached === false) return AUTO_COMPLETE_OFF_NOTE;
   return `These complete automatically in the schedule window ${formatWindow(schedule.window)}.`;
 }

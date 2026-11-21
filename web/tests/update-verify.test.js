@@ -86,7 +86,7 @@ test("MUTATION TARGET -- liveRunKind ignores live bytes (a first fill never turn
 test("liveRunKind: no games row yet -> running; needs_force must be literally true", () => {
   assert.equal(liveRunKind(undefined), "running");
   assert.equal(liveRunKind(null), "running");
-  assert.equal(liveRunKind(refresh({ needs_force: undefined })), "updating", "older server without the field");
+  assert.equal(liveRunKind(refresh({ needs_force: undefined })), "updating", "a row without the field");
   assert.equal(liveRunKind(refresh({ needs_force: 1 })), "updating", "strictly true, like isToolApp");
 });
 

@@ -185,7 +185,7 @@ test("TWIN PIN: the 'already gone' prefix is the start of the DELETE handler's o
 test("MUTATION TARGET: only the handler's own 404 means 'already gone'", () => {
   const e = (status, detail) => ({ status, detail, kind: status === 404 ? ERROR_KINDS.NOT_FOUND : ERROR_KINDS.SERVER });
   assert.equal(isClientAlreadyGone(e(404, "Unknown client_id 'retired-pc'")), true);
-  assert.equal(isClientAlreadyGone(e(404, "Not Found")), false, "unknown route (server older than AG-1) or a proxy");
+  assert.equal(isClientAlreadyGone(e(404, "Not Found")), false, "an unmatched route or a proxy");
   assert.equal(isClientAlreadyGone(e(404, null)), false, "a 404 with no JSON detail");
   assert.equal(isClientAlreadyGone(e(500, "Unknown client_id 'x'")), false, "only a 404");
   assert.equal(isClientAlreadyGone(null), false);

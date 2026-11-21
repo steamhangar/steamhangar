@@ -98,13 +98,15 @@ export function isNameAlreadyGone(err) {
   return !!err && err.kind === ERROR_KINDS.NOT_FOUND && typeof err.detail === "string" && err.detail.startsWith("No name stored");
 }
 
-/** Error line for a failed save or remove. A 404 that is not the handler's
- * own answer means the route does not exist: a server older than
- * D15-NAMES. */
+/** The old "server older than D15-NAMES" note. The web no longer shows it
+ * (OLD-SERVER-FALLBACK-1: web and API ship together, ADR-0022); kept for
+ * the Android twin pin (ClientGapsWebTwinTest): the app updates
+ * independently of the server and keeps the note. */
+export const RENAME_UNSUPPORTED_TEXT = "This server cannot store client names yet. Update vault-api to rename clients.";
+
+/** Error line for a failed save or remove: the server's detail, a 404
+ * included (no "older server" reading since OLD-SERVER-FALLBACK-1). */
 export function renameErrorText(err) {
-  if (err && err.kind === ERROR_KINDS.NOT_FOUND && !isNameAlreadyGone(err)) {
-    return "This server cannot store client names yet. Update vault-api to rename clients.";
-  }
   const detail = err && typeof err.detail === "string" && err.detail ? err.detail : (err && err.message) || "Request failed.";
   return `Could not save the name: ${detail}`;
 }

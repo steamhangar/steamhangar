@@ -33,9 +33,9 @@
  * **WP UPD-2: that sixth chip, "Updates".** `GET /v1/games` carries
  * `update_available` since WP UPD-1 (true only for a stale oracle verdict on
  * a game with cache content). The chip is labeled "Updates" (D14 wording)
- * and is OPTIONAL: `chipCounts` lists it only when the rows actually carry
- * the field (`hasUpdateField`), so an older vault-api shows the five chips
- * it always had.
+ * and, like every other chip, always shown (OLD-SERVER-FALLBACK-1: the web
+ * ships with the API of the same release, ADR-0022, so every row carries
+ * the field; the old "optional chip" gate for an older vault-api is gone).
  *
  * **WP TOOL-APPS-2c: chips count groups, not packages.** The Library hands
  * in GROUPED rows (lib/content-groups.js): a group card is one row, so every
@@ -56,7 +56,6 @@
  */
 
 import { dispKind, KIND, installedBadgeState, INSTALLED_BADGE } from "./game-status.js";
-import { hasUpdateField } from "./update-check.js";
 import { failedPackages } from "./content-groups.js";
 
 /**
@@ -95,8 +94,8 @@ export const FILTER_DEFS = Object.freeze([
     // WP TOOL-APPS-2c: a group also counts when one of its packages failed.
     predicate: (g, job, live) => dispKind(g, job) === KIND.ERROR || failedPackages(g, live).length > 0,
   },
-  // WP UPD-2: optional — see the module header and chipCounts.
-  { key: "updates", label: "Updates", predicate: (g) => g.update_available === true, optional: true },
+  // WP UPD-2: see the module header.
+  { key: "updates", label: "Updates", predicate: (g) => g.update_available === true },
 ]);
 
 const FILTER_BY_KEY = new Map(FILTER_DEFS.map((f) => [f.key, f]));
@@ -127,10 +126,7 @@ export function visibleGames(games, { query, filterKey, liveJobsByAppid }) {
  */
 export function chipCounts(games, { query, liveJobsByAppid }) {
   const inQuery = games.filter((g) => matchesQuery(g, query));
-  // Optional chips depend on the WHOLE list, not the query: typing a search
-  // must never make the "Updates" chip appear or vanish.
-  const withOptional = hasUpdateField(games);
-  return FILTER_DEFS.filter((f) => !f.optional || withOptional).map((f) => ({
+  return FILTER_DEFS.map((f) => ({
     key: f.key,
     label: f.label,
     count: inQuery.filter((g) => f.predicate(g, liveJobsByAppid?.get(g.appid), liveJobsByAppid)).length,

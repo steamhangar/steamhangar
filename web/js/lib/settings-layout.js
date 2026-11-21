@@ -354,8 +354,7 @@ export function fieldHelp(entry) {
 
 /**
  * True when the row is shown as plain text (Q1: env always wins; Q2: the
- * webhook URL is env-only). An older server without `editable` keeps its
- * inputs (its env values were overridable).
+ * webhook URL is env-only).
  */
 export function isPinned(entry) {
   return entry.env_only === true || entry.editable === false;
@@ -364,13 +363,12 @@ export function isPinned(entry) {
 /**
  * True for a vault-core key this build cannot hand to vault-core (D16b-1
  * review B3: `VAULT_CORE_SETTINGS_FILE` is blank): the API's
- * `reason: "core_file_disabled"`. A row without a `reason` field (a server
- * between D16b and its review) is judged by its shape (core target, not
- * editable, not from env), so it is never mislabelled "set via env".
+ * `reason: "core_file_disabled"`. No guess from the row's shape any more
+ * (OLD-SERVER-FALLBACK-1: every row of the same-release server carries
+ * `reason`).
  */
 export function isCoreFileDisabled(entry) {
-  if ("reason" in entry) return entry.reason === "core_file_disabled";
-  return entry.editable === false && !entry.env_only && entry.source !== "env" && entry.target === "core";
+  return entry.reason === "core_file_disabled";
 }
 
 /** The note under a plain-text row: "Set via env (VAULT_NAME)", or why a

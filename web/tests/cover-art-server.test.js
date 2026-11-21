@@ -29,7 +29,7 @@ test("coverArtUrl prefers a valid server cover_url", () => {
   assert.equal(coverArtUrl(440, legacyHost), legacyHost);
 });
 
-test("coverArtUrl falls back to the legacy path when cover_url is missing (older server, owned-only row)", () => {
+test("coverArtUrl falls back to the legacy path when cover_url is missing (owned-only row, no server cover)", () => {
   assert.equal(coverArtUrl(3527290), LEGACY_3527290);
   assert.equal(coverArtUrl(3527290, null), LEGACY_3527290);
   assert.equal(coverArtUrl(3527290, undefined), LEGACY_3527290);

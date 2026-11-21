@@ -50,7 +50,7 @@ test("MUTATION TARGET -- WP UPD-6: a flagged CACHED card says 'Update available'
     assert.equal(card.querySelector(".cap .sz").textContent, "0.5 GB", "the cover keeps the size");
   }));
 
-test("buildCard: false, missing (older vault-api) or a truthy non-boolean keep 'Current' and the green check", () =>
+test("buildCard: false, missing or a truthy non-boolean keep 'Current' and the green check", () =>
   withFakeDom(({ buildCard }) => {
     for (const over of [{ update_available: false }, { update_available: undefined }, { update_available: "true" }]) {
       const card = buildCard(game(over), ctx);

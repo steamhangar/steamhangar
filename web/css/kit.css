@@ -840,13 +840,11 @@
 
 /* split button: "Check updates" + caret; the menu holds the downloading entry */
 .kit .lib-split{ position:relative; display:inline-flex; flex:none; }
-.kit .lib-split > .btn:first-child:not([hidden]){ border-top-right-radius:0; border-bottom-right-radius:0; }
-.kit .lib-split > .btn:not([hidden]) + .split-more{
+.kit .lib-split > .btn:first-child{ border-top-right-radius:0; border-bottom-right-radius:0; }
+.kit .lib-split > .btn + .split-more{
   border-top-left-radius:0; border-bottom-left-radius:0; padding-inline:9px;
   border-left:1px solid color-mix(in srgb, var(--accent-ink) 35%, var(--accent));
 }
-.kit .lib-split .split-lbl{ display:none; }
-.kit .lib-split.solo .split-lbl{ display:inline; }
 .kit .lib-split .ico{ display:flex; }
 .kit .lib-split.loading > .btn:first-child{ opacity:.6; cursor:progress; }
 .kit .lib-split .pop.menu{ top:calc(100% + 6px); min-width:260px; padding:6px; border-radius:var(--r-m); box-shadow:var(--sh-1); }
@@ -1167,7 +1165,7 @@
 
 /* [hidden] guards for the Library and detail-sheet classes above that carry
    an author display (same rule as the kit's guard block). */
-.kit.view-library[hidden], .kit .lib-split[hidden], .kit .lib-split .split-lbl[hidden], .kit .lib-split .ico[hidden],
+.kit.view-library[hidden], .kit .lib-split[hidden], .kit .lib-split .ico[hidden],
 .kit .lib-bar[hidden], .kit .lib-search[hidden], .kit .lib-search .ico[hidden],
 .kit .lib-chips[hidden], .kit .lib-chips .fchip[hidden], .kit .lib-tools[hidden], .kit .lib-tools .ico[hidden],
 .kit .sortg[hidden], .kit .sortg button[hidden], .kit .segi[hidden], .kit .segi button[hidden], .kit .lib-filtersbtn[hidden],

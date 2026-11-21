@@ -47,7 +47,7 @@ function pc(loading) {
     agent_presence: null, cache_active: loading, last_active: iso(60_000), last_seen_in_cache_log: iso(60_000),
     last_reported_at: null, installed_appids: null, installed_app_count: null,
     stats: { bytes_served: MIB, hit_bytes: MIB, miss_bytes: 0, requests: 1, hits: 1, misses: 0, hit_rate: 1 },
-    loading_now: loading
+    live_now: loading
       ? { loading: true, bytes_per_second: 1.2 * MIB, apps: [{ appid: 526870, name: "Satisfactory", bytes_per_second: 1.2 * MIB }], unattributed_bytes_per_second: 0 }
       : { loading: false, bytes_per_second: 0, apps: [], unattributed_bytes_per_second: 0 },
     recent_apps: [], recent_unattributed_bytes: 0,

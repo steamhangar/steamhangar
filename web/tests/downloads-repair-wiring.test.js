@@ -15,6 +15,7 @@
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import { createFakeDom } from "./fake-dom.js";
+import { throughputFixture } from "./throughput-fixture.js";
 
 const dom = createFakeDom();
 globalThis.document = dom.document;
@@ -109,6 +110,9 @@ globalThis.fetch = async (url, init = {}) => {
     return respond(202, { ...repairReport(appid, true), removed_chunks: 4, removed_bytes: 6 * MB, job_id: id, job_status: "queued", job_deduplicated: false });
   }
   if (method === "POST") server.posts.push({ path: p, body: init.body === undefined ? undefined : JSON.parse(init.body) });
+  // Statistics: a real, feed-off answer (never a 404, OLD-SERVER-FALLBACK-1).
+  const stats = throughputFixture(new URL(String(url)));
+  if (stats) return respond(200, stats);
   return respond(404, { detail: "Not Found" });
 };
 
@@ -118,7 +122,11 @@ const { store } = await import("../js/store-singleton.js");
 const { renderDownloads, highlightJob } = await import("../js/views/downloads.js");
 const { closeRepair } = await import("../js/components/repair-flow.js");
 
-after(() => store.stop());
+after(async () => {
+  store.stop();
+  // The statistics poll runs while the view is mounted: leave the view.
+  (await import("../js/router.js")).navigateTo("library");
+});
 
 const tick = (ms = 10) => new Promise((r) => setTimeout(r, ms));
 async function until(pred, label, timeoutMs = 2000) {

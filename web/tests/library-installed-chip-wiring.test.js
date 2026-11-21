@@ -6,8 +6,8 @@
  * is pinned in library-filter-installed.test.js.
  *
  * Harness as in library-update-check-wiring.test.js (fake-dom, Map-backed
- * localStorage with an API key, routing fetch fake); this server is an
- * older vault-api without the update routes, so only the core chips show.
+ * localStorage with an API key, routing fetch fake); this fake server
+ * answers 404 on the update routes, which the view treats as an error.
  *
  * Run: node --test "web/tests/*.test.js"   (see web/tests/README.md)
  */

@@ -5,9 +5,9 @@
  *
  * Pins: `live_now` wins over `loading_now` in the now box, its speed, the
  * "Downloading" pill and the "N loading now" tile, in BOTH directions (a
- * live idle beats a stale swept "loading"); a server answer with the feed
- * ok but `live_now` null or missing (a server before rc21) falls back to
- * `loading_now`; the rendered view shows the live state.
+ * live idle beats a stale swept "loading"); without `live_now` the swept
+ * `loading_now` is NOT read (OLD-SERVER-FALLBACK-1: web and API ship
+ * together); the rendered view shows the live state.
  *
  * Harness: pure functions, then fake-dom.js with a routing `fetch` fake
  * (as clients-nav-refresh.test.js). Text only (LEARNINGS WEB-FIX-1).
@@ -68,12 +68,11 @@ test("MUTATION PIN: a live idle beats a stale swept 'loading' (the client stoppe
   assert.equal(loadingTile([c]), "Nothing loading now");
 });
 
-test("feed ok but live_now null or missing (server before rc21): the swept loading_now is used", () => {
+test("OLD-SERVER-FALLBACK-1: without live_now the swept loading_now is never used (no older-server fallback)", () => {
   for (const c of [pc({ loading_now: loadingOf("Satisfactory", 3), live_now: null }), pc({ loading_now: loadingOf("Satisfactory", 3) })]) {
-    assert.equal(currentLoading(c), c.loading_now);
-    assert.equal(nowBox(c).title, "Satisfactory");
-    assert.equal(connectionPill(c).text, "Downloading");
-    assert.equal(loadingTile([c]), "1 loading now");
+    assert.equal(currentLoading(c), null, "MUTATION PIN: no fallback to loading_now");
+    assert.notEqual(connectionPill(c).text, "Downloading");
+    assert.equal(loadingTile([c]), "Nothing loading now");
   }
   // Neither sent (feed not ok): the dash, not "nothing".
   const none = pc({ loading_now: null, live_now: null });

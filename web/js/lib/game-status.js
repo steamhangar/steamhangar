@@ -169,7 +169,7 @@ export function showsNotOwnedNote(game) {
 export const TOOL_APP_NOTE = "Steam tool package — cached together with the games that use it.";
 
 /** True for a `GET /v1/games` row the server flags as a Steam tool app
- * (WP API-FIX-4). Strictly `true`: an older server sends no flag at all. */
+ * (WP API-FIX-4). Strictly `true` (a non-boolean is not a flag). */
 export function isToolApp(game) {
   return game?.tool_app === true;
 }
@@ -203,8 +203,8 @@ export const UPDATE_AVAILABLE_WORD = "Update available";
  * Whether a card shows the "Update available" state (WP UPD-6): a CACHED
  * card (no live job, visible bytes) whose row carries `update_available:
  * true` (WP UPD-1; for a group row, the OR over its members that
- * lib/content-groups.js `groupGames` already computes). Strictly `true`: an
- * older vault-api sends no field. A DISPLAY overlay only: `dispKind`,
+ * lib/content-groups.js `groupGames` already computes). Strictly `true` (a
+ * non-boolean is not a flag). A DISPLAY overlay only: `dispKind`,
  * `data-dk`, `statusAction` and the filters stay on `cached` (the copy on
  * disk is valid, just not the newest), so the round-7 structural key is
  * unchanged; views/library.js full-renders when the flag flips
