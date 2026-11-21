@@ -23,7 +23,7 @@ import java.time.ZoneId
  */
 class DemoClientPriorityTest {
     private val utc = ZoneId.of("UTC")
-    private val duskfall = 4_010_010 // cached and idle: a fresh enqueue target
+    private val cobalt = 4_010_020 // idle, no active job: a fresh enqueue target
     private val halcyon = 4_010_040
 
     private fun held() = DemoState.fresh().withClientHold()
@@ -41,6 +41,7 @@ class DemoClientPriorityTest {
         assertEquals(listOf(900_101), cp.override_job_ids)
         val jobs = state.listJobSummaries(50)
         assertEquals("client", jobs.single { it.id == 900_102 }.pause_reason)
+        assertEquals("Duskfall Array: finishing it changes nothing showcased", 4_010_010, jobs.single { it.id == 900_102 }.appid)
         assertTrue(jobs.single { it.id == 900_101 }.client_override)
         val gc = jobs.single { it.id == 900_103 }
         assertEquals("queued", gc.status)
@@ -54,7 +55,7 @@ class DemoClientPriorityTest {
     @Test
     fun `MUTATION PIN -- during the hold a new prefill and a GC job stay queued`() {
         val state = held()
-        val ref = state.enqueuePrefill(listOf(duskfall)).single()
+        val ref = state.enqueuePrefill(listOf(cobalt)).single()
         assertEquals("queued", ref.status)
         val gc = state.gc(halcyon, execute = false)
         assertEquals("queued", gc.status)
@@ -69,7 +70,7 @@ class DemoClientPriorityTest {
     @Test
     fun `MUTATION PIN -- the hold ends by itself after its polls, the paused job resumes and the queue drains`() {
         val state = held()
-        val ref = state.enqueuePrefill(listOf(duskfall)).single()
+        val ref = state.enqueuePrefill(listOf(cobalt)).single()
         var jobs = state.listJobSummaries(50)
         repeat(DemoState.DEMO_HOLD_POLLS - 1) { jobs = state.listJobSummaries(50) }
         // The last hold poll ended it: its own answer already shows the drain.
@@ -114,13 +115,13 @@ class DemoClientPriorityTest {
         val jobs = state.listJobSummaries(50)
         assertTrue(jobs.none { it.id == 900_102 || it.id == 900_103 })
         assertFalse(jobs.single { it.id == 900_101 }.client_override)
-        assertEquals("running", state.enqueuePrefill(listOf(duskfall)).single().status)
+        assertEquals("running", state.enqueuePrefill(listOf(cobalt)).single().status)
     }
 
     @Test
     fun `withClientHold keeps new job ids past the hold jobs`() {
         val state = held()
-        val ref = state.enqueuePrefill(listOf(duskfall)).single()
+        val ref = state.enqueuePrefill(listOf(cobalt)).single()
         assertTrue("new id ${ref.job_id} must not collide with 900_103", ref.job_id > 900_103)
     }
 }

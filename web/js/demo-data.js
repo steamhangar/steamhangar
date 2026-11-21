@@ -549,10 +549,12 @@ function buildGames(librarySize = DEFAULT_LIBRARY_SIZE) {
 
 /** WP CAP-503-FIX-1b: the demo's client-priority hold scenario (see
  * `DEMO_HOLD_POLLS` below): a device loads through the cache, so vault-api
- * paused one prefill for it (Copper Horizon's first download) and a queued
- * garbage-collection dry run waits (operator decision 2026-11-21, Weg A),
- * on the game whose download already runs, so no other showcase is
- * blocked; a dry run changes nothing when it finishes. */
+ * paused one prefill for it (an update run of Frostline Convoy: done,
+ * confirmed current, no completeness or update flag, so finishing it after
+ * the hold changes nothing showcased; its shared-depot delete is blocked
+ * only while the job is active) and a queued garbage-collection dry run
+ * waits (operator decision 2026-11-21, Weg A) on the game whose download
+ * already runs; a dry run changes nothing when it finishes. */
 function buildHoldJobs() {
   return [
     {
@@ -574,7 +576,7 @@ function buildHoldJobs() {
     },
     {
       id: 900002,
-      appid: 2010020,
+      appid: 2010050,
       type: "prefill",
       status: "paused",
       created_at: isoAgo(5 * 60_000),
@@ -587,7 +589,7 @@ function buildHoldJobs() {
       paused_at: isoAgo(90_000),
       stop_request: null,
       pause_reason: "client",
-      log_excerpt: "[vault-api] worker claimed job 900002\nDownloading depot 2010021 ...",
+      log_excerpt: "[vault-api] worker claimed job 900002\nDownloading depot 2010060 ...",
       _demoTicksLeft: 2,
     },
   ];

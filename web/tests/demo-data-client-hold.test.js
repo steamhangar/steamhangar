@@ -33,7 +33,7 @@ test("the scenario: holding for the online agent's address, one paused for it, o
   assert.deepEqual(cp.override_job_ids, [900001]);
   const list = await jobs();
   assert.equal(byId(list, 900002).pause_reason, "client");
-  assert.equal(byId(list, 900002).appid, 2010020, "Copper Horizon's first download");
+  assert.equal(byId(list, 900002).appid, 2010050, "Frostline Convoy: finishing it changes nothing showcased");
   assert.equal(byId(list, 900003).status, "queued");
   assert.equal(byId(list, 900003).type, "gc", "a queued GC dry run waits too (Weg A)");
   assert.equal(byId(list, 900003).appid, 2010030, "on the game whose download already runs");

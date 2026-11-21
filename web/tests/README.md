@@ -4227,8 +4227,8 @@ and that leaving the view stops the hold poll (it waits 5.6 s, the last test
 of the file); the clock is pinned under TZ=Europe/Berlin and UTC.
 `demo-data-client-hold.test.js` (new): the demo's hold scenario
 (`resetDemoData({ clientHold: true })`; on by default in a browser demo, off
-in bare Node like the relay playtime gate): Copper Horizon's first download
-(900002) paused for the online agent's address, a GC dry run on Driftwood
+in bare Node like the relay playtime gate): an update run of Frostline
+Convoy (900002) paused for the online agent's address, a GC dry run on Driftwood
 Signal (900003) queued, the running 900001 resumed by choice. While it holds
 a new prefill, cached check or GC job stays queued; after 6 job polls the
 hold ends by itself, the paused job resumes and the queue drains; Pause on
