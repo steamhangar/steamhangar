@@ -247,8 +247,10 @@ Ports `web/js/components/status-icon.js` + the `.sic` rules in
   - ~~`downloadDriftFraction` / `downloadOpacityFraction`~~ — removed in
     WP APP-FIX-3: the running download glyph now "falls through" (two
     arrows one `DOWNLOAD_FALL_PERIOD` apart, clipped to the disc, no fade);
-    the geometry is `downloadFallOffset`/`downloadArrowOffsets` plus the
-    measuring helpers, see "Android parity (WP APP-FEAT-2)" below.
+    the geometry is `downloadFallOffset`/`downloadArrowOffsets`; the
+    test-only measuring helpers live in the test source set
+    (`StatusIconArrowGeometry.kt`, WP STATUS-ICON-TEST-HELPERS-1), see
+    "Android parity (WP APP-FEAT-2)" below.
 - **`AnimatorsEnabled.kt`** — documents and implements *how Compose picks
   up the system reduced-motion setting* (see below).
 - **`StatusIcon.kt`** — the Compose composable, drawing each glyph on a
