@@ -455,8 +455,22 @@ fun highestSuffix(series: SeriesOut): String {
 /** WP APP-DL-STATS-1 review (web `highestPeriodText`): the period for
  * TalkBack (the axis captions are decoration), or "" when unknown. */
 fun highestPeriodText(series: SeriesOut): String {
-    val word = bucketShort(highestBucketSeconds(series))
+    val word = bucketSpoken(highestBucketSeconds(series))
     return if (word.isNotEmpty()) "The highest point is an average over $word." else ""
+}
+
+/** WP APP-DL-STATS-1 re-check nit (web `bucketSpoken`): a bucket length in
+ * words for TalkBack ("5 seconds", "1 minute", "1 hour", "1 day"); the
+ * visible caption keeps [bucketShort]. "" for no length. */
+fun bucketSpoken(bucketSeconds: Int?): String {
+    if (bucketSeconds == null || bucketSeconds <= 0) return ""
+    fun unit(n: Long, word: String) = "$n $word${if (n == 1L) "" else "s"}"
+    return when {
+        bucketSeconds < 60 -> unit(bucketSeconds.toLong(), "second")
+        bucketSeconds < 3600 -> unit(jsRound(bucketSeconds / 60.0), "minute")
+        bucketSeconds < 86400 -> unit(jsRound(bucketSeconds / 3600.0), "hour")
+        else -> unit(jsRound(bucketSeconds / 86400.0), "day")
+    }
 }
 
 /** WP APP-DL-STATS-1 (web `graphLabel`): the graph's content description:

@@ -129,6 +129,13 @@ class TrafficWebTwinTest {
                 "if (best === null || v > best.v) best = { v, p };",
                 // The period for screen readers, and the graph's accessible name.
                 "return word ? `The highest point is an average over \${word}.` : \"\";",
+                // The spoken period (TalkBack / screen readers), not the caption's short units.
+                "const word = bucketSpoken(highestBucketSeconds(series));",
+                "const unit = (n, word) => `\${n} \${word}\${n === 1 ? \"\" : \"s\"}`;",
+                "if (bucketSeconds < 60) return unit(bucketSeconds, \"second\");",
+                "if (bucketSeconds < 3600) return unit(Math.round(bucketSeconds / 60), \"minute\");",
+                "if (bucketSeconds < 86400) return unit(Math.round(bucketSeconds / 3600), \"hour\");",
+                "return unit(Math.round(bucketSeconds / 86400), \"day\");",
                 "return [seriesLabel(series, maxBytesPerSecond), highestPeriodText(series), HIGHEST_NOTE].filter(Boolean).join(\" \");",
             ),
         )

@@ -29,6 +29,7 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
+import org.robolectric.annotation.GraphicsMode
 
 /**
  * WP APP-DL-STATS-1 review (must-fix): the graph's axis captions on the
@@ -43,7 +44,11 @@ import org.robolectric.annotation.Config
  * the row, and right of the middle caption.
  */
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [35], application = Application::class)
+// NATIVE graphics: LEGACY (Robolectric's default) measures text at about one
+// pixel per character, so the row would never overflow and the test would
+// pass with the old SpaceBetween row too (APP-DL-STATS-1 re-check).
+@GraphicsMode(GraphicsMode.Mode.NATIVE)
+@Config(sdk = [35], application = Application::class, qualifiers = "w411dp-h891dp")
 class GraphAxisCaptionsTest {
 
     @get:Rule(order = 0)
@@ -56,6 +61,7 @@ class GraphAxisCaptionsTest {
     fun `MUTATION TARGET -- on all at 360dp and font 1_3 the end caption keeps its own single-line width`() {
         val rowWidth = 304.dp
         var rowPx = 0f
+        var gapPx = 0f
         composeRule.setContent {
             val base = LocalDensity.current
             CompositionLocalProvider(LocalDensity provides Density(base.density, fontScale = 1.3f)) {
@@ -63,24 +69,33 @@ class GraphAxisCaptionsTest {
                     rowPx = with(LocalDensity.current) { rowWidth.toPx() }
                     Column {
                         GraphAxisCaptions(
-                            start = "since 2026-09-01",
-                            middle = "highest 19.0 MB/s (1 day avg)",
+                            start = START,
+                            middle = MIDDLE,
                             end = "now",
                             modifier = Modifier.width(rowWidth).testTag(ROW),
                         )
-                        // The reference: the same caption, free-standing, in the same style.
-                        Text(
-                            "now",
-                            style = MaterialTheme.typography.labelSmall,
-                            maxLines = 1,
-                            softWrap = false,
-                            modifier = Modifier.wrapContentWidth().testTag(REF),
-                        )
+                        // The references: each caption free-standing, unconstrained, in the same style.
+                        for ((text, tag) in listOf(START to REF_START, MIDDLE to REF_MIDDLE, "now" to REF)) {
+                            Text(
+                                text,
+                                style = MaterialTheme.typography.labelSmall,
+                                maxLines = 1,
+                                softWrap = false,
+                                modifier = Modifier.wrapContentWidth(unbounded = true).testTag(tag),
+                            )
+                        }
+                        gapPx = with(LocalDensity.current) { 8.dp.toPx() }
                     }
                 }
             }
         }
         composeRule.waitForIdle()
+        // Precondition: the three captions at their own width plus the two
+        // gaps do NOT fit the row, so this is the overflow case.
+        val needed = listOf(REF_START, REF_MIDDLE, REF).sumOf {
+            composeRule.onNodeWithTag(it).fetchSemanticsNode().size.width.toDouble()
+        } + 2 * gapPx
+        assertTrue("precondition: the captions must overflow the row ($needed px needed, $rowPx px there)", needed > rowPx)
         val end = composeRule.onNodeWithTag(GRAPH_END_TAG).fetchSemanticsNode().boundsInRoot
         val ref = composeRule.onNodeWithTag(REF).fetchSemanticsNode().boundsInRoot
         val middle = composeRule.onNodeWithTag(GRAPH_HIGHEST_TAG).fetchSemanticsNode().boundsInRoot
@@ -95,6 +110,10 @@ class GraphAxisCaptionsTest {
     private companion object {
         const val ROW = "axis-row"
         const val REF = "axis-ref-now"
+        const val REF_START = "axis-ref-start"
+        const val REF_MIDDLE = "axis-ref-middle"
+        const val START = "since 2026-09-01"
+        const val MIDDLE = "highest 19.0 MB/s (1 day avg)"
     }
 }
 

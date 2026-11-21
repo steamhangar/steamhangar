@@ -609,8 +609,24 @@ export function highestSuffix(series) {
  * @returns {string}
  */
 export function highestPeriodText(series) {
-  const word = bucketShort(highestBucketSeconds(series));
+  const word = bucketSpoken(highestBucketSeconds(series));
   return word ? `The highest point is an average over ${word}.` : "";
+}
+
+/**
+ * WP APP-DL-STATS-1 (re-check nit): a bucket length in words for screen
+ * readers ("5 seconds", "1 minute", "5 minutes", "1 hour", "1 day"); the
+ * visible caption keeps `bucketShort`. "" for no length.
+ * @param {number} bucketSeconds
+ * @returns {string}
+ */
+export function bucketSpoken(bucketSeconds) {
+  if (!Number.isInteger(bucketSeconds) || bucketSeconds <= 0) return "";
+  const unit = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
+  if (bucketSeconds < 60) return unit(bucketSeconds, "second");
+  if (bucketSeconds < 3600) return unit(Math.round(bucketSeconds / 60), "minute");
+  if (bucketSeconds < 86400) return unit(Math.round(bucketSeconds / 3600), "hour");
+  return unit(Math.round(bucketSeconds / 86400), "day");
 }
 
 /**

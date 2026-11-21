@@ -279,10 +279,15 @@ class TrafficViewTest {
         val tie = liveSeries(LiveOut(event_feed = feed("ok"), points = listOf(livePoint("a", 60, 7.0), livePoint("b", 5, 7.0))))
         assertEquals(" (1 min avg)", highestSuffix(tie))
         // TalkBack hears the period too, between the label and the note.
-        assertEquals("The highest point is an average over 15 s.", highestPeriodText(live))
+        assertEquals("The highest point is an average over 15 seconds.", highestPeriodText(live))
+        assertEquals(
+            listOf("1 second", "5 seconds", "15 seconds", "1 minute", "5 minutes", "1 hour", "2 hours", "1 day"),
+            listOf(1, 5, 15, 60, 300, 3600, 7200, 86400).map { bucketSpoken(it) },
+        )
+        assertEquals("", bucketSpoken(0))
         assertEquals("", highestPeriodText(SeriesOut(range = "24h", bucket_seconds = 300, points = emptyList())))
         assertEquals(
-            "Average speed per 5 minutes in the last 24 hours. Highest: < 1 KB/s. The highest point is an average over 5 min. $HIGHEST_NOTE",
+            "Average speed per 5 minutes in the last 24 hours. Highest: < 1 KB/s. The highest point is an average over 5 minutes. $HIGHEST_NOTE",
             graphLabel(persisted, 9.0),
         )
         assertNull(highestBucketSeconds(SeriesOut(range = "24h", bucket_seconds = 300, points = emptyList())))

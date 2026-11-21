@@ -189,7 +189,7 @@ test("MUTATION TARGET: feed ok — big speed, pill, caption, mini line, four til
   assert.equal(svg.tagName, "SVG");
   assert.equal(svg.getAttribute("role"), "img");
   assert.equal(svg.getAttribute("viewBox"), "0 0 600 96");
-  assert.equal(svg.getAttribute("aria-label"), `Average speed per 5 minutes in the last 6 hours. Highest: 10.0 MB/s. The highest point is an average over 5 min. ${HIGHEST_NOTE}`); // stored range: 6 h (the default is live since LIVE-DELAY-1)
+  assert.equal(svg.getAttribute("aria-label"), `Average speed per 5 minutes in the last 6 hours. Highest: 10.0 MB/s. The highest point is an average over 5 minutes. ${HIGHEST_NOTE}`); // stored range: 6 h (the default is live since LIVE-DELAY-1)
   assert.deepEqual(svg.children[0].children.map((l) => l.getAttribute("y1")), ["24", "48", "72"], "grid lines");
   // WP WEB-FIX-20.2: the points carry the hit/miss split, so two series;
   // the internet band's top line is the total.
