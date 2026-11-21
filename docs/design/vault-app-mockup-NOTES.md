@@ -103,16 +103,22 @@ with no cached co-owner" state exists on first load instead of having to be cons
 
 ## Design decisions
 
-**Palette.** Ground `#0A1016` with surfaces at `#111C24`/`#17252F` — a blue-grey
-biased slightly toward cyan so the neutrals and the accent belong to the same family.
+**Palette.** Ground `#081113` with surfaces at `#111D20`/`#18262A` — a grey turned
+toward the accent's cyan (OKLCH hue ~218, low chroma) so the neutrals and the accent
+belong to the same family. (Until NEUTRAL-RAMP-1, audit D-7, the ramp was `#0A1016`
+/ `#111C24` / `#17252F`, hue 230-249, a steel blue rather than the cyan this sentence
+claimed; `docs/design/tokens.json` holds the current values.) `vault-app-mockup.html`
+keeps its original palette as the frozen round-7 reference; `docs/design/tokens.json`
+is the source of truth for every colour.
 Accent is a vault aqua `#2ED9CE`, used only for primary actions, active nav, focus
 and progress. Status colors are a separate semantic set and never double as accent.
 **Retuned in round 5 for CVD separation** (see "Status icons" below): green `#57DD8A`
-current · yellow `#F2CE5B` running · orange `#F07B2E` update ready · grey `#8296A6` not
-cached · red `#FF6F6F` destructive. The three coloured states now differ in *lightness*
-as well as hue, because red-green colour-blindness collapses them onto a light-dark axis;
-grey is fully desaturated so it reads as neutral. Colour is only the **third** cue —
-shape (a status-icon glyph) is first, the status word second where there is room.
+current · yellow `#F2CE5B` running · orange `#F07B2E` update ready · grey `#82979E` not
+cached (`#8296A6` until NEUTRAL-RAMP-1) · red `#FF6F6F` destructive. The three coloured
+states now differ in *lightness* as well as hue, because red-green colour-blindness
+collapses them onto a light-dark axis; grey is a low-chroma member of the neutral ramp
+so it reads as neutral. Colour is only the **third** cue — shape (a status-icon glyph)
+is first, the status word second where there is room.
 
 **Committed to dark, on purpose.** The app surface is single-theme (your decision);
 only the desk backdrop behind the phone follows the viewer's light/dark preference,

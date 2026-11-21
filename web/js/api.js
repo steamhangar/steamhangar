@@ -228,10 +228,20 @@ const untimed = {
  * response models — no renaming layer, so a payload can be handed straight
  * to diff-utils.js / notifications.js keyed the same way the server keys it.
  *
- * Deliberately NOT wrapped here (out of this WP's scope — no current
- * consumer needs them yet): /v1/oracle*, /v1/schedule, /v1/stats. Add them
- * with the WP that first needs them rather than guessing their call shape
- * now.
+ * Deliberately NOT wrapped here (no web consumer needs them): `GET` and
+ * `DELETE /v1/oracle/{appid}`, `POST /v1/oracle/{appid}/refresh`,
+ * `GET /v1/stats`, `PUT /v1/mapping/{depotid}`,
+ * `DELETE /v1/mapping/{depotid}/{appid}`, `GET /v1/client-names` (the
+ * clients rows carry the names) and the server-selected "incomplete"
+ * prefill route in routers/jobs.py (the web sends `POST /v1/prefill/verify`
+ * with the listed rows instead, lib/cache-completeness.js header; its path
+ * stays out of this file, game-detail-sheet-completeness.test.js guards
+ * that). Add one with the package that first needs it rather than guessing
+ * its call shape now. Not wrapped for other reasons:
+ * `POST /v1/agent/installed` is agent-facing,
+ * `GET /v1/covers/{appid}/{signature}` is loaded as an image URL
+ * (lib/cover-art.js), and `GET /v1/health` is called without a key by
+ * `checkVaultApiKey` below.
  *
  * `gc` (WP 4a.4) mirrors the Android sibling's `CacheRepository.gc`
  * semantics exactly: `execute` defaults to `false` (dry run) on both sides,
@@ -265,20 +275,18 @@ const untimed = {
  * builds (only the keys that actually changed) and returns straight through
  * to `PATCH /v1/settings`, which answers with the same shape `GET` does.
  *
- * `schedule` (WP 4d-web) wraps `GET /v1/schedule` — the one route the WP
- * 4a.2 header above explicitly deferred ("Add them with the WP that first
- * needs them"). The Settings view is the first real consumer: it reads
- * `last_sweep_targets`/`last_sweep_at`/`last_sweep_enqueued` (the
- * "did the schedule actually do anything" signal) and `sweep_cached_gc_risk`
- * (the already-computed warning condition — see
- * `api/vault_api/routers/schedule.py`'s own docstring on that field: "a UI
- * can render this as a banner without re-deriving the two settings'
- * interaction itself"). No caller re-derives that boolean from
- * `sweep_include_cached`/`auto_gc` client-side; see
+ * `schedule` (WP 4d-web) wraps `GET /v1/schedule`, a route the WP 4a.2
+ * header first deferred until a consumer needed it. The Settings view is
+ * the first real consumer: it reads `last_sweep_targets`/`last_sweep_at`/
+ * `last_sweep_enqueued` (the "did the schedule actually do anything"
+ * signal) and `sweep_cached_gc_risk` (the already-computed warning
+ * condition — see `api/vault_api/routers/schedule.py`'s own docstring on
+ * that field: "a UI can render this as a banner without re-deriving the
+ * two settings' interaction itself"). No caller re-derives that boolean
+ * from `sweep_include_cached`/`auto_gc` client-side; see
  * `web/js/lib/schedule-presentation.js`'s header for why.
  */
 export const api = {
-  health: () => request("GET", "/v1/health"),
   games: () => request("GET", "/v1/games", { timeoutMs: LONG_REQUEST_TIMEOUT_MS }),
   game: (appid) => request("GET", `/v1/games/${appid}`, { timeoutMs: LONG_REQUEST_TIMEOUT_MS }),
   mapping: () => request("GET", "/v1/mapping"),

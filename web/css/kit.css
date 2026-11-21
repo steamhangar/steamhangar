@@ -124,8 +124,8 @@
    narrow container instead (same rule as app.css's `.segs.rangesegs`). */
 .kit .seg{ display:inline-flex; gap:2px; padding:3px; background:var(--surface); border:1px solid var(--line-soft); border-radius:var(--r-s); max-width:100%; min-width:0; overflow-x:auto; scrollbar-width:none; }
 .kit .seg button{ font:500 var(--fs-2)/1 var(--ui); color:var(--dim); background:none; border:0; border-radius:calc(var(--r-s) - 3px); padding:7px var(--sp-3); cursor:pointer; flex:none; white-space:nowrap; }
-/* WP CONTRAST-1: the selected segment's --raised-2 fill is only 1.27:1 on
-   --surface; the --dim-2 ring (5.25:1 on --surface, 4.15:1 on --raised-2)
+/* WP CONTRAST-1: the selected segment's --raised-2 fill is only 1.26:1 on
+   --surface; the --dim-2 ring (5.26:1 on --surface, 4.17:1 on --raised-2)
    is the 3:1 state indicator (WCAG 1.4.11). Same for `.segi` below. */
 .kit .seg button[aria-pressed="true"]{ background:var(--raised-2); color:var(--text); box-shadow:inset 0 0 0 1px var(--dim-2); }
 
@@ -340,7 +340,7 @@
 }
 .kit .ad-tabs .tab svg{ width:18px; height:18px; }
 /* WP CONTRAST-1: the --raised-2 fill is only 1.40:1 on the --bg strip; the
-   --dim-2 ring (5.81:1 on --bg, 4.15:1 on --raised-2) is the 3:1 state
+   --dim-2 ring (5.84:1 on --bg, 4.17:1 on --raised-2) is the 3:1 state
    indicator, as on the selected `.seg` segment. */
 .kit .ad-tabs .tab[aria-selected="true"]{ background:var(--raised-2); color:var(--accent); box-shadow:inset 0 0 0 1px var(--dim-2); }
 .kit .ad-tabs .tab:focus-visible{ outline:2px solid var(--accent); outline-offset:1px; }
@@ -900,8 +900,8 @@
   display:flex; flex-wrap:wrap; align-items:center; gap:10px; border-radius:var(--r-m); box-shadow:var(--sh-1);
 }
 .kit .lib-meta-cats{ display:flex; flex-wrap:wrap; gap:6px; flex-basis:100%; }
-/* On the --raised-2 popover --line-strong is only 2.72:1; --dim-2 is 4.15:1
-   against the popover and 5.81:1 against the field's --bg (WP CONTRAST-1). */
+/* On the --raised-2 popover --line-strong is only 2.74:1; --dim-2 is 4.17:1
+   against the popover and 5.84:1 against the field's --bg (WP CONTRAST-1). */
 .kit .lib-meta select, .kit .lib-meta-year{
   height:34px; padding:0 10px; border-radius:var(--r-s); background:var(--bg); color:var(--text);
   border:1px solid var(--dim-2); font:400 var(--fs-3) var(--ui);
@@ -986,7 +986,7 @@
 .kit .stt .state.tx-error{ color:var(--danger); }
 /* WP PILL-TONE-1 (operator 2026-11-21, Weg A): the card word of the two
    grey states takes the --none of its pill and dot, like the orange and red
-   ones take theirs: "Cached · not verified" and "Not cached" (5.65:1 on the
+   ones take theirs: "Cached · not verified" and "Not cached" (5.63:1 on the
    list row's --surface, 6.25:1 on --bg under a grid cover). Current and the
    active states keep the --dim word; their dot carries the tone. */
 .kit .stt .state.tx-unverified, .kit .stt .state.tx-none{ color:var(--none); }

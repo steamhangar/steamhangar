@@ -3809,6 +3809,9 @@ Demo: Aurora Cascade 86% (completable), Starfall Legion 99% damaged-only
 (group card "Partially cached 99%"), Emberreach unknown (announced build),
 Driftwood Signal mid-download; the two routes and `?incomplete=true`;
 a finished demo prefill re-measures (wrong-size chunks stay).
+NITS-AUDIT-WEB-1 (audit C-7, rc23) removed the demo's
+`POST /v1/prefill/incomplete` handler and its test: the web never sends
+that route, so `demo-data-completeness.test.js` has 8 tests since.
 
 Tests: `cache-completeness.test.js` 18, `game-card-completeness.test.js`
 11, `game-detail-sheet-completeness.test.js` 11,
@@ -4163,3 +4166,21 @@ as the record of their package. What changed:
   fixture (`throughput-fixture.js`), so no test depends on an error path
   to end its poll; they leave the Downloads view in `after()`, which stops
   the poll.
+
+### WP NEUTRAL-RAMP-1 (rc23, audit 2026-11-20 D-7, Weg B): neutral ramp toward the accent hue
+
+The neutral tokens (`--bg`, `--surface`, `--raised`, `--raised-2`,
+`--line`, `--line-soft`, `--line-strong`, `--text`, `--dim`, `--dim-2`,
+`--none`) turned from OKLCH hue 230-249 to ~218 with lightness kept
+(tokens.json, theme.css, kit.html, Android `VaultColors`). No new test;
+the value pins moved: `css-contrast` (every ratio recomputed from
+tokens.json: `--line-strong` 3.83 / 3.45 / 3.12:1 on bg / surface /
+raised, 2.74:1 on `--raised-2`; sic ink on `--dim-2` 5.82:1, `--text`
+2.80:1; pill words ok 7.33, run 8.14, stale 5.12, danger 5.26, none 4.58,
+neutral 5.06:1; `--none` 5.63:1 on `--surface`, 6.25:1 on `--bg`, still
+4.46:1 on `--raised-2`; `--dim-2` 4.17:1 on `--raised-2`, 5.84:1 on
+`--bg`, 5.26:1 on `--surface`; no pair dropped under its WCAG target),
+`css-kit-scale` and `design-tokens-contract` (`--dim-2:#7C9298`),
+`css-layout-foundation` (the verbatim `:root` colour list). The
+`png-diff` blind-spot test keeps the old `--dim`/`--dim-2` pair as its
+synthetic sample (it does not read the tokens).

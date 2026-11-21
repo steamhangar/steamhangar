@@ -301,7 +301,7 @@
 .tx-stale{ color:var(--stale); }
 /* WP CACHE-COMPLETE-1c (lib/cache-completeness.js `cardDisplay`). */
 /* WP PILL-TONE-1: unverified's word takes --none like its pill and dot
-   (5.65:1 on --surface, 6.25:1 on --bg; it was --dim). */
+   (5.63:1 on --surface, 6.25:1 on --bg; it was --dim). */
 .tx-partial{ color:var(--stale); } .tx-unverified{ color:var(--none); }
 /* WP WEB-FEAT-6: a running prefill over a completed copy (mockup colours:
    updating shares --run). WP PILL-TONE-1: verify too, like its disc and
