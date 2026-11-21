@@ -48,6 +48,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -62,6 +63,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.isTraversalGroup
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
@@ -688,19 +690,20 @@ internal fun JobCard(
             // Title block and pill (web `.job .t`). WP WEB-FIX-9: the pill
             // centres on the name + job line block (web `align-items:center`);
             // the name takes the free width and wraps, so a long name never
-            // pushes the pill out of the card.
+            // pushes the pill out of the card. The title block is a traversal
+            // group, so TalkBack reads name and meta before the pill (the pill
+            // centred on the block would otherwise sort between them).
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(JOB_CARD_GAP),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(model.name, style = MaterialTheme.typography.titleMedium)
+                Column(modifier = Modifier.weight(1f).semantics { isTraversalGroup = true }) {
+                    Text(model.name, style = jobCardTitleStyle())
                     Text(
                         stringResource(R.string.downloads_job_subtitle, model.jobId, model.appid),
                         style = JobCardMetaStyle,
                         color = VaultColors.Dim,
-                        modifier = Modifier.padding(top = 2.dp),
                     )
                 }
                 StatusPill(HeroStatus(model.kind, model.statusWord))
@@ -789,6 +792,12 @@ internal fun JobCard(
 internal val JOB_CARD_PADDING_H = 16.dp
 internal val JOB_CARD_PADDING_V = 12.dp
 internal val JOB_CARD_GAP = 12.dp
+
+/** Web `.job .nm{ font-size:var(--fs-4); font-weight:500 }`: 15 sp Medium, like the
+ * Clients card title (ClientCardViews.kt). */
+@Composable
+@ReadOnlyComposable
+private fun jobCardTitleStyle(): TextStyle = MaterialTheme.typography.titleMedium.copy(fontSize = 15.sp, fontWeight = FontWeight.Medium)
 
 /** Web `.job .meta{ font:var(--fs-1) var(--mono) }`: mono, 11 sp, regular. */
 private val JobCardMetaStyle = TextStyle(fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Normal, fontSize = 11.sp)

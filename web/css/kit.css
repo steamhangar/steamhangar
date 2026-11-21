@@ -556,7 +556,9 @@
    --fs-4, the card-title role, over the mono meta) beside the status pill,
    then the figures (speed line, figures in bold like the Throughput card's
    caption), the notes, the actions; one --sp-3 rhythm between them and
-   the card padding on the scale (16 px sides, the Android column inset). */
+   the card padding on the scale (16 px sides, the Android column inset).
+   The job's speed figure is bold --text, not accent: like `.hcap b` it is
+   a rolling average over minutes, not the live ring (accent = live). */
 .kit .job{
   background:var(--raised); border:1px solid color-mix(in srgb, var(--run) 40%, var(--line));
   border-radius:var(--r-m); padding:var(--sp-3) var(--sp-4); display:grid; gap:var(--sp-3); min-width:0;

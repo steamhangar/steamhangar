@@ -4,7 +4,9 @@ import android.app.Application
 import android.content.ComponentName
 import androidx.activity.ComponentActivity
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -38,6 +40,12 @@ import dev.steamvault.app.repo.ClientsRepository
 import dev.steamvault.app.repo.SettingsRepository
 import dev.steamvault.app.repo.TrafficRepository
 import dev.steamvault.app.ui.downloads.DownloadsStatsHeader
+import dev.steamvault.app.ui.downloads.JobCard
+import dev.steamvault.app.ui.downloads.JobSpeedLine
+import dev.steamvault.app.ui.downloads.logic.JobCardAction
+import dev.steamvault.app.ui.downloads.logic.JobCardMode
+import dev.steamvault.app.ui.downloads.logic.JobCardModel
+import dev.steamvault.app.ui.status.StatusKind
 import dev.steamvault.app.ui.downloads.downloadsStatsPoll
 import dev.steamvault.app.ui.library.ScreenshotGoldens
 import dev.steamvault.app.ui.nav.Destination
@@ -109,7 +117,19 @@ class ClientsScreenshotTest {
     fun downloads_stats_360dp_font130_night() =
         shoot("downloads_stats_360dp_font130_night", widthDp = 360, heightDp = 1250, fontScale = 1.3f, page = Page.STATS)
 
-    private enum class Page { CLIENTS, STATS }
+    /** WP APP-DL-CARD-1 (operator report 2026-11-01): the Downloads job card,
+     * the reported surface -- a held card with a long name and the long
+     * CAP-503 hold note, a running card that pauses for a device (speed line,
+     * client note, stop note), and a held GC card with its long pill. */
+    @Test
+    fun downloads_job_card_360dp_font130() =
+        shoot("downloads_job_card_360dp_font130", widthDp = 360, heightDp = 1000, fontScale = 1.3f, page = Page.JOB_CARDS)
+
+    @Test
+    fun downloads_job_card_411dp_font100() =
+        shoot("downloads_job_card_411dp_font100", widthDp = 411, heightDp = 891, fontScale = 1.0f, page = Page.JOB_CARDS)
+
+    private enum class Page { CLIENTS, STATS, JOB_CARDS }
 
     private fun shoot(name: String, widthDp: Int, heightDp: Int, fontScale: Float, page: Page) {
         RuntimeEnvironment.setQualifiers("w${widthDp}dp-h${heightDp}dp-night-420dpi")
@@ -142,6 +162,23 @@ class ClientsScreenshotTest {
                         LaunchedEffect(poll) { poll.refreshOnce() }
                         Box(Modifier.statusBarsPadding().padding(12.dp)) { DownloadsStatsHeader(poll, scope, nowMs = { NOW }) }
                     }
+                    // The Downloads list's insets: 12dp padding, 8dp between rows.
+                    Page.JOB_CARDS -> Surface(color = MaterialTheme.colorScheme.background, modifier = Modifier.fillMaxSize()) {
+                        Column(Modifier.statusBarsPadding().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            JobCard(model = HELD_CARD, speedLine = null, busy = false, holdNote = LONG_HOLD_NOTE, onPause = {}, onResume = {}, onCancel = {})
+                            JobCard(
+                                model = RUNNING_CARD,
+                                speedLine = JobSpeedLine("31.5 MB/s · 8.8 GB loaded so far · about 6 min left", "Measured at the cache."),
+                                busy = false,
+                                clientNote = CLIENT_NOTE,
+                                pausingNote = PAUSING_NOTE,
+                                onPause = {},
+                                onResume = {},
+                                onCancel = {},
+                            )
+                            JobCard(model = GC_HELD_CARD, speedLine = null, busy = false, onPause = {}, onResume = {}, onCancel = {})
+                        }
+                    }
                 }
             }
         }
@@ -151,6 +188,7 @@ class ClientsScreenshotTest {
         when (page) {
             Page.CLIENTS -> assertClientsPage(wholePage = heightDp >= FULL_PAGE_DP)
             Page.STATS -> assertStatsHeader()
+            Page.JOB_CARDS -> assertJobCards()
         }
     }
 
@@ -183,6 +221,17 @@ class ClientsScreenshotTest {
         val downloads = composeRule.onNode(hasText("Downloads"), useUnmergedTree = true).fetchSemanticsNode().size.height
         val settings = composeRule.onNode(hasText("Settings"), useUnmergedTree = true).fetchSemanticsNode().size.height
         assertEquals("the Downloads nav label wrapped (height $downloads vs Settings $settings)", settings, downloads)
+    }
+
+    /** The three cards are composed with their pills, notes and actions. */
+    private fun assertJobCards() {
+        for (word in listOf("Paused", "Downloading", "Garbage collection paused")) {
+            composeRule.onNode(hasContentDescription(word)).assertExists()
+        }
+        for (text in listOf(LONG_HOLD_NOTE, CLIENT_NOTE, PAUSING_NOTE)) {
+            composeRule.onNode(hasText(text), useUnmergedTree = true).assertExists()
+        }
+        composeRule.onNode(hasContentDescription("31.5 MB/s · 8.8 GB loaded so far", substring = true)).assertExists()
     }
 
     private fun assertStatsHeader() {
@@ -235,6 +284,33 @@ class ClientsScreenshotTest {
     private companion object {
         /** Height of the whole-page shot (WP ANDROID-REDESIGN-1a). */
         const val FULL_PAGE_DP = 3000
+
+        /** WP APP-DL-CARD-1: the job card shots' texts and cards. */
+        const val LONG_HOLD_NOTE =
+            "Paused to give workshop-livingroom-pc the full speed through the cache. Resumes by itself at about 12:02 " +
+                "unless a device keeps loading. Resume runs it now, alongside workshop-livingroom-pc."
+        const val CLIENT_NOTE = "Runs alongside workshop-livingroom-pc by your choice."
+        const val PAUSING_NOTE = "Pausing to give workshop-livingroom-pc the full speed through the cache."
+        private val HOLD_ACTIONS = JobCardAction(
+            showPause = false, pauseEnabled = false, showResume = true, showCancel = true,
+            cancelEnabled = true, pausing = false, cancelling = false,
+        )
+        val HELD_CARD = JobCardModel(
+            jobId = 266, appid = 4_010_030, name = "The Long Dark Survival Edition: Wintermute Redux",
+            kind = StatusKind.PAUSED, statusWord = "Paused", mode = JobCardMode.HELD, action = HOLD_ACTIONS,
+        )
+        val RUNNING_CARD = JobCardModel(
+            jobId = 267, appid = 4_010_040, name = "Breathedge", kind = StatusKind.RUNNING, statusWord = "Downloading",
+            mode = JobCardMode.ACTIVE,
+            action = JobCardAction(
+                showPause = true, pauseEnabled = false, showResume = false, showCancel = true,
+                cancelEnabled = true, pausing = true, cancelling = false,
+            ),
+        )
+        val GC_HELD_CARD = JobCardModel(
+            jobId = 268, appid = 4_010_010, name = "Duskfall Array", kind = StatusKind.PAUSED,
+            statusWord = "Garbage collection paused", mode = JobCardMode.HELD, action = HOLD_ACTIONS, gcHold = true,
+        )
 
         /** An evening (UTC), so the demo's daily rhythm draws a real graph. */
         val NOW: Long = Instant.parse("2026-10-14T19:30:00Z").toEpochMilli()

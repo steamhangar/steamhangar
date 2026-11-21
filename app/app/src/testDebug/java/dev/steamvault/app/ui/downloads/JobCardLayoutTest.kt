@@ -23,7 +23,9 @@ import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.unit.Density
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import dev.steamvault.app.ui.downloads.logic.JobCardAction
 import dev.steamvault.app.ui.downloads.logic.JobCardMode
 import dev.steamvault.app.ui.downloads.logic.JobCardModel
@@ -50,8 +52,10 @@ import org.robolectric.annotation.GraphicsMode
  * wide inside the list's 12dp padding). Semantics and bounds only, no
  * golden: a long name wraps beside the status pill instead of squeezing it,
  * the long CAP-503 hold note stays inside the card behind its rule, the
- * buttons keep a 48dp touch target, TalkBack reads title, pill, figures,
- * notes, actions in that order, and the pill's word is read once.
+ * buttons keep a 48dp touch target, the title block is a traversal group
+ * (TalkBack reads name and meta before the pill centred beside them), the
+ * blocks are composed title, pill, figures, notes, actions, and the pill's
+ * word is read once.
  */
 @RunWith(RobolectricTestRunner::class)
 // NATIVE graphics: LEGACY (Robolectric's default) measures text at about one
@@ -68,7 +72,14 @@ class JobCardLayoutTest {
 
     private var px = 0f
 
-    private fun show(model: JobCardModel, speedLine: JobSpeedLine? = null, holdNote: String? = null, clientNote: String? = null, pausingNote: String? = null) {
+    private fun show(
+        model: JobCardModel,
+        speedLine: JobSpeedLine? = null,
+        holdNote: String? = null,
+        clientNote: String? = null,
+        pausingNote: String? = null,
+        refWord: String = "",
+    ) {
         composeRule.setContent {
             val base = LocalDensity.current
             CompositionLocalProvider(LocalDensity provides Density(base.density, fontScale = 1.3f)) {
@@ -90,13 +101,15 @@ class JobCardLayoutTest {
                         }
                         // References, free-standing and unconstrained: the name in the card's
                         // title style and the pill as the card draws it.
-                        Text(
-                            model.name,
-                            style = MaterialTheme.typography.titleMedium,
-                            maxLines = 1,
-                            softWrap = false,
-                            modifier = Modifier.wrapContentWidth(unbounded = true).testTag(REF_NAME),
-                        )
+                        for ((text, tag) in listOf(model.name to REF_NAME, refWord to REF_WORD)) {
+                            Text(
+                                text,
+                                style = titleStyle(),
+                                maxLines = 1,
+                                softWrap = false,
+                                modifier = Modifier.wrapContentWidth(unbounded = true).testTag(tag),
+                            )
+                        }
                         Box(Modifier.wrapContentWidth(unbounded = true).testTag(REF_PILL)) {
                             StatusPill(HeroStatus(model.kind, model.statusWord))
                         }
@@ -164,11 +177,50 @@ class JobCardLayoutTest {
     }
 
     @Test
-    fun `TalkBack order is title, meta, pill, notes, actions`() {
+    fun `the title block is a traversal group, composed before the pill, notes and actions`() {
         show(HELD, holdNote = LONG_HOLD_NOTE)
+        // Composition order (what TalkBack follows inside traversal groups).
         assertEquals(
-            listOf(LONG_NAME, "job #266 · appid 4010030", "Paused", LONG_HOLD_NOTE, "Resume", "Cancel"),
-            readingOrder().filter { it in setOf(LONG_NAME, "job #266 · appid 4010030", "Paused", LONG_HOLD_NOTE, "Resume", "Cancel") },
+            listOf(LONG_NAME, META, "Paused", LONG_HOLD_NOTE, "Resume", "Cancel"),
+            readingOrder().filter { it in setOf(LONG_NAME, META, "Paused", LONG_HOLD_NOTE, "Resume", "Cancel") },
+        )
+        // The pill is centred on the two-line block, so by position TalkBack would
+        // read name, pill, meta; the traversal group keeps name and meta together.
+        val groups = nodesUnder(CARD) { it.config.getOrNull(SemanticsProperties.IsTraversalGroup) == true }
+        val title = groups.singleOrNull { g -> g.children.map { c -> c.config.getOrNull(SemanticsProperties.Text)?.joinToString { it.text } } == listOf(LONG_NAME, META) }
+        assertTrue("the title block (name + meta) is not one traversal group: ${groups.map { g -> g.children.size }}", title != null)
+    }
+
+    @Test
+    fun `a GC hold's long pill leaves the name a usable column inside the card`() {
+        show(GC_HELD, refWord = GC_NAME_WORD)
+        val card = bounds(CARD)
+        val pill = pillBounds(CARD, GC_WORD)
+        val ref = pillBounds(REF_PILL, GC_WORD)
+        assertEquals("the GC pill was squeezed", ref.width, pill.width, 0.5f)
+        assertTrue("the GC pill leaves the card", pill.right <= card.right - 16 * px + 0.5f)
+        val name = textBounds(CARD, GC_NAME)
+        assertTrue("the name runs under the pill", name.right <= pill.left + 0.5f)
+        assertTrue("the name column is under 40dp (${name.width / px} dp)", name.width >= 40 * px)
+        assertTrue("the name leaves the card", name.left >= card.left + 16 * px - 0.5f)
+    }
+
+    /**
+     * KNOWN NIT (APP-DL-CARD-1 review N3, kept for web parity): at 360dp /
+     * font 1.3 the "Garbage collection paused" pill (about 240dp) leaves the
+     * name about 55dp, less than "Wrenfield" needs, so the name breaks inside
+     * the word (the web `.nm{ overflow-wrap:anywhere }` does the same at a
+     * narrow column). This test records that state; when a fix lands (pill
+     * under the name, or a shorter word), flip it to `>=`.
+     */
+    @Test
+    fun `KNOWN NIT -- next to the GC pill the name breaks inside a word at 360dp and font 1_3`() {
+        show(GC_HELD, refWord = GC_NAME_WORD)
+        val name = textBounds(CARD, GC_NAME)
+        val word = bounds(REF_WORD)
+        assertTrue(
+            "the name column (${name.width / px} dp) now fits \"$GC_NAME_WORD\" (${word.width / px} dp): the nit is fixed, flip this test",
+            name.width < word.width,
         )
     }
 
@@ -188,7 +240,7 @@ class JobCardLayoutTest {
         assertTrue("the action row is under 48dp tall", card.bottom - stop.bottom >= (12 + 48 + 12) * px - 0.5f)
     }
 
-    /** Text or description of every node under the card, depth first in child order (TalkBack's order here). */
+    /** Text or description of every node under the card, depth first in composition (child) order. */
     private fun readingOrder(): List<String> {
         val out = ArrayList<String>()
         fun walk(node: SemanticsNode) {
@@ -209,7 +261,16 @@ class JobCardLayoutTest {
         const val CARD = "job-card"
         const val REF_NAME = "ref-name"
         const val REF_PILL = "ref-pill"
+        const val REF_WORD = "ref-word"
         const val LONG_NAME = "The Long Dark Survival Edition: Wintermute Redux"
+        const val META = "job #266 · appid 4010030"
+        const val GC_NAME = "Wrenfield Static"
+        const val GC_NAME_WORD = "Wrenfield"
+        const val GC_WORD = "Garbage collection paused"
+
+        /** The card's title style (DownloadsScreen.kt `jobCardTitleStyle`, web `.nm` --fs-4). */
+        @androidx.compose.runtime.Composable
+        fun titleStyle() = MaterialTheme.typography.titleMedium.copy(fontSize = 15.sp, fontWeight = FontWeight.Medium)
         // The longest CAP-503 hold note shape (web lib/client-priority.js clientHoldNote).
         const val LONG_HOLD_NOTE =
             "Paused to give workshop-livingroom-pc the full speed through the cache. Resumes by itself at about 12:02 " +
@@ -220,6 +281,14 @@ class JobCardLayoutTest {
         val HELD = JobCardModel(
             jobId = 266, appid = 4_010_030, name = LONG_NAME, kind = StatusKind.PAUSED, statusWord = "Paused",
             mode = JobCardMode.HELD,
+            action = JobCardAction(
+                showPause = false, pauseEnabled = false, showResume = true, showCancel = true,
+                cancelEnabled = true, pausing = false, cancelling = false,
+            ),
+        )
+        val GC_HELD = JobCardModel(
+            jobId = 268, appid = 4_010_030, name = GC_NAME, kind = StatusKind.PAUSED, statusWord = GC_WORD,
+            mode = JobCardMode.HELD, gcHold = true,
             action = JobCardAction(
                 showPause = false, pauseEnabled = false, showResume = true, showCancel = true,
                 cancelEnabled = true, pausing = false, cancelling = false,

@@ -168,8 +168,14 @@ class JobCardDesignTwinTest {
         assertCalledFrom(screen, "text = partsText(jobFigureParts(speedLine.text)),", "JobCard")
         assertCalledFrom(screen, "Modifier.padding(horizontal = JOB_CARD_PADDING_H, vertical = JOB_CARD_PADDING_V),", "JobCard")
         assertCalledFrom(screen, "verticalArrangement = Arrangement.spacedBy(JOB_CARD_GAP),", "JobCard")
-        assertCalledFrom(screen, "Column(modifier = Modifier.weight(1f)) {", "JobCard")
-        assertCalledFrom(screen, "style = MaterialTheme.typography.titleMedium", "JobCard")
+        // The title block takes the free width and is a traversal group (TalkBack: name, meta, then the pill).
+        assertCalledFrom(screen, "Column(modifier = Modifier.weight(1f).semantics { isTraversalGroup = true }) {", "JobCard")
+        assertCalledFrom(screen, "horizontalArrangement = Arrangement.spacedBy(JOB_CARD_GAP),", "JobCard")
+        assertCalledFrom(screen, "Text(model.name, style = jobCardTitleStyle())", "JobCard")
+        assertCalledFrom(screen, "MaterialTheme.typography.titleMedium.copy(fontSize = 15.sp, fontWeight = FontWeight.Medium)", "jobCardTitleStyle")
+        // Meta and figures in Dim (web `.meta` / `.m2{ color:var(--dim) }`).
+        assertCalledFrom(screen, "style = JobCardMetaStyle,\n                        color = VaultColors.Dim,", "JobCard")
+        assertCalledFrom(screen, "style = JobCardFigureStyle,\n                    color = VaultColors.Dim,", "JobCard")
         val code = stripComments(read(screen))
         val start = code.indexOf("internal fun JobCard(")
         assertTrue("JobCard is gone or no longer internal", start >= 0)
@@ -191,6 +197,35 @@ class JobCardDesignTwinTest {
             .map { it to row.indexOf(it) }
         for ((part, at) in webOrder) assertTrue("job-row.js lost `$part`", at >= 0)
         assertEquals("job-row.js builds the card in another order -- re-check JobCard", webOrder.sortedBy { it.second }.map { it.first }, webOrder.map { it.first })
+    }
+
+    @Test
+    fun `the title, meta and figure type are the web's --fs sizes, mono where the web is mono`() {
+        fun fs(n: Int): Int = Regex("""--fs-$n\s*:\s*(\d+)px""").find(themeCss)?.groupValues?.get(1)?.toInt() ?: error("theme.css: no --fs-$n token")
+        assertTrue(rule(kitCss, ".kit .job .nm").contains("font-size:var(--fs-4);"))
+        assertTrue(rule(kitCss, ".kit .job .meta").contains("font:var(--fs-1) var(--mono); color:var(--dim);"))
+        assertTrue(rule(kitCss, ".kit .job .m2").contains("font:var(--fs-2) var(--mono); color:var(--dim);"))
+        val code = stripComments(read(screen))
+        assertTrue("jobCardTitleStyle is not --fs-4 (${fs(4)} sp)", code.contains("titleMedium.copy(fontSize = ${fs(4)}.sp, fontWeight = FontWeight.Medium)"))
+        assertTrue(
+            "JobCardMetaStyle is not mono --fs-1 (${fs(1)} sp) regular",
+            code.contains("private val JobCardMetaStyle = TextStyle(fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Normal, fontSize = ${fs(1)}.sp)"),
+        )
+        assertTrue(
+            "JobCardFigureStyle is not mono --fs-2 (${fs(2)} sp) regular",
+            code.contains("private val JobCardFigureStyle = TextStyle(fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Normal, fontSize = ${fs(2)}.sp)"),
+        )
+    }
+
+    @Test
+    fun `MUTATION PIN -- the stop note is Dim like the web hint, never the error colour`() {
+        val code = stripComments(read(screen))
+        val start = code.indexOf("private fun StopNote(")
+        assertTrue("StopNote is gone", start >= 0)
+        val body = code.substring(start, code.indexOf("\n}\n", start))
+        assertTrue("StopNote is no longer onSurfaceVariant (Dim, web `.hint.stopnote`)", body.contains("color = MaterialTheme.colorScheme.onSurfaceVariant,"))
+        assertFalse("StopNote is red again (colorScheme.error / StatusDanger)", body.contains("colorScheme.error") || body.contains("StatusDanger"))
+        assertTrue("web `.hint` is --dim", rule(kitCss, ".kit .hint").contains("color:var(--dim);"))
     }
 
     @Test
