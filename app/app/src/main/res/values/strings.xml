@@ -169,13 +169,16 @@
          app"): `installed_on` non-empty means a fresh agent report claims
          this game installed. `library_installed_on` is used when the game
          also has cache content right now; `library_installed_not_cached`
-         is the distinct wording for the protection-gap case (installed, but
-         nothing cached) — the two must never collapse into one string. An
+         is the distinct wording for the installed-but-nothing-cached case
+         — the two must never collapse into one string. Its text is the web
+         badge's, character for character (web lib/game-status.js
+         `installedBadgeText`, audit D-13, ANDROID-INSTALLED-WORDING-1;
+         pinned by ui/library/InstalledNotCachedWebTwinTest.kt). An
          EMPTY `installed_on` renders NOTHING (no string resource at all,
          see ui/library/logic/InstalledState.kt) — it is never worded as
          "not installed anywhere". -->
     <string name="library_installed_on">Installed on %1$s</string>
-    <string name="library_installed_not_cached">Installed on %1$s — not cached</string>
+    <string name="library_installed_not_cached">Installed, not cached · %1$s</string>
     <string name="library_installed_with_timestamp">%1$s (as of %2$s)</string>
     <plurals name="library_installed_additional_clients">
         <item quantity="one">(+%1$d more)</item>
@@ -550,13 +553,18 @@
     <string name="detail_needs_force_note">Flagged to force a full re-download on its next download.</string>
 
     <!-- WP AG-3, api/README.md "Installed state per app": the explicit
-         statement for the protection-gap case — a fresh agent report says
-         this game is installed somewhere, and the vault currently has
-         nothing cached for it. The compact badge line above this (shared
-         with the library card, ui/library/InstalledBadgeText.kt) already
-         names the client and timestamp; this sentence spells out the
-         consequence in full since the detail sheet has the room. -->
-    <string name="detail_installed_not_cached_warning">This game is installed on %1$s but is not currently cached — the vault is not protecting it.</string>
+         statement for the installed-but-nothing-cached case — a fresh agent
+         report says this game is installed somewhere, and the vault
+         currently has no cached bytes for it. The compact badge line above
+         this (shared with the library card, ui/library/InstalledBadgeText.kt)
+         already names the client and timestamp, so this sentence does not.
+         Its text is the web detail sheet's note, character for character
+         (web components/game-detail-sheet.js `buildInstalledNote`, audit
+         D-13, ANDROID-INSTALLED-WORDING-1): bytes-only wording, never "the
+         vault is not protecting it" (the status-based "protects a shared
+         depot" sense can be true at the same moment, see that function's
+         header). Pinned by ui/library/InstalledNotCachedWebTwinTest.kt. -->
+    <string name="detail_installed_not_cached_warning">Installed, not cached — no cached bytes for this game right now.</string>
 
     <string name="detail_action_download">Download to cache</string>
     <string name="detail_action_retry">Retry download</string>

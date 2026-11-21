@@ -657,10 +657,12 @@ private fun LoadedDetailBody(
             }
             if (installedBadge is InstalledBadge.InstalledNotCached) {
                 // The explicit statement the whole `installed_on` field exists for:
-                // a game a gaming PC currently has installed, which this vault is
-                // NOT protecting (api/README.md "Installed state per app").
+                // a game a gaming PC currently has installed, with no cached bytes
+                // on this vault (api/README.md "Installed state per app"). No
+                // client argument: the badge line above already names it, and the
+                // text is the web note's (ANDROID-INSTALLED-WORDING-1).
                 Text(
-                    text = stringResource(R.string.detail_installed_not_cached_warning, installedBadge.display.primaryClientId),
+                    text = stringResource(R.string.detail_installed_not_cached_warning),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.error,
                     modifier = Modifier.padding(top = 2.dp),
