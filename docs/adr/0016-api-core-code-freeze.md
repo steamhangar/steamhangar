@@ -689,3 +689,98 @@ renders; the static includes move to `core/docker/golden/` and the image
 copies them to `/opt/vault/golden/`. The pins this ADR's addenda cite as
 "drift step 2c/2d/2e/2f" live on under the same numbers in
 `core/tests/test-template-invariants.sh` (ADR-0001 addendum 2026-11-21).
+
+## Addendum 2026-11-21 — freeze exception: proxy version in About (WP PROXY-VERSION-1)
+
+Settings > About listed vault-proxy as "Version — · commit —" although its
+image carries `VAULT_BUILD_VERSION` and the OCI version label (seen on rc22,
+roadmap PROXY-VERSION-1). The VER-2 addendum above kept the proxy at
+reachability only, because a version page of tinyproxy's own would need a
+hole in the egress filter. User decision 2026-11-21 ("Weg A"): report the
+proxy's real version and commit. No new env var, no compose change, no
+allowlist entry. Scope, all in WP PROXY-VERSION-1:
+
+- deploy/proxy/ (not frozen, listed for completeness): `tinyproxy.conf`
+  gets `ErrorFile 403 "/run/tinyproxy/403.html"`; `docker-entrypoint.sh`
+  renders that page at every start with one marker line
+  `<!-- vault-build component=vault-proxy version=<v> commit=<c> -->` from
+  `VAULT_BUILD_VERSION` / `VAULT_BUILD_COMMIT`, checked against the VER-1
+  grammar like vault-core's hook (`invalid` for a bad value, `unknown` for
+  the Dockerfile default commit; a failed write only warns, tinyproxy then
+  sends its built-in page). The page uses no tinyproxy `{variables}`.
+- api/: `vault_api/about.py` only. `probe_proxy` returns `ProxyAnswer`
+  (status code plus the marker values), reads at most 4 KiB and stops at
+  the marker; `proxy_build_from` checks the values again on read; the
+  proxy entry carries version and commit on a `403`. No route, schema or
+  response model change; a proxy without the marker (older image) or one
+  that does not answer still shows `null`.
+- Not frozen, listed for completeness: web `about-view.js` and Android
+  `AboutPresentation.kt` / `strings.xml` (the proxy note no longer says
+  "does not report a version"; a dash on the proxy row now gets the dash
+  note), both demo fixtures, `deploy/tests/verify-stack.sh` (step 6w reads
+  `dev` from the live proxy, the UPD-1 re-render writes the page to /tmp),
+  tests and docs.
+
+## Addendum 2026-11-21 — freeze exception: client priority over the runner (WP CAP-503-FIX-1)
+
+Operator decision 2026-11-01 (CAP-503-FIX-1 Weg A, rc23 scope,
+`docs/handover/post-0.1.0-roadmap.md`): a Steam client and the prefill
+runner share the global MISS cap (16); measured the same day, the runner
+retried rejected chunks at ~37,000 503s per minute and the PC got 39 Mbit/s
+instead of ~150. The API pauses the runner while a client loads and resumes
+it after an idle gap, without losing the job's progress, and shows why.
+This is a new behaviour, not an audit finding, so it needs its own
+exception. Package CAP-503-FIX-1a (api only; the Downloads UI is
+CAP-503-FIX-1b).
+
+- api/ (scope list):
+  - `vault_api/client_priority.py` (new): the controller thread. Ticks every
+    5 s only while a job is queued/running or client-paused; reads the live
+    ring's "now" window for non-runner MISS bytes (>= 512 KiB/s = a client
+    loads); holds for 120 s after the last sighting (`IDLE_GAP_SECONDS`,
+    constant, no env var). Fail-safe: event log off or runner address
+    unknown = no hold. Operator decision 2026-11-21 (Weg B): a manual
+    Resume during a hold overrides it for that job (`client_override`).
+  - `vault_api/jobs.py`: `PAUSE_REASON_MANUAL`/`PAUSE_REASON_CLIENT`,
+    `effective_pause_reason`, `pause_reason` in the job reads; manual pause
+    records `manual` (and turns a `client` pause into a manual one instead
+    of the old `409`); resume, cancel and `finish_job` clear it; new
+    controller helpers `has_client_priority_work`, `running_prefill_ids`,
+    `client_paused_ids`, `client_override_ids`, `request_client_pause`,
+    `withdraw_client_pause` (clears the request, keeps the tag),
+    `resume_client_paused` (each selects once and writes by id inside
+    `BEGIN IMMEDIATE`). `resume_job` takes `client_override`; manual pause,
+    resume, cancel, `finish_job` and `recover_stale_jobs` clear the tags as
+    documented; `claim_next_job` gains `overridden_only`. `park_paused` and
+    `ACTIVE_STATUSES` are unchanged.
+  - `vault_api/db.py`: schema v34, `jobs.pause_reason` (nullable TEXT, NULL
+    reads as manual) and `jobs.client_override` (nullable INTEGER); the
+    per-column job step now runs on every existing database.
+  - `vault_api/live_tier.py`: `runner_marks` (marker lines inside the ring:
+    address, token, time), so a new runner address is known before the next
+    sweep applies its marker. Traffic figures unchanged.
+  - `vault_api/runner_identity.py`: `live_mark_valid`, the sweep's token
+    rules read-only (nothing consumed), so a LAN host requesting the marker
+    path changes nothing here either; the core comment at the
+    runner-mark location ("a LAN host requesting this path changes
+    nothing") therefore stays true.
+  - `vault_api/worker.py`: optional `hold` gate; while it answers `True`
+    only jobs with `client_override` are claimed (a failing gate opens).
+  - `vault_api/main.py`: creates and starts/stops the controller, wires the
+    gate.
+  - `vault_api/routers/jobs.py`: `pause_reason` and `client_override` on
+    `JobSummary`/`JobDetail`; resume passes the hold state; new read-only
+    `GET /v1/client-priority`.
+- Not frozen, listed for completeness: `api/tests/test_cap_503_fix_1a.py`,
+  api/README.md ("Client priority over the prefill runner", endpoint
+  table), `docs/PROJECT_PLAN.md` §6. core/ and the runner process are
+  untouched; the pause is the existing WP 3.12 path (the cache is the
+  progress store).
+- Known limits: the unknown-runner guard is global, not per address. If
+  some runner address is known (an older window) but the running runner's
+  own marker never reached the log, its MISS counts as a device's and it
+  pauses itself about every two minutes until a marker for its address is
+  seen. A device behind the runner's address gets no priority.
+
+Every other frozen-path change still needs its own user decision and note
+here.

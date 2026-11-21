@@ -236,6 +236,31 @@ def apply_marks(conn: sqlite3.Connection, marks: list[Mark]) -> MarkResult:
     return result
 
 
+def live_mark_valid(
+    conn: sqlite3.Connection, token: str, addr: str, seen: datetime
+) -> bool:
+    """Whether a marker line the live ring read is the runner's
+    (WP CAP-503-FIX-1a, ``client_priority``). Read-only, consumes nothing:
+    the sweep stays the one place that applies markers.
+
+    The same rules as :func:`apply_marks`: an issued token, the line's time
+    inside :data:`MARK_VALID_BEFORE` / :data:`MARK_VALID_AFTER` of its issue.
+    A token the sweep already consumed counts only for the address that
+    consumed it, so a token replayed from another host later does nothing.
+    """
+    row = conn.execute(
+        "SELECT issued_at, consumed_addr FROM runner_marks WHERE token = ?", (token,)
+    ).fetchone()
+    if row is None:
+        return False
+    issued = parse_utc_iso(row["issued_at"])
+    if issued is None or not (
+        issued - MARK_VALID_BEFORE <= seen <= issued + MARK_VALID_AFTER
+    ):
+        return False
+    return row["consumed_addr"] is None or row["consumed_addr"] == addr
+
+
 def _extend_period(conn: sqlite3.Connection, addr: str, seen: datetime) -> None:
     seen_iso = to_utc_iso(seen)
     newest = conn.execute(

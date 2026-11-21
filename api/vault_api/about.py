@@ -17,8 +17,10 @@ One list, fixed order, one entry per component:
                    ``VAULT_PREFILL_MODE=subprocess``.
 ``steamprefill``   Queue mode: the version the runner reported. Subprocess
                    mode: this image's own ``STEAMPREFILL_VERSION``.
-``vault-proxy``    Reachability only (see :func:`probe_proxy`), ``version``
-                   always ``null``.
+``vault-proxy``    One probe (see :func:`probe_proxy`): the status from its
+                   answer, version and commit from the marker line its
+                   refusal page carries (WP PROXY-VERSION-1); ``null`` when
+                   the page has none (an image from before that package).
 ``vault-dns``      Never probed; ``unknown``.
 =================  ===========================================================
 
@@ -99,6 +101,15 @@ _TIMESTAMP = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z
 #: proxy logs one "Proxying refused on filtered domain" line per probe; the
 #: distinctive name says where it came from.
 PROXY_PROBE_HOST = "steamhangar-about-probe.invalid"
+#: Upper bound on what the probe reads from the proxy's answer. The refusal
+#: page ``deploy/proxy/docker-entrypoint.sh`` renders is ~400 bytes plus
+#: tinyproxy's headers.
+PROXY_ANSWER_MAX_BYTES = 4096
+#: The marker line on that page (WP PROXY-VERSION-1). Found anywhere in the
+#: answer; the values are checked against the VER-1 grammar afterwards.
+_PROXY_MARKER = re.compile(
+    rb"<!-- vault-build component=vault-proxy version=(\S*) commit=(\S*) -->", re.ASCII
+)
 
 _CORE_NOT_PROBED = (
     "vault-api has no network path to vault-core (egress lock, ADR-0011), "
@@ -359,23 +370,40 @@ def proxy_address(environ: Mapping[str, str]) -> tuple[str, int] | None | Litera
     return parts.hostname, (port if port is not None else 80)
 
 
-def probe_proxy(address: tuple[str, int], timeout: float) -> int | None:
-    """Ask the proxy for a host it must refuse; return the HTTP status code,
-    or ``None`` when the answer is not an HTTP status line.
+@dataclass(frozen=True)
+class ProxyAnswer:
+    """What :func:`probe_proxy` read. ``status``: the HTTP status code, or
+    ``None`` when the answer is not an HTTP status line. ``build``: the
+    ``(version, commit)`` pair from the refusal page's marker line exactly as
+    sent, or ``None`` when there is no marker (:func:`proxy_build_from`
+    checks the values)."""
 
-    **Why reachability only, and no version.** The proxy image carries its
-    version as ``VAULT_BUILD_VERSION`` like every image, but nothing can
-    read it over the network without weakening the egress lock: tinyproxy
-    1.11.3 runs its destination filter BEFORE it checks ``StatHost`` (the
-    only page it can serve itself), so a version page would need its host on
-    the egress allowlist, and that filter matches case-insensitively while
-    the ``StatHost`` comparison is a case-sensitive ``strcmp``, so an
-    upper-case spelling of that host would pass the filter and be forwarded
-    (WP VER-2; read in the 1.11.3 ``reqs.c`` source, ``process_request``).
-    The probe instead proves the proxy answers and that its filter refuses
-    an off-list host: ``403`` is the expected answer and no byte leaves the
-    proxy for it. Raises ``OSError`` (incl. timeouts) when the proxy does not
-    answer.
+    status: int | None
+    build: tuple[str, str] | None = None
+
+
+def probe_proxy(address: tuple[str, int], timeout: float) -> ProxyAnswer:
+    """Ask the proxy for a host it must refuse; return its status code and
+    the build marker of its refusal page.
+
+    **Why the version comes from the refusal page.** A version page of its
+    own would weaken the egress lock: tinyproxy 1.11.3 runs its destination
+    filter BEFORE it checks ``StatHost`` (the only page it can serve itself),
+    so that page would need its host on the egress allowlist, and that
+    filter matches case-insensitively while the ``StatHost`` comparison is a
+    case-sensitive ``strcmp``, so an upper-case spelling of that host would
+    pass the filter and be forwarded (WP VER-2; read in the 1.11.3
+    ``reqs.c`` source, ``process_request``). The refusal itself needs no
+    hole: since WP PROXY-VERSION-1 the proxy's entrypoint renders its
+    ``ErrorFile 403`` page with one marker line naming the image's
+    ``VAULT_BUILD_VERSION`` / ``VAULT_BUILD_COMMIT``. ``403`` is the expected
+    answer and no byte leaves the proxy for it.
+
+    Reads at most :data:`PROXY_ANSWER_MAX_BYTES`, and stops at the marker,
+    at end of stream or at the limit. Raises ``OSError`` (incl. timeouts)
+    when the proxy does not answer; a timeout AFTER the status line arrived
+    keeps what was read (a proxy that leaves the connection open still
+    counts as answering).
     """
     request = (
         f"GET http://{PROXY_PROBE_HOST}/ HTTP/1.0\r\n"
@@ -386,20 +414,52 @@ def probe_proxy(address: tuple[str, int], timeout: float) -> int | None:
         sock.settimeout(timeout)
         sock.sendall(request)
         data = b""
-        while b"\r\n" not in data and len(data) < 256:
-            chunk = sock.recv(256 - len(data))
-            if not chunk:
-                break
-            data += chunk
+        try:
+            while len(data) < PROXY_ANSWER_MAX_BYTES and not _PROXY_MARKER.search(data):
+                chunk = sock.recv(PROXY_ANSWER_MAX_BYTES - len(data))
+                if not chunk:
+                    break
+                data += chunk
+        except OSError:
+            if b"\r\n" not in data:
+                raise
     match = re.match(rb"HTTP/1\.[01] ([0-9]{3})[ \r]", data)
-    return int(match.group(1)) if match else None
+    if not match:
+        return ProxyAnswer(None)
+    marker = _PROXY_MARKER.search(data)
+    build = None
+    if marker:
+        build = (
+            marker.group(1).decode("ascii", "replace"),
+            marker.group(2).decode("ascii", "replace"),
+        )
+    return ProxyAnswer(int(match.group(1)), build)
+
+
+def proxy_build_from(build: tuple[str, str] | None) -> tuple[str | None, str | None]:
+    """``(version, commit)`` for the answer, checked like vault-core's file:
+    a version outside the VER-1 grammar is :data:`INVALID_VALUE` (the
+    entrypoint's own ``invalid`` passes the grammar and is passed through);
+    a commit is a commit id, ``invalid``, or ``None`` for ``unknown``;
+    anything else is :data:`INVALID_VALUE`. No marker: ``(None, None)``."""
+    if build is None:
+        return None, None
+    raw_version, raw_commit = build
+    version = raw_version if is_valid_version(raw_version) else INVALID_VALUE
+    if raw_commit == "unknown":
+        commit: str | None = None
+    elif raw_commit == INVALID_VALUE or is_valid_commit(raw_commit):
+        commit = raw_commit
+    else:
+        commit = INVALID_VALUE
+    return version, commit
 
 
 def proxy_component(
     environ: Mapping[str, str],
     checked_at: str,
     timeout: float,
-    prober: Callable[[tuple[str, int], float], int | None] = probe_proxy,
+    prober: Callable[[tuple[str, int], float], ProxyAnswer] = probe_proxy,
 ) -> Component:
     address = proxy_address(environ)
     if address is None:
@@ -414,19 +474,26 @@ def proxy_component(
             "HTTP_PROXY is set but is not a usable http://host:port URL.",
         )
     try:
-        code = prober(address, timeout)
+        answer = prober(address, timeout)
     except OSError:
         return Component(
             "vault-proxy", None, None, "unreachable", checked_at,
             "The egress proxy did not answer.",
         )
+    code = answer.status
     if code == 403:
-        return Component(
-            "vault-proxy", None, None, "ok", checked_at,
-            "Answers, and refuses a host that is not on the egress allowlist. "
-            "Its version is not shown: reading it would need a hole in the "
-            "egress filter.",
-        )
+        version, commit = proxy_build_from(answer.build)
+        detail = "Answers, and refuses a host that is not on the egress allowlist."
+        if answer.build is None:
+            detail += (
+                " Its refusal page names no version: a vault-proxy image from "
+                "before rc23, or the page could not be written (see the proxy's log)."
+            )
+        elif version == INVALID_VALUE:
+            detail += " Its refusal page names a version that is not valid."
+        else:
+            detail += " Version and commit are the ones its refusal page names."
+        return Component("vault-proxy", version, commit, "ok", checked_at, detail)
     if code is None:
         return Component(
             "vault-proxy", None, None, "unknown", checked_at,
@@ -467,7 +534,7 @@ class AboutService:
         environ: Mapping[str, str] | None = None,
         monotonic: Callable[[], float] = time.monotonic,
         wallclock: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
-        proxy_prober: Callable[[tuple[str, int], float], int | None] = probe_proxy,
+        proxy_prober: Callable[[tuple[str, int], float], ProxyAnswer] = probe_proxy,
     ) -> None:
         self._settings = settings
         self._ttl = ttl_seconds

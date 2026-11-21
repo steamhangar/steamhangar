@@ -65,6 +65,7 @@ import logging
 import sqlite3
 import threading
 import traceback
+from collections.abc import Callable
 
 from vault_api import (
     cache_completeness,
@@ -112,8 +113,15 @@ class PrefillWorker:
         size_cache: SizeCache | None = None,
         webhook_notifier: WebhookNotifier | None = None,
         oracle_fetch: "oracle.Fetcher | None" = None,
+        hold: Callable[[], bool] | None = None,
     ) -> None:
         self._settings = settings
+        #: WP CAP-503-FIX-1a: the client-priority gate
+        #: (``client_priority.ClientPriority.holding``). While it answers
+        #: ``True`` only queued jobs with ``client_override`` are claimed, so
+        #: a job does not start SteamPrefill just to be paused for a client
+        #: again. ``None`` = no gate (every test that does not care).
+        self._hold = hold
         #: WP UPD-FIX-1: the fetcher of the post-run oracle re-check
         #: (``_recheck_update_verdict``). ``None`` = the configured one.
         self._oracle_fetch = oracle_fetch
@@ -198,8 +206,19 @@ class PrefillWorker:
                             self._stop.wait(self._settings.worker_poll_seconds)
                         continue
 
+                # WP CAP-503-FIX-1a: while a client is loading through the
+                # cache the queue waits, except for jobs an operator resumed
+                # during the hold (``client_override``, operator Weg B). A
+                # reattached run above is not affected: the controller pauses
+                # a running job itself.
+                held = self._held()
+
                 try:
-                    job = jobs.claim_next_job(conn)
+                    job = (
+                        jobs.claim_next_job(conn, overridden_only=True)
+                        if held
+                        else jobs.claim_next_job(conn)
+                    )
                 except sqlite3.Error:
                     # A locked/failed claim must not kill the worker; the job
                     # stays 'queued' and the next tick retries.
@@ -214,6 +233,17 @@ class PrefillWorker:
                 self._execute(conn, job)
         finally:
             conn.close()
+
+    def _held(self) -> bool:
+        """The client-priority gate. A failing gate opens (the pre-rc23
+        behaviour) rather than stopping the queue for good."""
+        if self._hold is None:
+            return False
+        try:
+            return bool(self._hold())
+        except Exception:  # noqa: BLE001 - never end the worker thread
+            logger.exception("Client priority gate failed; claiming as usual.")
+            return False
 
     def _still_running(self, conn: sqlite3.Connection, job_id: int) -> bool:
         """Whether ``job_id`` is still 'running'. A DB error counts as yes,

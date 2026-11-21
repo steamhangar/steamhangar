@@ -88,6 +88,83 @@ fi
 mv -f "$CONF_FILE.tmp" "$CONF_FILE" || die "could not move the rendered config into place at $CONF_FILE"
 log "client allowlist rendered: Allow $egress_subnet (VAULT_EGRESS_SUBNET) + loopback"
 
+# --- the refusal page with this image's build identity -----------------------
+# WP PROXY-VERSION-1 (ADR-0016 addendum 2026-11-21). tinyproxy.conf's
+# `ErrorFile 403` points at this page. vault-api's GET /v1/about probe asks
+# this proxy for an off-list host, gets this page with the 403, and reads the
+# marker line. Same input and grammar as vault-core's version hook
+# (core/docker/29-vault-build-version.sh) and vault_api.build_info():
+#   version: 1-64 chars of [0-9A-Za-z._+-], first char a letter or digit
+#   commit:  7-40 chars of [0-9a-f], or the literal Dockerfile default "unknown"
+# A value outside the grammar (blank or unset included) is written as the word
+# "invalid", never raw. The grammar has no '<', '>', '{' or '}', so a value can
+# neither break the HTML comment nor become a tinyproxy {variable}.
+# Failure policy: informational, like vault-core's hook. A failed write logs a
+# WARNING and the proxy still starts; tinyproxy then sends its built-in page
+# and vault-api shows no version for the proxy.
+# Test-only override, same rule as the other *_FOR_TESTS paths above.
+ERROR_PAGE="${VAULT_PROXY_ERROR_PAGE_FILE_FOR_TESTS:-/run/tinyproxy/403.html}"
+
+warn() { echo "$ME: WARNING: $*" >&2; }
+
+valid_version() {
+    v=$1
+    [ -n "$v" ] || return 1
+    [ "${#v}" -le 64 ] || return 1
+    case "$v" in
+        [!0-9A-Za-z]*) return 1 ;;
+        *[!0-9A-Za-z._+-]*) return 1 ;;
+    esac
+    return 0
+}
+
+valid_commit() {
+    c=$1
+    [ "${#c}" -ge 7 ] && [ "${#c}" -le 40 ] || return 1
+    case "$c" in
+        *[!0-9a-f]*) return 1 ;;
+    esac
+    return 0
+}
+
+build_version=invalid
+if [ -n "${VAULT_BUILD_VERSION+x}" ] && valid_version "$VAULT_BUILD_VERSION"; then
+    build_version=$VAULT_BUILD_VERSION
+else
+    warn "VAULT_BUILD_VERSION is unset or not a valid version; the refusal page says 'invalid'."
+fi
+build_commit=unknown
+if [ -n "${VAULT_BUILD_COMMIT+x}" ] && [ "$VAULT_BUILD_COMMIT" != "unknown" ]; then
+    if valid_commit "$VAULT_BUILD_COMMIT"; then
+        build_commit=$VAULT_BUILD_COMMIT
+    else
+        build_commit=invalid
+        warn "VAULT_BUILD_COMMIT is not a commit id; the refusal page says 'invalid'."
+    fi
+fi
+
+render_error_page() {
+    printf '%s\n' \
+        '<!DOCTYPE html>' \
+        '<html><head><title>403 Refused by vault-proxy</title></head>' \
+        '<body>' \
+        '<h1>403 Refused by vault-proxy</h1>' \
+        '<p>The SteamHangar egress proxy refused this request: the destination host is not on its allowlist, or this client may not use the proxy.</p>'
+    printf '<!-- vault-build component=vault-proxy version=%s commit=%s -->\n' "$build_version" "$build_commit"
+    printf '%s\n' '</body></html>'
+}
+
+# A subshell: POSIX lets a non-interactive shell exit on a redirection error
+# of a function call, which would end this script under `set -e`. dash keeps
+# going either way (api/tests/test_proxy_version_1.py cannot tell the
+# difference there); the subshell makes the shell's choice not matter.
+if ( render_error_page > "$ERROR_PAGE.tmp" ) 2>/dev/null && mv -f "$ERROR_PAGE.tmp" "$ERROR_PAGE" 2>/dev/null; then
+    log "refusal page rendered: version=$build_version commit=$build_commit"
+else
+    rm -f "$ERROR_PAGE.tmp" "$ERROR_PAGE" 2>/dev/null || true
+    warn "could not write the refusal page $ERROR_PAGE; the proxy starts with tinyproxy's built-in page and GET /v1/about shows no version for it."
+fi
+
 # --- baked-in mandatory host --------------------------------------------------
 # api.steampowered.com: the ONE outbound host the shipped PRODUCT ITSELF
 # needs, once an operator configures a Steam Web API relay key (ADR-0004

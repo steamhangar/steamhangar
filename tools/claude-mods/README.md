@@ -13,7 +13,7 @@ a plugin option the operator sets.
 |---|---|
 | `token-meter` | one JSONL line per model request (main loop and subagents) with token counts; `/tokens` prints a summary |
 | `read-brake` | denies whole-file reads of the big planning docs and of very large files |
-| `output-trim` | keeps long Bash output in a file, returns head, tail and failure lines |
+| `output-trim` | keeps long Bash output in a file, returns head, tail and failure lines (node test output: summary and failures) |
 | `dev-commands` | `/ci`, `/antraege`, `/wp` answered without a model turn |
 
 ## token-meter
@@ -89,6 +89,7 @@ Options:
 ```sh
 claude plugin test tools/claude-mods/token-meter
 claude plugin test tools/claude-mods/read-brake
+claude plugin test tools/claude-mods/output-trim
 claude plugin validate --strict tools/claude-mods
 claude plugin validate --strict tools/claude-mods/token-meter
 claude plugin validate --strict tools/claude-mods/read-brake
@@ -154,8 +155,21 @@ the model gets instead:
 - one line naming the file with the full output.
 
 A few very long lines (minified JSON) are cut per line at 400 characters.
-A failing command (non-zero exit) is trimmed the same way; its error text is
-what is kept.
+Test output of `node --test` (TAP or the `spec` reporter) is trimmed by its
+structure instead, see below.
+
+Output above about 30 KB reaches the mod already cut by Claude Code, which
+keeps the whole output in its own file (`persistedOutputPath` in the Bash
+result) and shows the model only a 2 KB preview of it. The mod then reads
+that file back and trims the whole text, so line counts, the tail and the
+summary of a test run are those of the real output; it keeps the full text
+in its own output directory as usual and answers the result without the
+persisted-output fields, so the trimmed text and the file line are shown
+inline instead of being cut by the preview. Claude Code's result is passed
+on untouched (preview and persisted-output fields included, nothing kept
+by the mod) when that file cannot be read, or when the text to show inline
+would still be above `maxBytes` (output that trimming cannot shorten
+enough, such as a few hundred very wide lines).
 
 Never trimmed:
 
@@ -163,7 +177,13 @@ Never trimmed:
 - commands that already ask for a small range or a count: `head`, `tail`,
   `sed -n`, `grep -c` / `--count`, `wc`;
 - commands that read a kept file back (they name the output directory);
-- anything when the file cannot be written: then the output stays whole.
+- anything when the file cannot be written: then the output stays whole;
+- a failing command (non-zero exit): its result is passed on exactly as
+  Claude Code gave it. Its error text holds only the first ~30 KB of the
+  output, with no persisted file to read the rest from, and Claude Code
+  2.1.319 refuses a rewritten errored Bash result (it does not match the
+  Bash output shape and the model gets no output at all); the hook API
+  documents no shape that replaces an errored result's text.
 
 | option | default | meaning |
 |---|---|---|
@@ -176,6 +196,60 @@ Never trimmed:
 
 The kept files are not cleaned up by the mod; prune the directory now and
 then.
+
+### TAP output
+
+Output with a `TAP version N` line and at least one `ok`/`not ok` test
+point (`node --test --test-reporter=tap`) is trimmed by its structure
+instead of by head and tail. The model gets:
+
+- the `TAP version` line and one marker line saying what was left out,
+- every `not ok` test point with its whole YAML block (`---` to `...`),
+  verbatim, after the `# Subtest:` names of its parent subtests (each
+  parent once),
+- `Bail out!` lines and the closing `# tests` / `# suites` / `# pass` /
+  `# fail` / `# cancelled` / `# skipped` / `# todo` / `# duration_ms`
+  summary,
+- every line that is not TAP (noise around the run, stack traces printed
+  outside a YAML block), where it stood,
+- the line naming the file with the full output, as above.
+
+Left out: `ok` test points with their YAML blocks, the other `# Subtest:`
+headers, plans (`1..N`) and other `#` comments (node writes a test's
+console output as such comments). A passing run thus shrinks to the
+summary. If the result is still above `maxLines` or `maxBytes` (many
+failures), it is cut once more like any output, the middle lines kept
+being the `not ok` lines, numbered as in the full output. As with spec
+output below, this applies when the command exits zero.
+
+### spec output
+
+Node 24 prints the `spec` reporter by default, also when stdout is not a
+terminal (`dev.sh test-web`). Output with an `ℹ tests N` line and at least
+one `✔`/`✖` test line with its duration is trimmed by its structure. The
+model gets:
+
+- one marker line saying what was left out,
+- every `✖` line (failed test or suite) after the `▶` names of its parent
+  suites (each parent once),
+- the `ℹ tests` / `suites` / `pass` / `fail` / `cancelled` / `skipped` /
+  `todo` / `duration_ms` summary,
+- the whole `✖ failing tests:` section to the end (each failure's location,
+  error and stack),
+- every other line (a test's console output, an error printed below a `✖`
+  line, noise around the run), where it stood,
+- the line naming the file with the full output.
+
+Left out: `✔` lines (passed tests and suites, todos), `﹣` skipped tests
+and the other `▶` suite headers. A passing run thus shrinks to the
+summary. If the result is still above `maxLines` or `maxBytes`, it is cut
+once more like any output, the middle lines kept being the `✖` lines,
+numbered as in the full output.
+
+A failing run exits non-zero, so it reaches the model as Claude Code gave
+it (see "Never trimmed"); the structured trim applies when the command
+itself succeeds, for example `dev.sh test-web || true` or
+`dev.sh test-web; echo "exit $?"`.
 
 ## dev-commands
 

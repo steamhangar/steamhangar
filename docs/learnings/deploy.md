@@ -181,3 +181,8 @@ at the end, under a dated heading, one entry each with the WP that proved it.
 - See also `ci.md` CI-NIGHTLY-1: in `docker inspect --format` templates,
   render netip-typed fields (`.IPAddress`, `.GlobalIPv6Address`, ...) with
   `{{json ...}}`; newer Docker prints their zero value as `invalid IP`.
+- tinyproxy's `ErrorFile 403` page is a channel back to vault-api that
+  needs no allowlist hole: the entrypoint writes it to the tmpfs at start
+  with a validated build marker (no `{variables}`, nothing from the request
+  echoed), and the existing refusal probe reads it (PROXY-VERSION-1). This
+  corrects the VER-2 note that a proxy version needs a wider filter.

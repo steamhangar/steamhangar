@@ -327,7 +327,18 @@ import time
 #: the update check or ``depot_app_map`` reads or writes it. A v33 file is
 #: refused by older code (the downgrade guard), so a rollback to a v32 build
 #: needs the SQLite dump ``update.sh`` takes before upgrading.
-SCHEMA_VERSION = 33
+#: v34 (WP CAP-503-FIX-1a, client priority over the prefill runner): added
+#: ``jobs.pause_reason`` (nullable TEXT: ``manual`` or ``client``, see
+#: ``vault_api/jobs.py`` ``PAUSE_REASON_*``) and ``jobs.client_override``
+#: (nullable INTEGER, 1 = an operator resumed the job during a client hold).
+#: NULL on every existing row: a pause reads as manual, so nothing paused
+#: before the upgrade is ever resumed automatically, and no job overrides. Reuses the per-column-guarded
+#: ``_add_missing_job_columns`` step, which since v34 runs on EVERY existing
+#: database (not keyed on the stamp: parallel branches stamp versions in a
+#: different order, the v24 lesson). No data step. A v34 file is refused by
+#: older code (the downgrade guard), so a rollback to a v33 build needs the
+#: SQLite dump ``update.sh`` takes before upgrading.
+SCHEMA_VERSION = 34
 
 _DDL = """
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -451,7 +462,17 @@ CREATE TABLE IF NOT EXISTS jobs (
     -- moved, the job queues by its own id (plain FIFO). A moved job carries
     -- an explicit integer key; the claim order is COALESCE(order_key, id),
     -- then id (vault_api/jobs.py, "Queue order").
-    order_key         INTEGER
+    order_key         INTEGER,
+    -- v34 (WP CAP-503-FIX-1a): why the job is paused or a pause is pending:
+    -- 'manual' (operator) or 'client' (the client-priority controller,
+    -- vault_api/client_priority.py). NULL reads as manual. Only 'client' is
+    -- ever resumed automatically.
+    pause_reason      TEXT,
+    -- v34 (WP CAP-503-FIX-1a, operator Weg B): 1 = an operator resumed this
+    -- job while the runner was held for a client; it runs alongside the
+    -- device and is never client-paused. Cleared at every terminal
+    -- transition and on a manual pause. NULL = no override.
+    client_override   INTEGER
 );
 
 -- The job worker polls "give me the oldest queued job" on every tick and the
@@ -1244,7 +1265,12 @@ def init_db(db_path: str) -> None:
         # per-column guard, so one call also brings a v8..v14 database up to
         # date by adding just the seven queue-mode ``run_*`` columns it lacks.
         # v31 (WP D20) adds ``order_key`` through the same step.
-        if row is not None and row["version"] < 31:
+        # v34 (WP CAP-503-FIX-1a) adds ``pause_reason`` and
+        # ``client_override`` and runs the step on
+        # EVERY existing database, like the agent_reports step below: the
+        # per-column guard makes it a no-op once the columns exist, and a
+        # file stamped by a parallel branch cannot skip it.
+        if row is not None:
             _add_missing_job_columns(conn)
 
         # v5 (WP 3.4): same situation as the v4 step above -- an existing
@@ -1338,6 +1364,9 @@ _POST_V1_JOB_COLUMNS = (
     ("run_result_json", "TEXT"),
     # v31 (WP D20 QUEUE-ORDER-1a)
     ("order_key", "INTEGER"),
+    # v34 (WP CAP-503-FIX-1a)
+    ("pause_reason", "TEXT"),
+    ("client_override", "INTEGER"),
 )
 
 

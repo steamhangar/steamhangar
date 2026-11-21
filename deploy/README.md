@@ -1335,10 +1335,12 @@ reach vault-core over the network by design, so it reads a file vault-core
 writes into the cache volume, `<cache>/logs/vault-core-version.json`);
 `vault-runner` and `steamprefill` `ok` while the runner has reported in the
 last 90 s (`not_in_use` / vault-api's own SteamPrefill with
-`VAULT_PREFILL_MODE=subprocess`); `vault-proxy` `ok` with no version (the
-probe only proves it answers and refuses an off-list host; it logs one
+`VAULT_PREFILL_MODE=subprocess`); `vault-proxy` `ok` with the version and
+commit its refusal page names (the probe proves it answers and refuses an
+off-list host, and reads the version from that refusal; it logs one
 `Proxying refused on filtered domain "steamhangar-about-probe.invalid"` line
-per probe, at most once a minute); `vault-dns` `unknown` (never probed).
+per probe, at most once a minute; an older proxy image shows no version);
+`vault-dns` `unknown` (never probed).
 Details: api/README.md "Component versions".
 
 ## Logs and rotation

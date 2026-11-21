@@ -285,6 +285,7 @@ Steam-only, prefill-first design can solve better:
 | DELETE | /v1/jobs/{id} | Cancel a queued or running job (Phase 3, user decision 2026-08-06) |
 | POST | /v1/jobs/{id}/pause | Pause a running download — terminates the subprocess; cached chunks make resume cheap |
 | POST | /v1/jobs/{id}/resume | Resume: re-runs the prefill; already-cached chunks replay as disk-speed HITs |
+| GET | /v1/client-priority | Whether the prefill runner is held for a device loading through the cache, for whom and until when; client-paused and overridden job ids (WP CAP-503-FIX-1a, operator decision 2026-11-01 Weg A) |
 | GET | /v1/schedule | Scheduler state: window, interval, last/next sweep |
 | DELETE | /v1/cache/{appid} | Delete a game from the cache |
 | POST | /v1/cache/{appid}/gc | Garbage-collect orphaned chunks (manifest diff) |
@@ -306,7 +307,7 @@ Steam-only, prefill-first design can solve better:
 | GET | /v1/steam/player-summaries | Relay `GetPlayerSummaries` (persona name, avatar) |
 | GET | /v1/settings | Effective runtime settings with the source of each value (settings API, ADR-0009) |
 | PATCH | /v1/settings | Partial update of the runtime-editable keys, same grammar as startup; `403` under `VAULT_SETTINGS_READONLY` |
-| GET | /v1/about | Version, commit and status of vault-api (web UI), vault-core, vault-runner, SteamPrefill, vault-proxy and vault-dns (WP VER-2; vault-core from a file on the cache volume, the proxy by reachability only, vault-dns never probed) |
+| GET | /v1/about | Version, commit and status of vault-api (web UI), vault-core, vault-runner, SteamPrefill, vault-proxy and vault-dns (WP VER-2; vault-core from a file on the cache volume, the proxy's status and version from one probe whose refusal page names the version (WP PROXY-VERSION-1), vault-dns never probed) |
 | GET | /v1/covers/{appid}/{signature} | Cover image vault-api stored for a tracked app, ETag + long `Cache-Control` (WP D10 COVER-CACHE-1). No `X-Api-Key` header: the signature in the path is an HMAC of the API key, handed out only by the authenticated `GET /v1/games` (`cover_cached_url`) |
 | GET | /v1/health | Liveness (for external monitoring) — the one unauthenticated route, besides the web UI's static files |
 

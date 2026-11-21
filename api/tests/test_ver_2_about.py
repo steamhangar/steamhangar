@@ -19,8 +19,10 @@ G5  vault-runner / SteamPrefill: ``ok`` only while the freshest presence row
 G6  the runner writes its presence on start, then at most once per
     interval, from the idle loop AND from inside a running job; a database
     error never escapes; a day-old row is pruned.
-G7  vault-proxy: reachability only. The probe asks for the literal
-    ``steamhangar-about-probe.invalid`` and ``403`` is the only ``ok``.
+G7  vault-proxy: the probe asks for the literal
+    ``steamhangar-about-probe.invalid`` and ``403`` is the only ``ok``. The
+    version and commit its refusal page names are pinned in
+    ``test_proxy_version_1.py`` (WP PROXY-VERSION-1).
 G8  vault-dns: never probed, ``unknown``.
 G9  60 s cache; parallel lookups with a deadline: a hung lookup degrades
     its own entry only and does not hold the route.
@@ -77,7 +79,7 @@ def _service(settings: Settings, environ=None, prober=None, **kw) -> AboutServic
         settings,
         environ={} if environ is None else environ,
         wallclock=lambda: NOW,
-        proxy_prober=prober or (lambda addr, t: 403),
+        proxy_prober=prober or (lambda addr, t: about.ProxyAnswer(403)),
         **kw,
     )
 
@@ -576,7 +578,7 @@ def test_proxy_status_from_the_probe_answer(settings: Settings, answer, status, 
 
     def prober(addr, timeout):
         seen.append(addr)
-        return answer
+        return about.ProxyAnswer(answer)
 
     proxy = _by_name(
         _service(settings, {"HTTP_PROXY": "http://vault-proxy:8888"}, prober=prober).components()
@@ -591,7 +593,7 @@ def test_proxy_lowercase_env_wins_like_urllib(settings: Settings) -> None:
     _service(
         settings,
         {"HTTP_PROXY": "http://upper:1", "http_proxy": "http://lower:2"},
-        prober=lambda a, t: seen.append(a) or 403,
+        prober=lambda a, t: seen.append(a) or about.ProxyAnswer(403),
     ).components()
     assert seen == [("lower", 2)]
 
@@ -645,10 +647,10 @@ class _OneShotServer:
 def test_probe_asks_for_the_literal_invalid_host_and_reads_403() -> None:
     server = _OneShotServer(b"HTTP/1.0 403 Filtered\r\nContent-Type: text/html\r\n\r\nno")
     try:
-        code = about.probe_proxy(("127.0.0.1", server.port), 2.0)
+        answer = about.probe_proxy(("127.0.0.1", server.port), 2.0)
     finally:
         server.close()
-    assert code == 403
+    assert answer == about.ProxyAnswer(403, None)
     # Security-constant pin against a LITERAL (docs/LEARNINGS.md 4a.6r): the
     # probe host must stay an RFC 6761 .invalid name the proxy refuses on the
     # name alone, never a resolvable one.
@@ -660,7 +662,7 @@ def test_probe_asks_for_the_literal_invalid_host_and_reads_403() -> None:
 def test_probe_reads_a_non_http_answer_as_none() -> None:
     server = _OneShotServer(b"SSH-2.0-OpenSSH\r\n")
     try:
-        assert about.probe_proxy(("127.0.0.1", server.port), 2.0) is None
+        assert about.probe_proxy(("127.0.0.1", server.port), 2.0) == about.ProxyAnswer(None)
     finally:
         server.close()
 
@@ -704,7 +706,7 @@ def test_answer_is_cached_for_the_ttl(settings: Settings) -> None:
     svc = _service(
         settings,
         {"HTTP_PROXY": "http://p:1"},
-        prober=lambda a, t: calls.append(1) or 403,
+        prober=lambda a, t: calls.append(1) or about.ProxyAnswer(403),
         monotonic=lambda: clock[0],
     )
     first = svc.components()
@@ -726,7 +728,7 @@ def test_a_hung_probe_degrades_only_its_own_entry_and_does_not_hold_the_route(se
 
     def hung(addr, timeout):
         release.wait(5)
-        return 403
+        return about.ProxyAnswer(403)
 
     _write_core(settings)
     svc = _service(settings, {"HTTP_PROXY": "http://p:1"}, prober=hung, deadline_seconds=0.3)
@@ -760,7 +762,7 @@ def test_probes_run_in_parallel(settings: Settings, monkeypatch) -> None:
 
     def proxy_waits(addr, timeout):
         gate.wait()
-        return 403
+        return about.ProxyAnswer(403)
 
     monkeypatch.setattr(about, "core_component", core_waits)
     c = _by_name(_service(settings, {"HTTP_PROXY": "http://p:1"}, prober=proxy_waits).components())
@@ -779,7 +781,7 @@ def test_answer_names_no_path_host_or_runner_id(settings: Settings, tmp_path) ->
     app = create_app(s)
     app.state.about = AboutService(
         s, environ={"HTTP_PROXY": "http://vault-proxy-internal:8888"},
-        proxy_prober=lambda a, t: 403,
+        proxy_prober=lambda a, t: about.ProxyAnswer(403),
     )
     body = TestClient(app).get("/v1/about", headers=HEADERS).text
     for needle in (str(tmp_path), s.db_path, s.cache_root, "vault-proxy-internal", "8888",

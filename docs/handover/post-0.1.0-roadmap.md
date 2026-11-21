@@ -2058,6 +2058,26 @@ and VERIFY-COLD-1 is prose in the Sunday-test box of the rc19.3 block.
   The API pauses (or holds) the runner while client MISS traffic is seen
   and resumes it after an idle gap; must not lose the job's progress and
   must show the reason in the Downloads UI (web + app twin).
+  **CAP-503-FIX-1a done 2026-11-21 (api, schema v34, ADR-0016 addendum):**
+  a controller holds the runner while client MISS >= 512 KiB/s is seen
+  (live tier) and resumes after a 120 s idle gap (constants, no env var);
+  `jobs.pause_reason` (NULL = manual, never auto-resumed),
+  `jobs.client_override`, `GET /v1/client-priority`; live-ring runner
+  markers are token-checked. Operator decisions 2026-11-21: **a manual
+  Resume during a hold overrides it for that job (Weg B)** until the job
+  ends or is paused manually, also across later holds; **queued GC jobs
+  wait during a hold (Weg A)**, an explicit Resume of a GC job overrides
+  like any job. Known limits (README, addendum): a device behind the
+  runner's address gets no priority; a runner whose marker is lost while
+  another runner window exists pauses itself about every 2 min.
+  Mutation checks could not run (auto mode blocked them for coder and
+  reviewer); the guards were judged by reading, unpinned: threshold value
+  beyond the 60-602 KiB/s band, live-mark eviction and pruning.
+  **CAP-503-FIX-1b (web + app, rc23 wave 2):** show the hold in Downloads:
+  a held/client-paused job and every queued job while holding name the
+  device(s) and the resume time; an overridden job reads "runs alongside
+  <device> by your choice"; `restored` (after a restart, no device seen
+  yet) must not claim a sighting; twin pins web <-> Android.
 - **APP-EXPERT-SWITCH-1 (android, operator 2026-11-01, screenshot; rc23):**
   the "Show expert settings" switch at the bottom of Settings > About
   needs a rework: in the off state the dark track and thumb read as
@@ -2072,6 +2092,11 @@ and VERIFY-COLD-1 is prose in the Sunday-test box of the rc19.3 block.
   version line for components that do not report one.
   **Decision (operator, 2026-11-21 evening): Weg A, report the proxy's
   version, rc23** (api change with its own ADR-0016 addendum).
+  **Done 2026-11-21 (PROXY-VERSION-1, -NITS-1):** the proxy's tinyproxy
+  `ErrorFile 403` page carries a build marker, the about probe reads it.
+  Candidate **PROXY-VERSION-CHECK-1**: compare the proxy's version with
+  vault-api's (mismatch -> Check), like vault-core. Nit: re-wrap the long
+  line in `api/README.md` "Component versions" (~6729).
 - **APP-DL-CARD-1 (android, operator 2026-11-01, screenshot; rc23 by operator decision 2026-11-01):** the
   Downloads page's active-job card ("Breathedge, job #266 ... 0 MB/s · 0
   GB loaded so far", Pause/Cancel) looks unpolished next to the
@@ -2089,6 +2114,26 @@ and VERIFY-COLD-1 is prose in the Sunday-test box of the rc19.3 block.
   (node TAP) and gave no file hint, so the harness still persisted 528 KB.
   Candidate: for TAP output keep the summary plus every `not ok` block and
   drop `ok` lines with their YAML blocks; name the full-output file.
+  **Done 2026-11-21 (rc23), output-trim 0.2.0:** OUTPUT-TRIM-TAP-1 (TAP),
+  follow-up **OUTPUT-TRIM-2** (found in the package: node 24 prints the
+  `spec` reporter even when redirected, so `dev.sh test-web` is spec now;
+  output over ~30 KB reaches the hook already cut with
+  `persistedOutputPath`, now read back for every format; a non-zero exit
+  returns core's result untouched, because core 2.1.319 refused the old
+  `{isError, result: string}` answer and the long failing command lost
+  all output) and **OUTPUT-TRIM-NITS-1** (review: unreadable or still
+  oversized read-back leaves core's result alone, `yamlEnd` stops at a
+  dedent, version 0.2.0). Measured: passing test-web 2,293 lines -> 9.
+  Open: **OUTPUT-TRIM-LIVE-1** live check after the mod rollout Antrag
+  (inline result once the persisted fields are removed, `$.fs.read` on
+  the `tool-results` path, `seq 1 40000; exit 3` shows its output,
+  installed version 0.2.0). Nit: TAP drops `#` comments (a failing test's
+  console output) while spec keeps them (documented).
+  Test nits (OUTPUT-TRIM-NITS-1 re-review): the test "read back but not
+  shorter" (`tests/output-trim.test.ts`, ~450) passes only through the
+  size check because its trailing newline makes `trimText` 1 byte
+  shorter (drop the `+ '\n'`); the stderr part of the size check
+  (`register.ts` ~101) has no test.
 - **DEVSH-VERIFY-ARGS-1 (operator dev.sh, found 2026-11-01):** `dev.sh
   verify <bad id>` stops the dev stack before verify-stack.sh rejects the
   argument (exit 2). Candidate: validate the section list before stopping

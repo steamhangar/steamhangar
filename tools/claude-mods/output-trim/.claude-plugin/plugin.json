@@ -1,8 +1,8 @@
 {
   "name": "output-trim",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "author": { "name": "SteamHangar contributors" },
-  "description": "Trims long Bash output to head, tail and failure lines; keeps the full output in a file.",
+  "description": "Trims long Bash output to head, tail and failure lines (node test output to its summary and failures); keeps the full output in a file.",
   "userConfig": {
     "outputDir": {
       "type": "string",

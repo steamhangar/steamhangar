@@ -560,6 +560,7 @@ def _run_entrypoint(
         "VAULT_PROXY_FILTER_FILE_FOR_TESTS": str(filter_file),
         "VAULT_PROXY_CONF_TEMPLATE_FOR_TESTS": str(conf_template),
         "VAULT_PROXY_CONF_FILE_FOR_TESTS": str(tmp_path / "tinyproxy.conf"),
+        "VAULT_PROXY_ERROR_PAGE_FILE_FOR_TESTS": str(tmp_path / "403.html"),
         "PATH": "/usr/bin:/bin",
     }
     if egress_subnet is not _UNSET:
