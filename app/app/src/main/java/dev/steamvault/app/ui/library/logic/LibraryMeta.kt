@@ -158,12 +158,6 @@ private fun clauses(game: GameSummary, f: MetaFilter): List<Boolean?> {
     return out
 }
 
-/** Whether [game] passes the filter (unknown values per `includeUnknown`). */
-fun matchesMeta(game: GameSummary, f: MetaFilter): Boolean {
-    if (!f.active) return true
-    return clauses(game, f).all { it ?: f.includeUnknown }
-}
-
 data class MetaFilterResult(val games: List<GameSummary>, val unknownExcluded: Int)
 
 /**

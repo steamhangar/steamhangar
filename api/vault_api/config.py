@@ -313,7 +313,7 @@ DEFAULT_SWEEP_INCLUDE_CACHED = True
 #: missing chunks (``scheduler.completion_appids``, WP CACHE-COMPLETE-1b)?
 #: ON by default: that was the only behaviour before this switch existed.
 #: Off, the sweep never forces a game for completeness; "Verify" and
-#: "Complete all" (``POST /v1/prefill/verify``/``incomplete``) still work, and
+#: "Verify all" (``POST /v1/prefill/verify``) and ``/incomplete`` still work, and
 #: the disk check itself still runs (it is part of the update check). A forced
 #: run requests the full chunk list of the current build, but only chunks
 #: missing from the cache are downloaded (present ones are cache HITs).

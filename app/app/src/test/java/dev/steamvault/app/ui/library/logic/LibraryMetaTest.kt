@@ -102,8 +102,8 @@ class LibraryMetaTest {
         val on = applyMetaFilter(rows, f(minRating = 80, includeUnknown = true))
         assertEquals(listOf(1, 3, 4, 5), ids(on.games))
         assertEquals(0, on.unknownExcluded)
-        // A known failing clause still excludes with include-unknown (API rule).
-        assertFalse(matchesMeta(rows[1], f(minRating = 80, includeUnknown = true)))
+        // A known failing clause still excludes with include-unknown (API rule):
+        // game 2 is missing from `on` above.
         // Unknown for one clause but failing another is not "unknown-hidden".
         val mixed = applyMetaFilter(
             listOf(game(6, meta(rating = null, coop = false))),

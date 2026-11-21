@@ -3,10 +3,10 @@
  * `views/downloads.js`: rendered only with an entry (user rule 2026-10-14),
  * placed after "Updates available" and before the Queue, one row per
  * incomplete game with its figure, "Complete now" -> `POST
- * /v1/prefill/verify {appids:[id]}`, "Complete all" -> the same route with
+ * /v1/prefill/verify {appids:[id]}`, "Verify all" -> the same route with
  * exactly the listed completable rows (never `/v1/prefill/incomplete`), focus
  * kept across a rebuild, no "Complete now" (a note
- * instead) for a game short only of damaged chunks, no "Complete all" when
+ * instead) for a game short only of damaged chunks, no "Verify all" when
  * no row can be completed, the schedule note, the "verifies on the next run"
  * toast for a running dedupe, and the started game leaving the list once
  * its job shows.
@@ -180,7 +180,7 @@ test("MUTATION PIN: hidden while nothing is incomplete; shown with rows, figures
   }
 });
 
-test("MUTATION PIN: only damaged-only rows -> listed, but no 'Complete all'", async () => {
+test("MUTATION PIN: only damaged-only rows -> listed, but no 'Verify all'", async () => {
   reset();
   server.games = [partial(40, "Broken Bits", 99, 0)];
   try {
@@ -210,7 +210,7 @@ test("MUTATION PIN: 'Complete now' sends POST /v1/prefill/verify with exactly th
   }
 });
 
-test("MUTATION PIN: 'Complete all' sends POST /v1/prefill/verify with exactly the listed completable rows", async () => {
+test("MUTATION PIN: 'Verify all' sends POST /v1/prefill/verify with exactly the listed completable rows", async () => {
   reset();
   // Incomplete on the server, but not listed here: update-flagged (60), busy
   // (70) and damaged-only (40). None of them may be sent.
@@ -280,7 +280,7 @@ test("a game with an active job is not listed (it is in the queue)", async () =>
   }
 });
 
-test("MUTATION PIN: focus survives a rebuild — the same row's button, then 'Complete all', then the Queue heading", async () => {
+test("MUTATION PIN: focus survives a rebuild — the same row's button, then 'Verify all', then the Queue heading", async () => {
   reset();
   server.games = [partial(20, "Aurora", 86, 3), partial(30, "Zephyr Run", 42, 7)];
   try {
@@ -294,7 +294,7 @@ test("MUTATION PIN: focus survives a rebuild — the same row's button, then 'Co
     assert.equal(document.activeElement?.dataset?.incompleteAppid, "30", "the same row's button");
     assert.equal(document.activeElement?.dataset?.role, "complete-now");
 
-    // Its row leaves: focus moves to "Complete all".
+    // Its row leaves: focus moves to "Verify all".
     server.games = [partial(20, "Aurora", 87, 2), partial(30, "Zephyr Run", 100, 0)];
     store.refreshNow();
     await until(() => rowFor(s, 30) === null, "row gone");

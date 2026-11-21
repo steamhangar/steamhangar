@@ -221,7 +221,7 @@ class VaultApiClient(
      * server flags `needs_force` first, then enqueues exactly like
      * [prefill] (same dedupe, same 422 for a Steam tool app, same
      * response). "Verify" in the detail sheet and "Complete now" /
-     * "Complete all" in Downloads all send exactly the ids they list.
+     * "Verify all" in Downloads all send exactly the ids they list.
      */
     suspend fun prefillVerify(appids: List<Int>): List<PrefillJobRef> =
         post("/v1/prefill/verify", PrefillRequest(appids))

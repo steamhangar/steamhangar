@@ -195,6 +195,10 @@ Rejected: `?nocache=1`/`--nocache` (full re-download, or manifests only).
    decision 2026-10-14).
 3. No schema change. Details: api/README.md "Verify and complete".
 
+Amendment 2026-11-21 (VERIFY-ALL-LABEL-1): since rc23 the "Complete all"
+button reads "Verify all" on web and Android; it sends the listed ids to
+`POST /v1/prefill/verify`. The decisions above are unchanged.
+
 ## Note 2026-10-15 (WP UPD-FIX-1): which file is "the" manifest of a depot
 
 Decision 3 records one manifest per (app, depot), but the temp cache keeps

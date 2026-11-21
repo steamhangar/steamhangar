@@ -24,7 +24,6 @@ import {
   agentVersionRef,
   clientCardModel,
   compareReleaseVersions,
-  isAgentOutdated,
   outdatedAgentInfo,
   outdatedAgentText,
   summaryTiles,
@@ -90,8 +89,6 @@ test("MUTATION TARGET: bundled agent — same build never warns, below minimum a
   // Without a minimum an older agent only differs.
   const noMin = agentVersionRef("0.1.0-rc22", { agent: { ...CLIENTS.agent, minimum: null } });
   assert.equal(agentVersionIssue("0.1.0-rc16", noMin), "bundled");
-  assert.equal(isAgentOutdated("0.1.0-rc16", REF), true);
-  assert.equal(isAgentOutdated("0.1.0-rc18", REF), false, "the alias list: an rc18 agent is the rc17 build");
 });
 
 test("no bundled agent: the CLIENTS-3 rule against the server version is unchanged", () => {

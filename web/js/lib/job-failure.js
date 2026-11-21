@@ -140,9 +140,6 @@ export const HINTS = Object.freeze({
   }),
 });
 
-/** Kept for callers/tests that name the login hint directly. */
-export const LOGIN_HINT = HINTS[FAILURE_HINT.NOT_LOGGED_IN];
-
 /**
  * Whether `job` is the newest PREFILL job for its app in `jobs` (highest
  * id; ids are SQLite autoincrement, so higher = later). Retry is offered

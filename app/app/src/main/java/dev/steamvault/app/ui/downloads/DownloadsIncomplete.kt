@@ -21,10 +21,10 @@ import dev.steamvault.app.net.model.GameSummary
 import dev.steamvault.app.net.model.JobSummary
 import dev.steamvault.app.ui.downloads.logic.IncompleteWording
 import dev.steamvault.app.ui.downloads.logic.UpdatesWording
-import dev.steamvault.app.ui.downloads.logic.completeAllSpokenLabel
 import dev.steamvault.app.ui.downloads.logic.completeNowSpokenLabel
 import dev.steamvault.app.ui.downloads.logic.incompleteHeadingText
 import dev.steamvault.app.ui.downloads.logic.incompletePctText
+import dev.steamvault.app.ui.downloads.logic.verifyAllSpokenLabel
 import dev.steamvault.app.ui.library.logic.RepairWording
 import dev.steamvault.app.ui.library.logic.isCompletable
 import dev.steamvault.app.ui.library.logic.repairNoteFor
@@ -63,9 +63,9 @@ fun incompleteRowModel(game: GameSummary, name: String, jobs: List<JobSummary> =
 }
 
 /**
- * The "Incomplete (N)" heading with "Complete all", plus the schedule note
+ * The "Incomplete (N)" heading with "Verify all", plus the schedule note
  * (web `paintIncomplete`). The caller emits it only when the list is
- * non-empty (user rule: no empty Downloads sections). "Complete all" is
+ * non-empty (user rule: no empty Downloads sections). "Verify all" is
  * offered only while at least one row can be completed, and sends exactly
  * those rows.
  *
@@ -78,7 +78,7 @@ internal fun IncompleteHeader(
     rows: List<IncompleteRowModel>,
     note: String?,
     inFlight: Int?,
-    onCompleteAll: (List<Int>) -> Unit,
+    onVerifyAll: (List<Int>) -> Unit,
 ) {
     val completable = rows.filter { it.completable }.map { it.appid }
     Column(modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
@@ -93,11 +93,11 @@ internal fun IncompleteHeader(
                 modifier = Modifier.weight(1f).semantics { heading() },
             )
             if (completable.isNotEmpty()) {
-                val starting = inFlight == COMPLETE_ALL
-                val label = if (starting) UpdatesWording.STARTING else IncompleteWording.COMPLETE_ALL
-                val spoken = if (starting) UpdatesWording.STARTING else completeAllSpokenLabel(completable.size)
+                val starting = inFlight == VERIFY_ALL
+                val label = if (starting) UpdatesWording.STARTING else IncompleteWording.VERIFY_ALL
+                val spoken = if (starting) UpdatesWording.STARTING else verifyAllSpokenLabel(completable.size)
                 OutlinedButton(
-                    onClick = { onCompleteAll(completable) },
+                    onClick = { onVerifyAll(completable) },
                     enabled = inFlight == null,
                     modifier = Modifier.semantics { contentDescription = spoken },
                 ) { Text(label) }

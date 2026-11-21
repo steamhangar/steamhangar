@@ -87,7 +87,7 @@
  * same pattern: the games whose measured `cache_complete_pct` is below 100,
  * with no active job and no update flag (lib/cache-completeness.js
  * `pendingIncomplete`), each with its figure and "Complete now" (`POST
- * /v1/prefill/verify`, a forced run), plus "Complete all" (the same
+ * /v1/prefill/verify`, a forced run), plus "Verify all" (the same
  * route with exactly the listed completable rows, like "Update all") and a
  * schedule note (`incompleteScheduleNote`:
  * completed automatically in the window, or manual only). A game short only
@@ -95,7 +95,7 @@
  * cannot fix it — but "Repair" (WP CACHE-REPAIR-UI-1,
  * `components/repair-flow.js`: dry run, confirm with the counts, execute,
  * "Show job" scrolls to the queued job here) and a note saying why;
- * "Complete all" is offered only while at least one row can be completed. Like every Downloads section
+ * "Verify all" is offered only while at least one row can be completed. Like every Downloads section
  * since UPD-6 (user rule 2026-10-14) it is rendered only with at least one
  * entry, and rebuilt only when its content changes.
  *
@@ -835,7 +835,7 @@ let incompleteInFlight = null;
 
 /**
  * Queue the completion: `POST /v1/prefill/verify` with one game ("Complete
- * now") or exactly the listed completable rows ("Complete all").
+ * now") or exactly the listed completable rows ("Verify all").
  * @param {number[]} appids
  * @param {"all"|number} which what the busy label goes on
  */

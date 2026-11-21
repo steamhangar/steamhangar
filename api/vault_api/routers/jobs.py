@@ -469,7 +469,9 @@ def create_incomplete_jobs(
     size_cache: SizeCache = Depends(get_size_cache),
     cache_root: str = Depends(get_cache_root),
 ) -> list[PrefillJobRef]:
-    """"Complete all" (WP CACHE-COMPLETE-1b): a forced prefill for every game
+    """Server-side "complete all" (WP CACHE-COMPLETE-1b; the UIs' "Verify all"
+    sends its listed ids to ``POST /v1/prefill/verify`` instead): a forced
+    prefill for every game
     ``GET /v1/games?incomplete=true`` lists right now that is short of at
     least one chunk file (``cache_completeness.is_completable``). No request
     body (like ``POST /v1/prefill/cached``; a body is ignored). 202.

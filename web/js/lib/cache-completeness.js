@@ -46,7 +46,7 @@
  * **Incomplete list (Downloads).** {@link pendingIncomplete}: the raw rows
  * whose own pct is known and below 100 (the server's
  * `cache_completeness.is_incomplete`, which `GET /v1/games?incomplete=true`
- * and "Complete all" use), Steam tool apps left out (the server leaves them
+ * and `POST /v1/prefill/incomplete` use), Steam tool apps left out (the server leaves them
  * out too), without an active prefill job (once a job exists the game is in
  * the queue), and without `update_available` (rule 1 above: it is listed
  * under "Updates available" and "Update now" completes it). Derived from the
@@ -54,7 +54,8 @@
  * server's own two-line rule on the same fields.
  *
  * **Actions.** "Verify" (detail sheet) and "Complete now" (one row) send
- * `POST /v1/prefill/verify {appids}`; "Complete all" sends the same route
+ * `POST /v1/prefill/verify {appids}`; "Verify all" (VERIFY-ALL-LABEL-1,
+ * `components/job-row.js`) sends the same route
  * with exactly the listed rows "Complete now" is offered for (like UPD-6's
  * "Update all"), never `POST /v1/prefill/incomplete`: the server's own
  * selection ignores jobs and update flags, so it could force games this
@@ -284,7 +285,6 @@ export const INCOMPLETE_HEADING = "Incomplete";
 /** WP AUTO-VERIFY-1: the note while automatic completion is switched off. */
 export const AUTO_COMPLETE_OFF_NOTE = "Manual only — automatic completion is off in Settings.";
 export const COMPLETE_NOW_LABEL = "Verify";
-export const COMPLETE_ALL_LABEL = "Complete all";
 
 /**
  * The incomplete games the Downloads section lists (module header), sorted
@@ -314,12 +314,6 @@ export function pendingIncomplete(games, jobs, titleOf = (g) => String(g.name ??
 /** "Incomplete (N)". */
 export function incompleteHeadingText(count) {
   return `${INCOMPLETE_HEADING} (${count})`;
-}
-
-/** "Complete all 2 games" — the button's accessible name; `count` is the
- * number of rows "Complete now" is offered for. */
-export function completeAllAriaLabel(count) {
-  return `${COMPLETE_ALL_LABEL} ${count} ${count === 1 ? "game" : "games"}`;
 }
 
 /** "Complete now — Emberreach". */
@@ -364,7 +358,7 @@ export function incompleteScheduleNote(schedule) {
 
 /**
  * Toast for a successful `POST /v1/prefill/verify` ("Verify", "Complete
- * now", "Complete all").
+ * now", "Verify all").
  *
  * A deduplicated entry is worded by its job's status (README "UI note"): a
  * QUEUED job runs forced when the worker claims it; a PAUSED one runs

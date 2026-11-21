@@ -3,10 +3,7 @@
  * `GET /v1/clients/overview` (WP D15b): agent PCs, agentless addresses and
  * the server's own prefill runner (WP D15-RUNNER, `kind: "runner"`).
  * Pure: no DOM. WP CLIENTS-4: `clientCardModel` and `summaryTiles` are
- * what the page renders (`components/client-card.js`, `views/clients.js`);
- * the one-line texts (`loadingNowText`, `statsText`, `recentAppsText`,
- * `installedText`, `connectionChip`) are the wording reference the Android
- * twin (`ClientsPage.kt`) ports and stay pinned here for it.
+ * what the page renders (`components/client-card.js`, `views/clients.js`).
  * Unit-tested in web/tests/clients-page.test.js.
  *
  * Wording rules:
@@ -43,7 +40,7 @@ import { canRename, isolate } from "./client-names.js";
 import { UNKNOWN_APP_NAME } from "./app-names.js";
 import { isReleaseVersion } from "./agent-install.js";
 import { PRODUCT_NAME } from "./product.js";
-import { DASH, RANGE_PHRASES, formatRate, formatSpeed, formatTrafficBytes } from "./traffic-view.js";
+import { DASH, RANGE_PHRASES, formatSpeed, formatTrafficBytes } from "./traffic-view.js";
 import { describeBypassClient, isRemovableClientId, presenceLine } from "./clients-view.js";
 
 /** How many recently loaded apps a card names before "+N more". */
@@ -108,15 +105,6 @@ export function clientKindText(client) {
   return addrs.length ? `${agent} · ${addrs.join(", ")}` : `${agent} · no address in the cache log`;
 }
 
-/** Connection chip: word and chip class (the `.pchip` vocabulary). */
-export function connectionChip(client) {
-  // "Agent" wording only for a vault-agent client; an address has no agent.
-  const agent = isAgentClient(client);
-  if (client.connected === true) return { word: agent ? "Agent online" : "Loading", cls: "pchip pchip-on" };
-  if (client.connected === false) return { word: agent ? "Agent offline" : "No agent", cls: "pchip pchip-off" };
-  return { word: "No current data", cls: "pchip pchip-unknown" };
-}
-
 /**
  * What a client is loading now (WP CLIENTS-LIVE-1): `live_now` from the
  * server's live tier when it sent one, else the swept `loading_now` (up to
@@ -133,69 +121,6 @@ export function currentLoading(client) {
 /** Name of an app in a list: the server's name, else the neutral "Unknown app" (never a bare id). */
 export function appLabel(app) {
   return typeof app.name === "string" && app.name.trim() ? app.name : UNKNOWN_APP_NAME;
-}
-
-/**
- * "Loading now" line.
- * @param {object} client
- * @returns {string}
- */
-export function loadingNowText(client) {
-  const now = currentLoading(client);
-  if (!now) return `Loading now: ${DASH}`;
-  if (!now.loading) return "Loading now: nothing";
-  const speed = formatSpeed(now.bytes_per_second) || DASH;
-  const apps = Array.isArray(now.apps) ? now.apps.map(appLabel) : [];
-  if (apps.length) return `Loading now: ${speed} · ${apps.join(", ")}`;
-  return `Loading now: ${speed} · content not linked to one game`;
-}
-
-/**
- * Installed games line; agent clients only (`null` for an address).
- * @param {object} client
- * @returns {string | null}
- */
-export function installedText(client) {
-  if (!isAgentClient(client)) return null;
-  const n = client.installed_app_count;
-  if (!Number.isInteger(n)) return "Installed games: not reported";
-  return `${n} game${n === 1 ? "" : "s"} installed`;
-}
-
-/**
- * Bytes and hit rate over the selected range; `null` with no stats (feed
- * disabled).
- * @param {object} client
- * @param {string} range
- * @returns {string | null}
- */
-export function statsText(client, range) {
-  const s = client.stats;
-  if (!s) return null;
-  const loaded = formatTrafficBytes(s.bytes_served) || DASH;
-  const rate = formatRate(s.hit_rate);
-  const phrase = RANGE_PHRASES[range] || "";
-  return `${loaded} loaded ${phrase}` + (rate ? ` · hit rate ${rate}` : "");
-}
-
-/**
- * The top recently loaded apps; `null` when the server sent none (feed
- * disabled) or the range has nothing.
- * @param {object} client
- * @returns {string | null}
- */
-export function recentAppsText(client) {
-  const apps = Array.isArray(client.recent_apps) ? client.recent_apps : null;
-  if (!apps) return null;
-  const parts = apps.slice(0, RECENT_APPS_SHOWN).map((a) => {
-    const size = formatTrafficBytes(a.bytes_served);
-    return size ? `${appLabel(a)} (${size})` : appLabel(a);
-  });
-  const more = apps.length - RECENT_APPS_SHOWN;
-  if (more > 0) parts.push(`+${more} more`);
-  const other = formatTrafficBytes(client.recent_unattributed_bytes);
-  if (other && client.recent_unattributed_bytes > 0) parts.push(`${other} not linked to one game`);
-  return parts.length ? `Loaded recently: ${parts.join(", ")}` : null;
 }
 
 /**
@@ -439,20 +364,6 @@ export function agentVersionIssue(agentVersion, reference) {
     return "bundled";
   }
   return differsFromServer(a, ref.server || "") ? "server" : null;
-}
-
-/**
- * WP CLIENTS-3 (Weg A, frontend only): an agent is outdated when its reported
- * version differs from the server's. "Differs", not "older": a newer agent is
- * flagged too, because that pair is untested. Since RELEASE-SPLIT-1b the
- * reference is the bundled agent when the server states one
- * ({@link agentVersionIssue}).
- * @param {unknown} agentVersion
- * @param {unknown} serverVersion server version string or {@link agentVersionRef}
- * @returns {boolean}
- */
-export function isAgentOutdated(agentVersion, serverVersion) {
-  return agentVersionIssue(agentVersion, serverVersion) !== null;
 }
 
 /**

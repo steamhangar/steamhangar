@@ -46,7 +46,6 @@ package dev.steamvault.app.ui.onboarding.logic
 enum class OnboardingStep { CONNECT, STEAM, DONE }
 
 val FIRST_ONBOARDING_STEP = OnboardingStep.CONNECT
-val LAST_ONBOARDING_STEP = OnboardingStep.DONE
 
 private val ORDER = OnboardingStep.entries
 

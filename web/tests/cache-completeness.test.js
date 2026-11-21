@@ -41,7 +41,6 @@ import {
   verifyAppids,
   pendingIncomplete,
   incompleteHeadingText,
-  completeAllAriaLabel,
   completeNowAriaLabel,
   incompletePctText,
   incompleteScheduleNote,
@@ -254,8 +253,6 @@ test("MUTATION TARGET C7 -- Incomplete list: known < 100, no tool app, no active
 
 test("Incomplete texts: heading, aria labels, the row's figure", () => {
   assert.equal(incompleteHeadingText(3), "Incomplete (3)");
-  assert.equal(completeAllAriaLabel(1), "Complete all 1 game");
-  assert.equal(completeAllAriaLabel(2), "Complete all 2 games");
   assert.equal(completeNowAriaLabel("Aurora"), "Verify — Aurora");
   assert.equal(incompletePctText(partial(42)), "42%");
   assert.equal(incompletePctText(unknown()), "—");

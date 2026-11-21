@@ -185,6 +185,8 @@ test("stats: agent shows Installed / Loaded / Hit rate with a meter; runner and 
     ["installed:Installed:—:-", "loaded:Loaded:—:-", "hitrate:Hit rate:—:-"],
     "nothing reported: dashes, never zeros",
   );
+  assert.equal(cells(render(agentClient({ installed_app_count: 0 })))[0], "installed:Installed:0games:-", "a real zero prints");
+  assert.equal(cells(render(agentClient({ installed_app_count: 1 })))[0], "installed:Installed:1game:-");
 });
 
 test("MUTATION TARGET: recent games as chips with +N more", () => {

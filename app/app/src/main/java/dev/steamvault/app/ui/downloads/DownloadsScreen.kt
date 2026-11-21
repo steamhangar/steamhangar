@@ -493,7 +493,7 @@ private fun DownloadsBody(
                     rows = incompleteRows,
                     note = incompleteScheduleNote(controller.schedule),
                     inFlight = controller.incompleteInFlight,
-                    onCompleteAll = { ids -> controller.startCompletion(scope, ids, COMPLETE_ALL) },
+                    onVerifyAll = { ids -> controller.startCompletion(scope, ids, VERIFY_ALL) },
                 )
             }
             items(incompleteRows, key = { "incomplete-${it.appid}" }) { row ->

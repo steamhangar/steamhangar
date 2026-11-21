@@ -3,7 +3,6 @@ package dev.steamvault.app.demo
 import dev.steamvault.app.ui.clients.logic.clientKindText
 import dev.steamvault.app.ui.clients.logic.clientName
 import dev.steamvault.app.ui.clients.logic.clientsHaveFigures
-import dev.steamvault.app.ui.clients.logic.installedText
 import dev.steamvault.app.ui.clients.logic.isAddressClient
 import dev.steamvault.app.ui.clients.logic.isAgentClient
 import dev.steamvault.app.ui.clients.logic.isRunnerClient
@@ -130,7 +129,6 @@ class DemoTrafficTest {
         assertEquals(2, addresses.size)
         assertTrue(agents.any { it.connected == true } && agents.any { it.connected == false })
         assertTrue("an agent has installed games", agents.any { (it.installed_app_count ?: 0) > 0 })
-        assertTrue(agents.all { installedText(it) != null })
         assertTrue("connected first", o.clients.first().connected == true)
         assertTrue("someone is loading now", o.clients.any { it.loading_now?.loading == true })
     }

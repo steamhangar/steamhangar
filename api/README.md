@@ -654,7 +654,7 @@ route, see "Auth").
 | POST   | `/v1/prefill`                      | Body `{"appids": [int, ...]}` — queue one prefill job per app id. `202` with a list of `{appid, job_id, status, deduplicated}`. `422` for an empty list, an appid `< 1`, a non-list, or an unrecognized body field; `422` with a string `detail` (nothing queued) when the body names a Steam tool app (WP API-FIX-4, see "Steam tool apps" below) |
 | POST   | `/v1/prefill/cached`               | Phase 4c, WP 4c-api. **No request body.** Selects every app that currently has cache content and queues a prefill for each through the exact same path `POST /v1/prefill` uses (same dedupe, same response shape). Steam tool apps are never selected (WP API-FIX-4). `202` with a list of `{appid, job_id, status, deduplicated}`, one entry per selected app, `[]` if nothing is cached. See "Check & update all cached games" below |
 | POST   | `/v1/prefill/verify`               | WP CACHE-COMPLETE-1b. "Verify" / "Complete now". Body `{"appids": [int, ...]}` as for `POST /v1/prefill` (same `422`s, tool apps refused). Sets `needs_force = 1` for each app, then queues it through the same enqueue (same dedupe, same response). Apps whose last prefill ended `not_owned` (within 7 days) are skipped and listed in the additive `X-Skipped-Not-Owned` response header (comma-separated appids; WP NOT-OWNED-2). `202`. See "Verify and complete" below |
-| POST   | `/v1/prefill/incomplete`           | WP CACHE-COMPLETE-1b. "Complete all". **No request body** (ignored, like `/v1/prefill/cached`). Selects the games `GET /v1/games?incomplete=true` lists that miss at least one chunk file (`cache_missing_chunks > 0`) and handles each like `POST /v1/prefill/verify` (including the `X-Skipped-Not-Owned` skip). `202`, `[]` when nothing is incomplete. See "Verify and complete" below |
+| POST   | `/v1/prefill/incomplete`           | WP CACHE-COMPLETE-1b. The server-side "complete all" selection (the web and app "Verify all" send their listed ids to `/v1/prefill/verify` instead). **No request body** (ignored, like `/v1/prefill/cached`). Selects the games `GET /v1/games?incomplete=true` lists that miss at least one chunk file (`cache_missing_chunks > 0`) and handles each like `POST /v1/prefill/verify` (including the `X-Skipped-Not-Owned` skip). `202`, `[]` when nothing is incomplete. See "Verify and complete" below |
 | GET    | `/v1/jobs`                         | Recent jobs, newest first. `?limit=` 1–200, default 20 (`422` outside that range). WP D15b history filter: `?range=24h|7d|30d|all` or `?since=<UTC YYYY-MM-DDTHH:MM:SSZ>` keeps finished jobs whose finish (else start, else creation) is within it; queued/running/paused jobs are always kept; both parameters together or a malformed `since` is `422`. Without either, unchanged. Omits `log_excerpt` on purpose — this is the polling list. Includes `updated`, `up_to_date`, `summary_parse_ok` (schema v4, WP 3.3 — see "Job outcome honesty" below; `null` until the job finishes or if the summary couldn't be parsed), `gc_execute` (schema v7, WP 3.8 — `null` for a prefill job, `false`/`true` for a GC job's mode), plus `paused_at` and `stop_request` (schema v8, WP 3.12 — see "Job control" below) |
 | GET    | `/v1/jobs/{id}`                    | One job incl. `log_excerpt` plus the same `updated`/`up_to_date`/`summary_parse_ok`/`gc_execute` fields; `404` for an unknown id |
 | DELETE | `/v1/jobs/{id}`                    | **Cancel** a job (WP 3.12). `200` with `{job_id, status, outcome, detail}` — `outcome` is `"immediate"` (a queued/paused job, finalized here) or `"requested"` (a running job; the worker stops it, keep polling). `404` unknown id; `409` if the job already finished. See "Job control" below |
@@ -664,7 +664,7 @@ route, see "Auth").
 | DELETE | `/v1/cache/{appid}`                | Delete this game's depot directories. `200` with `{appid, deleted_depots[], skipped_shared[], failed[], total_bytes_freed}`; `404` unknown appid or no mappings; `409` while a prefill **or GC** job for the app is queued/running/**paused** (WP 3.12); `422` for `appid < 1`; `500` if the cache-root guards refuse. **`?with_packages=true&members=<csv>`** (WP TOOL-APPS-2b) also deletes the app's content packages; `members` must be exactly the list the confirmation showed. See "Per-game deletion" and "Grouped delete" below |
 | GET    | `/v1/cache/{appid}/delete-plan`    | WP TOOL-APPS-2b. Read-only preview of `DELETE /v1/cache/{appid}` (optionally `?with_packages=true`) for a confirmation dialog: `{appid, with_packages, members[], kept_children[], delete_depots[], skipped_shared[], unusable[], total_bytes, blocked_by[]}`. Same `404`s as the deletion; an in-flight job is listed in `blocked_by` instead of a `409`. See "Grouped delete" below |
 | POST   | `/v1/cache/{appid}/gc`             | Queue a garbage-collection job. Body optional; `{"execute": true}` (a literal JSON boolean) is the only way to delete — **dry run by default**. `202` with `{appid, job_id, status, type, mode, execute, deduplicated}`; `404` unknown appid or no mappings; `422` for `appid < 1`, a non-boolean `execute`, or an unrecognized body field. See "Garbage collection" below |
-| POST   | `/v1/cache/{appid}/repair`         | WP CACHE-REPAIR-1. Repair a game whose cache holds chunk files of the wrong size (`cache_missing_chunks: 0` on an incomplete row; a forced prefill cannot fix them, vault-core serves the file as a HIT). Body optional, `{"execute": true}` (literal boolean) deletes, **dry run by default**. Only chunk files of the app's target manifests whose size differs from the manifest's are candidates; the size is re-checked right before each unlink, links are never followed, everything stays behind the `deletion.py` cache-root guards, more than 2000 files are refused. Execute then re-measures the app and queues a forced prefill. `200` `{appid, mode, execute, damaged_chunks, damaged_bytes, depots[], unreadable_depots[], exceeds_cap, max_files, removed_chunks, removed_bytes, skipped{}, job_id, job_status, job_deduplicated}` (dry run, or nothing damaged: no-op); `202` once files were removed and the job queued; `404` unknown app / no mappings; `409` a queued/running/paused job for the app or a co-owner of a damaged depot, or the app's last prefill ended `not_owned`; `422` more than `max_files` damaged on execute; `500` cache-root guard. "Complete all" and automatic completion keep skipping such a game until it is repaired |
+| POST   | `/v1/cache/{appid}/repair`         | WP CACHE-REPAIR-1. Repair a game whose cache holds chunk files of the wrong size (`cache_missing_chunks: 0` on an incomplete row; a forced prefill cannot fix them, vault-core serves the file as a HIT). Body optional, `{"execute": true}` (literal boolean) deletes, **dry run by default**. Only chunk files of the app's target manifests whose size differs from the manifest's are candidates; the size is re-checked right before each unlink, links are never followed, everything stays behind the `deletion.py` cache-root guards, more than 2000 files are refused. Execute then re-measures the app and queues a forced prefill. `200` `{appid, mode, execute, damaged_chunks, damaged_bytes, depots[], unreadable_depots[], exceeds_cap, max_files, removed_chunks, removed_bytes, skipped{}, job_id, job_status, job_deduplicated}` (dry run, or nothing damaged: no-op); `202` once files were removed and the job queued; `404` unknown app / no mappings; `409` a queued/running/paused job for the app or a co-owner of a damaged depot, or the app's last prefill ended `not_owned`; `422` more than `max_files` damaged on execute; `500` cache-root guard. `POST /v1/prefill/incomplete`, "Verify all" and automatic completion keep skipping such a game until it is repaired |
 | GET    | `/v1/cache/summary`                | `total_bytes` (disk usage of `depot/`, each depot counted once), `top_consumers` (top 10 `{appid, name, size_bytes}`, largest first), `unmapped_depots` (`{count, size_bytes}` for depot dirs on disk with no mapping row for any app), `free_disk_bytes` (free space on the cache filesystem, `null` if undeterminable) |
 | POST   | `/v1/agent/installed`              | Body `{"client_id": str, "appids": [int, ...]}` — store one **full-list** snapshot of a client's installed games. `200` with `{client_id, received, added, removed, first_report}`; `422` for a bad `client_id` (empty, > 64 chars, control characters, surrounding whitespace, `.`/`..`), an appid `< 1` or a boolean, a missing/non-list `appids`, more than 10 000 ids, or an unrecognized body field. Optional `local_addrs` (WP AGENT-ADDR-1): up to 8 unicast IP literals the PC uses toward the vault; `422` for anything else. See "Agent reports" and "Agent LAN addresses" below |
 | GET    | `/v1/clients`                      | One row per reporting client, sorted by `client_id`: `{client_id, first_seen, last_reported_at, app_count}` (WP 2.4) plus `{source_addrs, cache_hits, cache_misses, bytes_served, last_seen_in_cache_log, bypass_suspected}` (WP 3.11, ADR-0008 — the hit statistics and bypass warnings plan §5/§6 promised). The cache fields are `0`/`null`/`false` when the event feed is off. Plus `{peer_addrs, reported_addrs}` (WP AGENT-ADDR-1, diagnostics). See "Cache-event sweep → Bypass detection" and "Agent LAN addresses" WP D15-NAMES adds `name`, `name_addr`, `display_name` (see "Client names"). |
@@ -1637,7 +1637,7 @@ Two independent fixes land in this package:
    app's newest prefill job (finished within 7 days, and the app is not idle
    and never prefilled, which a cache deletion resets it to), not from
    `apps.status`; it feeds the `not_owned` flag of `GET /v1/games` and the
-   skips of the scheduler, verify (`X-Skipped-Not-Owned`) and "Complete all".
+   skips of the scheduler, verify (`X-Skipped-Not-Owned`) and `POST /v1/prefill/incomplete`.
 
 `GET /v1/jobs/{id}` and `GET /v1/jobs` both expose the parsed result as three
 additive fields: `updated`, `up_to_date` (`int | null`), `summary_parse_ok`
@@ -2336,7 +2336,7 @@ of the **current build** is there (`vault_api/cache_completeness.py`):
 
 ### Verify and complete (WP CACHE-COMPLETE-1b)
 
-"Verify" (one game) and "Complete now" / "Complete all" (the incomplete list)
+"Verify" (one game) and "Complete now" / "Verify all" (the incomplete list)
 are the same operation: a **forced prefill** of the game, queued as a normal
 download job (progress in Downloads, `GET /v1/jobs`).
 
@@ -2381,7 +2381,7 @@ the game's NEXT run; the current run does not become a verify. Say so rather
 than showing the running job as the verify. A queued or paused job does run
 forced.
 
-**Selection for "Complete all".** `cache_completeness.incomplete_apps`: every
+**Selection for `POST /v1/prefill/incomplete`.** `cache_completeness.incomplete_apps`: every
 tracked app whose figure (`cache_completeness.app_figure`, the games list's
 own computation) passes `cache_completeness.is_incomplete` (known and below
 100), Steam tool packages left out -- `GET /v1/games?incomplete=true` uses the
@@ -2395,7 +2395,7 @@ scheduler's settings) -- and then only those that
 disk; `null` exactly when `cache_complete_pct` is). An incomplete row with
 `cache_missing_chunks: 0` is short only of chunk files with the wrong size.
 **No current action repairs such a game** until the CACHE-REPAIR-1 follow-up
-lands (see "Damaged chunks" below): "Complete all" skips it, and UIs should
+lands (see "Damaged chunks" below): `POST /v1/prefill/incomplete` and "Verify all" skip it, and UIs should
 not offer "Complete now" for it (`POST /v1/prefill/verify` would still queue
 the forced run, which does not help).
 
@@ -2418,8 +2418,8 @@ targets, so those runs complete the game; the log names them. Rules:
   `true`, applies `next_sweep`. Off: the sweep never forces a game for
   completeness and logs nothing about it; the disk check still runs with the
   update check, the figures and the incomplete list stay, and "Verify" /
-  "Complete now" / "Complete all" (`POST /v1/prefill/verify`,
-  `POST /v1/prefill/incomplete`) still work. `GET /v1/schedule` reports the
+  "Complete now" / "Verify all" (`POST /v1/prefill/verify`) and
+  `POST /v1/prefill/incomplete` still work. `GET /v1/schedule` reports the
   effective value as `auto_complete_cached`.
 - **All incomplete cached games** (user decision 2026-10-14), not only sweep
   targets: a game completes in the window whether or not a PC reports it

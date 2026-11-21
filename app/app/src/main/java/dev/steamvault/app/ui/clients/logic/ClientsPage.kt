@@ -3,16 +3,10 @@ package dev.steamvault.app.ui.clients.logic
 import dev.steamvault.app.PRODUCT_NAME
 import dev.steamvault.app.net.model.ClientActivityOut
 import dev.steamvault.app.net.model.ClientsOverviewOut
-import dev.steamvault.app.net.model.LoadingAppOut
-import dev.steamvault.app.net.model.RecentAppOut
 import dev.steamvault.app.ui.library.logic.UNKNOWN_APP_NAME
 import dev.steamvault.app.ui.traffic.logic.DASH
 import dev.steamvault.app.ui.traffic.logic.FeedState
-import dev.steamvault.app.ui.traffic.logic.RANGE_PHRASES
 import dev.steamvault.app.ui.traffic.logic.feedState
-import dev.steamvault.app.ui.traffic.logic.formatRate
-import dev.steamvault.app.ui.traffic.logic.formatSpeed
-import dev.steamvault.app.ui.traffic.logic.formatTrafficBytes
 
 /**
  * Clients page presentation (WP D15d) -- a Kotlin port of
@@ -20,8 +14,8 @@ import dev.steamvault.app.ui.traffic.logic.formatTrafficBytes
  * `GET /v1/clients/overview` (WP D15b): agent PCs, agentless addresses and
  * the server's own prefill runner (WP D15-RUNNER, `kind: "runner"`).
  * Pure. Since WP ANDROID-REDESIGN-1a the card itself is `ClientCard.kt`'s
- * [ClientCardView] (web CLIENTS-1..4); the one-line texts here stay the
- * wording reference, as on the web.
+ * [ClientCardView] (web CLIENTS-1..4); this file keeps the title, kind
+ * line, summary and note texts the card and page use.
  *
  * **Verbatim-port exception (app/README.md "String resources").** Every
  * user-visible literal is the web module's own, pinned by string equality
@@ -101,68 +95,8 @@ fun clientKindText(client: ClientActivityOut): String {
     return if (addrs.isNotEmpty()) "$agent · ${addrs.joinToString(", ")}" else "$agent · no address in the cache log"
 }
 
-/** The connection chip's three looks (web `.pchip-on/-off/-unknown`). */
-enum class ConnectionLook { ON, OFF, UNKNOWN }
-
-data class ConnectionChip(val word: String, val look: ConnectionLook)
-
-fun connectionChip(client: ClientActivityOut): ConnectionChip {
-    // "Agent" wording only for a vault-agent client; an address has no agent.
-    val agent = isAgentClient(client)
-    return when (client.connected) {
-        true -> ConnectionChip(if (agent) "Agent online" else "Loading", ConnectionLook.ON)
-        false -> ConnectionChip(if (agent) "Agent offline" else "No agent", ConnectionLook.OFF)
-        null -> ConnectionChip("No current data", ConnectionLook.UNKNOWN)
-    }
-}
-
-/** Name of an app in a list: the server's name, else "App <id>". */
+/** Name of an app in a list: the server's name, else the neutral [UNKNOWN_APP_NAME] (never a bare id). */
 fun appLabel(appid: Int, name: String?): String = if (!name.isNullOrBlank()) name else UNKNOWN_APP_NAME
-
-private fun LoadingAppOut.label() = appLabel(appid, name)
-private fun RecentAppOut.label() = appLabel(appid, name)
-
-/** "Loading now" line. */
-fun loadingNowText(client: ClientActivityOut): String {
-    val now = currentLoading(client) ?: return "Loading now: $DASH"
-    if (!now.loading) return "Loading now: nothing"
-    val speed = formatSpeed(now.bytes_per_second) ?: DASH
-    val apps = now.apps.map { it.label() }
-    return if (apps.isNotEmpty()) "Loading now: $speed · ${apps.joinToString(", ")}" else "Loading now: $speed · content not linked to one game"
-}
-
-/** Installed games line; agent clients only (`null` for an address). */
-fun installedText(client: ClientActivityOut): String? {
-    if (!isAgentClient(client)) return null
-    val n = client.installed_app_count ?: return "Installed games: not reported"
-    return "$n game${if (n == 1) "" else "s"} installed"
-}
-
-/** Bytes and hit rate over the selected range; `null` with no stats (feed
- * disabled). */
-fun statsText(client: ClientActivityOut, range: String): String? {
-    val s = client.stats ?: return null
-    val loaded = formatTrafficBytes(s.bytes_served) ?: DASH
-    val rate = formatRate(s.hit_rate)
-    val phrase = RANGE_PHRASES[range] ?: ""
-    return "$loaded loaded $phrase" + (if (rate != null) " · hit rate $rate" else "")
-}
-
-/** The top recently loaded apps; `null` when the server sent none (feed
- * disabled) or the range has nothing. */
-fun recentAppsText(client: ClientActivityOut): String? {
-    val apps = client.recent_apps ?: return null
-    val parts = apps.take(RECENT_APPS_SHOWN).map { a ->
-        val size = formatTrafficBytes(a.bytes_served)
-        if (size != null) "${a.label()} ($size)" else a.label()
-    }.toMutableList()
-    val more = apps.size - RECENT_APPS_SHOWN
-    if (more > 0) parts.add("+$more more")
-    val unattributed = client.recent_unattributed_bytes
-    val other = formatTrafficBytes(unattributed)
-    if (other != null && unattributed != null && unattributed > 0) parts.add("$other not linked to one game")
-    return if (parts.isNotEmpty()) "Loaded recently: ${parts.joinToString(", ")}" else null
-}
 
 /** "Last active 4 min ago". */
 fun lastActiveText(client: ClientActivityOut, nowMs: Long = System.currentTimeMillis()): String {
