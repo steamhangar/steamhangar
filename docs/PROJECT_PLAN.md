@@ -489,7 +489,12 @@ their open boxes (items 2, 7 and 11) are in section 12. Item 13 stays here.
       twins), DOC-LINES-CHECK-1, RC23-RELEASE-NOTES-1, SNACKBAR-LIVE-1;
       operator item TALKBACK-CHECK-1; candidate for the next rc:
       ANDROID-TWIN-DETAIL-1 (remaining web-twin gaps of the Android app); all in the roadmap section "Audit 2026-11-20:
-      findings"
+      findings"; tag gate (operator decision 2026-11-21 evening,
+      RC23-HOLD Weg C): no rc23 tag until all six packages planned on
+      2026-11-01 are on `main` (APP-DL-STATS-1, APP-DL-CARD-1,
+      OUTPUT-TRIM-TAP-1, CAP-503-FIX-1, APP-EXPERT-SWITCH-1,
+      PROXY-VERSION-1), the release notes are updated for them, and
+      then the rollout Antrag follows
     - v0.2.0 rename: D18 incl. logo, LAUNCHER-PREP-1
     - v0.3.0 privacy: D22 then LIBRARY-META-1d
     - v0.4.0 agents and devices: Weg B for agents with the installer (D6

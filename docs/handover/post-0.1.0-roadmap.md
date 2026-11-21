@@ -2070,6 +2070,8 @@ and VERIFY-COLD-1 is prose in the Sunday-test box of the rc19.3 block.
   reports the proxy without a version by design. Either report it (the
   proxy's own version endpoint or the release components) or hide the
   version line for components that do not report one.
+  **Decision (operator, 2026-11-21 evening): Weg A, report the proxy's
+  version, rc23** (api change with its own ADR-0016 addendum).
 - **APP-DL-CARD-1 (android, operator 2026-11-01, screenshot; rc23 by operator decision 2026-11-01):** the
   Downloads page's active-job card ("Breathedge, job #266 ... 0 MB/s · 0
   GB loaded so far", Pause/Cancel) looks unpolished next to the
@@ -2203,6 +2205,19 @@ Library, Downloads or Detail toast is read once when it appears; reasoned in
 the ANDROID-INSTALLED-NITS-1 and SNACKBAR-LIVE-1 reviews, not measured). Open: CORE-LIVE-PARITY-1
 (candidate); the rollout Antrag for rc23 must flag the read-only services
 for the operator's own compose override.
+
+**RC23-HOLD** (operator decision 2026-11-21 evening, Weg C of A "tag now"
+/ B "tag after the next nightly" / C "hold"): the audit filled rc23, but
+none of the six packages planned for rc23 on 2026-11-01 was built. rc23
+is not tagged until all six are on `main`: APP-DL-STATS-1, APP-DL-CARD-1,
+OUTPUT-TRIM-TAP-1, CAP-503-FIX-1 (Weg A, client priority; not covered by
+the audit exception, so a change under `api/` or `core/` brings its own
+ADR-0016 addendum in the package, like CORE-FIX-2), APP-EXPERT-SWITCH-1, PROXY-VERSION-1 (promoted from candidate to
+rc23; Weg A, report the version). Package order: wave 1 CAP-503-FIX-1a (api
++ addendum), PROXY-VERSION-1, OUTPUT-TRIM-TAP-1; wave 2 APP-DL-STATS-1, then
+APP-DL-CARD-1, APP-EXPERT-SWITCH-1, CAP-503-FIX-1b (pause reason in the
+Downloads UI, web + app); one goldens round, RC23-RELEASE-NOTES-2, tag. The rc23 release notes get a section for them before the tag.
+ANDROID-TWIN-DETAIL-1 and CORE-LIVE-PARITY-1 stay rc24 candidates.
 
 ### Wave 0
 
