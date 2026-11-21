@@ -125,6 +125,15 @@
  * module keeps the data flow, polling and handlers.
  *
  *
+ * **Client priority (WP CAP-503-FIX-1b).** While a job is active the view
+ * polls `GET /v1/client-priority` every 5 s (`holdPoll`). A job vault-api
+ * paused for a loading device names the device(s) and the expected resume
+ * time instead of the manual-pause note, the queue gets one note while the
+ * runner is held, and a job the operator resumed during the hold reads
+ * "Runs alongside <device> by your choice." Wording and the restored and
+ * manual cases: `lib/client-priority.js`. Text-only patches, like the speed
+ * line.
+ *
  * `highlightJob(jobId)` (WP 4a.7) is this module's one export beyond
  * `renderDownloads` — the notification bell's "job events -> Downloads
  * with the job highlighted" navigation target lands here without any
@@ -132,7 +141,7 @@
  */
 
 import { store } from "../store-singleton.js";
-import { createViewPoll, VIEW_POLL_MS } from "../store.js";
+import { createViewPoll, VIEW_POLL_MS, hasActiveJob } from "../store.js";
 import { api, getStoredApiKey, isDemoMode } from "../api.js";
 import { createRangeSegs } from "../components/range-segs.js";
 import { createDownloadsHero } from "../components/downloads-hero.js";
@@ -254,6 +263,13 @@ import {
   confirmGcLines,
 } from "../lib/bulk-jobs.js";
 import { GRIP_SVG } from "../lib/icons.js";
+import {
+  CLIENT_PRIORITY_POLL_MS,
+  clientHoldNote,
+  clientOverrideNote,
+  clientPausingNote,
+  queueHoldNote,
+} from "../lib/client-priority.js";
 
 function errorText(err) {
   if (err && typeof err.detail === "string" && err.detail) return err.detail;
@@ -297,6 +313,9 @@ const state = {
   schedule: null,
   // WP RATE-TILE: `GET /v1/settings`, read once per mount; null = not known.
   settings: null,
+  // WP CAP-503-FIX-1b: the last `GET /v1/client-priority` answer while a
+  // job is active; null = not known or nothing active.
+  clientPriority: null,
 };
 
 /** WP D15c: the hero statistics's last answer for `range`
@@ -1061,7 +1080,9 @@ function paintJobActions(card, job) {
       "Cancel requested — the download is stopping. Bytes already fetched stay on the cache.";
   } else if (pausing) {
     stopNote.hidden = false;
-    stopNote.textContent = "Pause requested — stopping. Resume re-runs from the cache, not from zero.";
+    // WP CAP-503-FIX-1b: vault-api pausing it for a loading device.
+    stopNote.textContent =
+      clientPausingNote(job) || "Pause requested — stopping. Resume re-runs from the cache, not from zero.";
   } else {
     stopNote.hidden = true;
     stopNote.textContent = "";
@@ -1081,10 +1102,48 @@ function buildJobCard(job, gamesByAppid) {
     kind: activeJobKind(job, game),
     word: activeJobWord(job, game),
     held,
-    holdNote: held ? (job.type === "gc" ? GC_HOLD_NOTE : HOLD_NOTE) : "",
+    holdNote: held ? holdNoteFor(job) : "",
   });
   paintJobActions(card, job);
+  paintClientNote(card, job);
   return card;
+}
+
+/** A paused card's note: the client-priority one for a job vault-api paused
+ * for a loading device (WP CAP-503-FIX-1b), else the manual-pause note. */
+function holdNoteFor(job) {
+  return clientHoldNote(job, state.clientPriority) || (job.type === "gc" ? GC_HOLD_NOTE : HOLD_NOTE);
+}
+
+function setNoteText(node, text) {
+  if (node.textContent !== text) node.textContent = text;
+  node.hidden = !text;
+}
+
+/** WP CAP-503-FIX-1b: patch one card's client-priority texts (the paused
+ * card's hold note, the override note) — text only, never the pill. */
+function paintClientNote(card, job) {
+  const hold = card.querySelector('[data-role="hold-note"]');
+  if (hold) setNoteText(hold, holdNoteFor(job));
+  const note = card.querySelector('[data-role="client-note"]');
+  if (note) setNoteText(note, clientOverrideNote(job, state.clientPriority) || "");
+}
+
+/** WP CAP-503-FIX-1b: the note over the queue while the runner is held. */
+function paintQueueHoldNote(queued = partitionJobs(state.jobs).queued) {
+  if (!mounted()) return;
+  setNoteText(els.queueHold, queueHoldNote(queued, state.clientPriority) || "");
+}
+
+/** WP CAP-503-FIX-1b: repaint every client-priority text from the current
+ * jobs and hold answer (a hold poll tick). */
+function paintClientNotes() {
+  if (!mounted()) return;
+  for (const card of els.activeBody.querySelectorAll(".job")) {
+    const job = state.jobs.find((j) => j.id === Number(card.dataset.jid));
+    if (job) paintClientNote(card, job);
+  }
+  paintQueueHoldNote();
 }
 
 // ---------------------------------------------------------------------
@@ -1622,6 +1681,7 @@ function fullRender() {
   }
 
   setBadge(els.queueCount, p.queued.length);
+  paintQueueHoldNote(p.queued); // WP CAP-503-FIX-1b
   // WP D20: a rebuild must not drop keyboard focus from a reorder handle.
   const focusedJid = focusedGripJid();
   els.queueBody.replaceChildren();
@@ -1950,6 +2010,29 @@ const trafficPoll = createViewPoll({
   },
 });
 
+// ---------------------------------------------------------------------
+// Client priority (WP CAP-503-FIX-1b): the hold poll
+// ---------------------------------------------------------------------
+
+/** `GET /v1/client-priority` every 5 s while a job is queued, running or
+ * paused (only then can anything be held or waiting); with nothing active
+ * it asks nothing and keeps a slow tick, and a job appearing nudges it
+ * (the jobs subscription). Answers patch text only (`paintClientNotes`). */
+const holdPoll = createViewPoll({
+  fetcher: async () => (hasActiveJob(state.jobs) ? api.clientPriority() : null),
+  intervalMs: () => (hasActiveJob(state.jobs) ? CLIENT_PRIORITY_POLL_MS : VIEW_POLL_MS),
+  onTick: (answer) => {
+    state.clientPriority = answer && typeof answer === "object" ? answer : null;
+    paintClientNotes();
+  },
+  // A failed read shows no hold text rather than a stale one; the next
+  // tick retries (the job rows still say "paused" either way).
+  onError: () => {
+    state.clientPriority = null;
+    paintClientNotes();
+  },
+});
+
 function setStatsRange(range) {
   if (!isStatsRange(range) || range === traffic.range) return;
   traffic.range = range;
@@ -2016,10 +2099,14 @@ function patchStopRequests(jobIds) {
   for (const jobId of jobIds) {
     const job = state.jobs.find((j) => j.id === jobId);
     const card = els.activeBody.querySelector(`.job[data-jid="${jobId}"]`);
-    if (job && card) paintJobActions(card, job);
+    if (job && card) {
+      paintJobActions(card, job);
+      paintClientNote(card, job); // WP CAP-503-FIX-1b: pause_reason / client_override
+    }
   }
   // A stop_request change moves a running job in or out of Pause all's set.
   paintBulkBar();
+  paintQueueHoldNote(); // a queued job's client_override changes the queue note
 }
 
 /** Update just the name text on every visible row for this appid, without
@@ -2120,6 +2207,12 @@ function buildSection() {
   const queueCount = countBadge("queue-count");
   const queueHead = sectionHead("Queue", queueCount);
   queueHead.h2.tabIndex = -1; // WP UPD-6: focus anchor when the updates section empties
+  // WP CAP-503-FIX-1b: while the runner is held for a loading device, one
+  // note says why the queue waits and until when (`paintQueueHoldNote`).
+  const queueHold = hintMessage("");
+  queueHold.classList.add("holdnote");
+  queueHold.dataset.role = "queue-hold-note";
+  queueHold.hidden = true;
   const queueBody = el("div", "rowlist");
   queueBody.dataset.role = "queue-list";
   const queueHint = hintMessage("");
@@ -2135,7 +2228,7 @@ function buildSection() {
   const col1 = el("div", "col");
   col1.append(
     block("dl-active", activeHead.head, activeBody),
-    block("dl-queue", queueHead.head, queueBody, queueHint, queueLive),
+    block("dl-queue", queueHead.head, queueHold, queueBody, queueHint, queueLive),
   );
 
   // Column 2: Updates available and Incomplete (WP UPD-6, CACHE-COMPLETE-1c),
@@ -2208,6 +2301,7 @@ function buildSection() {
     activeCount,
     activeBody,
     queueCount,
+    queueHold,
     queueBody,
     queueHint,
     queueLive,
@@ -2239,7 +2333,10 @@ function buildSection() {
 
 store.subscribe("jobs", ({ items, diff }) => {
   if (!Array.isArray(items)) return; // {error} payload — nothing to render
+  // WP CAP-503-FIX-1b: a first active job asks for the hold at once.
+  const becameActive = !hasActiveJob(state.jobs) && hasActiveJob(items);
   state.jobs = items;
+  if (becameActive && mounted()) holdPoll.refresh();
   updateNavPip(items); // unconditional: the pip lives in the nav, not this view
 
   if (!mounted()) return;
@@ -2309,6 +2406,7 @@ onViewChange((view) => {
   closeRepair(); // WP CACHE-REPAIR-UI-1: its dialog would strand #app inert
   sectionEl = null;
   trafficPoll.stop();
+  holdPoll.stop(); // WP CAP-503-FIX-1b
 });
 
 // Paint the pip immediately from whatever snapshot already exists (e.g.
@@ -2337,6 +2435,8 @@ export function renderDownloads() {
     store.refresh("jobs", "games");
     trafficPoll.start();
     trafficPoll.refresh();
+    holdPoll.start(); // WP CAP-503-FIX-1b
+    holdPoll.refresh();
     loadHistory();
   }
   return section;

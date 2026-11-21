@@ -1,6 +1,7 @@
 package dev.steamvault.app.repo
 
 import dev.steamvault.app.net.VaultApiClient
+import dev.steamvault.app.net.model.ClientPriorityOut
 import dev.steamvault.app.net.model.JobControlOut
 import dev.steamvault.app.net.model.JobDetail
 import dev.steamvault.app.net.model.JobMoveOut
@@ -27,6 +28,12 @@ interface JobsRepository {
     suspend fun resume(id: Int): JobControlOut
     /** `POST /v1/jobs/{id}/move` (WP D20) -- see [VaultApiClient.moveJob]'s kdoc. */
     suspend fun moveJob(id: Int, position: Int): JobMoveOut
+
+    /** WP CAP-503-FIX-1b: `GET /v1/client-priority` -- whether the runner is
+     * held for a loading device. Defaults to `null` ("not known": no hold
+     * texts), so a repository without the route (the demo, test fakes)
+     * needs no change. */
+    suspend fun clientPriority(): ClientPriorityOut? = null
 }
 
 class VaultJobsRepository(private val client: VaultApiClient) : JobsRepository {
@@ -39,4 +46,5 @@ class VaultJobsRepository(private val client: VaultApiClient) : JobsRepository {
     override suspend fun pause(id: Int): JobControlOut = client.pauseJob(id)
     override suspend fun resume(id: Int): JobControlOut = client.resumeJob(id)
     override suspend fun moveJob(id: Int, position: Int): JobMoveOut = client.moveJob(id, position)
+    override suspend fun clientPriority(): ClientPriorityOut? = client.clientPriority()
 }

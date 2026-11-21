@@ -4202,3 +4202,21 @@ uppercase tags. Property names and keywords are matched case-insensitively
 `FontWeightPinTest` scans `src/main/java` for any weight but Normal /
 Medium / Bold. Goldens change (slightly lighter labels, buttons and
 row titles; bolder legacy primary buttons) and are re-recorded separately.
+
+### WP CAP-503-FIX-1b (rc23): client-priority hold texts in Downloads
+
+`client-priority.test.js` (new): the texts of `lib/client-priority.js`, one
+test per state, expected as string literals: held (a job paused for a
+device names it and the resume time, `resume_at` as local HH:MM), queued
+while holding (one note over the queue; an override-only queue gets none),
+override ("Runs alongside <device> by your choice.", only while holding),
+restored (no device named, no sighting claimed), manual (no text, the view
+keeps its own note), the pausing stop note, the device phrase and the clock.
+`downloads-client-priority-wiring.test.js` (new): the view polls
+`GET /v1/client-priority` only while a job is active, and each state reaches
+the page (paused card note, queue note above the rows, override note on the
+running card, stop note, manual note kept, a client pause turned manual
+repainted from the jobs poll). `downloads-render-plan.test.js`: a
+`pause_reason` or `client_override` change is a text patch, not a rebuild.
+`throughput-fixture.js` answers `/v1/client-priority` (nothing held). The
+Android twin pins the same literals (`ClientPriorityWebTwinTest`).

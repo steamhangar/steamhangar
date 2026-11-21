@@ -40,6 +40,14 @@ data class JobSummary(
     /** WP D20: 0-based place among the QUEUED jobs (0 = runs next); null
      * unless the job is queued and for an older API that sends none. */
     val queue_position: Int? = null,
+    /** Schema v34 (WP CAP-503-FIX-1a): `"client"` = vault-api paused the job
+     * for a device loading through the cache (resumed by itself), `"manual"`
+     * = the operator's pause; null while the job is neither paused nor
+     * pausing, and from an older API (reads as a manual pause there). */
+    val pause_reason: String? = null,
+    /** Schema v34: the operator resumed this job during a client hold, so it
+     * runs alongside the device (operator decision 2026-11-21, Weg B). */
+    val client_override: Boolean = false,
 )
 
 /**
@@ -66,7 +74,43 @@ data class JobDetail(
     val paused_at: String? = null,
     val stop_request: String? = null,
     val queue_position: Int? = null,
+    val pause_reason: String? = null,
+    val client_override: Boolean = false,
     val log_excerpt: String? = null,
+)
+
+/** One device loading through the cache — `vault_api/routers/jobs.py::ClientLoadOut`. */
+@Serializable
+data class ClientLoadOut(
+    val addr: String,
+    /** The name set for this address on the Clients page, if any. */
+    val name: String? = null,
+    val miss_bytes_per_second: Double = 0.0,
+)
+
+/**
+ * `GET /v1/client-priority` (WP CAP-503-FIX-1a) —
+ * `vault_api/routers/jobs.py::ClientPriorityOut`: whether the prefill runner
+ * is held for a device loading through the cache, for whom ([clients], the
+ * last sighting) and until when ([resume_at], the last sighting plus the
+ * 120 s idle gap). [restored] = held again after a vault-api restart with no
+ * device seen since ([clients] empty, [last_client_at] is the restart).
+ * Read by the Downloads screen (WP CAP-503-FIX-1b); an older server answers
+ * `404` and the screen shows no hold texts.
+ */
+@Serializable
+data class ClientPriorityOut(
+    val enabled: Boolean = false,
+    val holding: Boolean = false,
+    val since: String? = null,
+    val last_client_at: String? = null,
+    val resume_at: String? = null,
+    val idle_gap_seconds: Int = 120,
+    val clients: List<ClientLoadOut> = emptyList(),
+    val paused_job_ids: List<Int> = emptyList(),
+    val override_job_ids: List<Int> = emptyList(),
+    val restored: Boolean = false,
+    val runner_address_unknown: Boolean = false,
 )
 
 /**

@@ -2135,6 +2135,29 @@ function jobSummary(j) {
     paused_at,
     stop_request,
     queue_position: demoQueuePosition(j),
+    // WP CAP-503-FIX-1b (schema v34): demo pauses are the operator's own
+    // (the demo has no device to give priority to), so "manual" while the
+    // job is paused or a pause is pending, as the real API reports them.
+    pause_reason: status === "paused" || stop_request === "pause" ? "manual" : null,
+    client_override: false,
+  };
+}
+
+/** WP CAP-503-FIX-1b: `GET /v1/client-priority` (CAP-503-FIX-1a). The demo
+ * has no device loading through a cache, so the runner is never held. */
+function handleGetClientPriority() {
+  return {
+    enabled: true,
+    holding: false,
+    since: null,
+    last_client_at: null,
+    resume_at: null,
+    idle_gap_seconds: 120,
+    clients: [],
+    paused_job_ids: [],
+    override_job_ids: [],
+    restored: false,
+    runner_address_unknown: false,
   };
 }
 
@@ -3267,6 +3290,9 @@ export async function demoRequest(method, path, { body, params } = {}) {
   }
   if (method === "GET" && path === "/v1/schedule") {
     return handleGetSchedule();
+  }
+  if (method === "GET" && path === "/v1/client-priority") {
+    return handleGetClientPriority();
   }
 
   if (method === "GET" && path === "/v1/steam/key") {

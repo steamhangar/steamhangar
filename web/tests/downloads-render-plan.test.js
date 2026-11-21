@@ -146,3 +146,27 @@ test("a batch where ONE job transitions status and another only has a stop_reque
   assert.equal(plan.full, true);
   assert.deepEqual(plan.patchStopRequest, []);
 });
+
+// WP CAP-503-FIX-1b: `pause_reason` / `client_override` (schema v34) change a
+// card's notes only, so they ride the same text patch as `stop_request`.
+test("MUTATION TARGET: a pause_reason-only change (client pause turned manual, still paused) is patched, not rebuilt", () => {
+  const plan = planJobsUpdate({
+    isFirst: false,
+    added: [],
+    removed: [],
+    updated: [{ prev: j(1, { status: "paused", pause_reason: "client" }), curr: j(1, { status: "paused", pause_reason: "manual" }) }],
+  });
+  assert.equal(plan.full, false);
+  assert.deepEqual(plan.patchStopRequest, [1]);
+});
+
+test("MUTATION TARGET: a client_override-only change is patched, not rebuilt", () => {
+  const plan = planJobsUpdate({
+    isFirst: false,
+    added: [],
+    removed: [],
+    updated: [{ prev: j(2, { client_override: false }), curr: j(2, { client_override: true }) }],
+  });
+  assert.equal(plan.full, false);
+  assert.deepEqual(plan.patchStopRequest, [2]);
+});
