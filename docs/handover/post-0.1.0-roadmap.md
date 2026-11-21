@@ -2144,11 +2144,12 @@ L > 3 h; file:line as of 94a77cb. No secrets in the tree or the history
 
 Order (operator decision 2026-11-21, Weg A of the audit summary): wave 0
 the red-CI fix alone, wave 1 small packages, wave 2 M packages, then the
-bundled decisions (in "Open decisions" above). The low findings below are
-nits, picked up when a package touches the file. `api/`, `core/` and
-`dns/` are still under the ADR-0016 freeze (FREEZE-EXIT-1): code changes
-there need a freeze exception, comment and doc fixes do not; marked
-"(freeze)" below. Design packages that change pixels re-record the web
+wave 3 decisions (answered 2026-11-21, see "Wave 3" below) and the nit
+packages that cover every low finding. `api/`, `core/` and `dns/` stay
+under the ADR-0016 freeze until the `v0.1.0` final tag, but every audit
+finding is excepted (addendum 2026-11-21); "(freeze)" below only marks
+that a nit touches a frozen path and rides on that exception. Design
+packages that change pixels re-record the web
 goldens through the `wp/<name>-goldens` path.
 
 ### Wave 0
@@ -2243,9 +2244,10 @@ goldens through the `wp/<name>-goldens` path.
   (`web/js/lib/game-status.js:200`) and "Update ready" in turquoise in the
   pill (`status-icon.js:33`). Fix: one tone and one word per state for
   disc and text, pinned in `docs/design/status-vocabulary.json` (Android
-  `StatusVocabularyContractTest`). The stale state needs UPDATE-TONE-1
-  and UPDATE-WORD-1 first; the audit's proposal for the rest: verify
-  run-yellow, partial orange, paused yellow. Fits `/design:fix`.
+  `StatusVocabularyContractTest`). The stale state is decided (UPDATE-TONE-1
+  + UPDATE-WORD-1, 2026-11-21): orange, "Update available"; the audit's
+  proposal for the rest: verify run-yellow, partial orange, paused
+  yellow. Fits `/design:fix`.
 - **FONT-FLOOR-1** (audit D-3; web; medium / M): 21 rules in
   `web/css/app.css` sit below the own floor `--fs-1` 11 px
   (`web/css/theme.css:55`), 8.5-10.5 px, e.g. bottom nav `:87`, nav
@@ -2321,9 +2323,10 @@ Nit packages (all low findings below and the U-items with an action,
 operator 2026-11-21 "fix everything"): **SEC-HARDEN-1** (S-3, S-4, S-6,
 S-7, S-8, S-9; api/core parts under the audit exception),
 **DESIGN-NITS-1** (D-5, D-8..D-13, D-15, D-16, after the wave 2 design
-packages), **NITS-AUDIT-WEB-1** (C-7, C-14 web side, C-15, C-17, C-18,
-C-20, C-29, U-8 note), **NITS-AUDIT-APP-1** (C-14 app side, C-18 Kotlin,
-C-19), **NITS-AUDIT-API-1** (C-8..C-12, CLOCK-SEAM-1, C-25, U-5),
+packages), **NITS-AUDIT-WEB-1** (C-7, C-15, C-17, C-20, C-29, U-8 note),
+**NITS-AUDIT-APP-1** (C-14 and C-18 on both sides in one package, since
+each side keeps its helpers "for the other", and C-19),
+**NITS-AUDIT-API-1** (C-8..C-12, CLOCK-SEAM-1, C-25, U-5),
 **NITS-AUDIT-OPS-1** (C-3, C-21..C-24, C-27, U-7). C-13, U-3, U-4, U-6
 need no change; C-26 stays with its rc22 nit.
 
@@ -2338,7 +2341,8 @@ Follow-up of CI-CLOCK-1 (review 2026-11-21):
   package touches them.
 
 Security:
-- S-1 cross-site cache fill: see CROSS-SITE-FILL-1 (open decision).
+- S-1 cross-site cache fill: CROSS-SITE-FILL-1 decided (document only),
+  package TM-CROSS-SITE-1.
 - S-3 (freeze) `api/Dockerfile:242` gives uid 101 `/app` and the
   SteamPrefill binary; no `read_only` root FS (`deploy/compose.yaml:356`
   is only a mount); `load_dotenv()` in production (`config.py:22-27`):
@@ -2363,13 +2367,15 @@ Security:
   `!*.env.example`, `*.pem`, `*.key`.
 
 Design:
-- D-2 accent in data roles: see ACCENT-ROLES-1 (open decision).
+- D-2 accent in data roles: ACCENT-ROLES-1 decided (keep the kit, fix
+  the NOTES), in DESIGN-MD-1.
 - D-5 `web/css/app.css` colours outside the tokens: live banner
   `#EF8F3C`/`#F6DCC4` (`:752-759`, `:780`, `:862`, `:1034`), counter ink
   `#20180a` (`:103`, `:716`); dead `#8FA6B2` (`:604`, `.toggle`) and
   `rgba(237,197,95,…)` (`:511`, `.jobcard.active` never set): map to
   `--stale` (color-mix), `--text`, sic-ink; drop the dead rules.
-- D-7 neutral ramp: see NEUTRAL-RAMP-1 (open decision).
+- D-7 neutral ramp: NEUTRAL-RAMP-1 decided (Weg B, toward cyan), own
+  package.
 - D-8 15 radius literals next to 4 tokens (10 px 14x, e.g.
   `web/css/kit.css:194`, `:803`, `:821`; 14 px `kit.css:734`; 11 px
   `theme.css:464`): map to `--r-s`/`--r-m`.
@@ -2388,7 +2394,8 @@ Design:
   cached" (`web/js/lib/library-filters.js:83`) vs card "Installed but not
   cached" (`game-status.js:376`): sentence case, one wording (Android twin
   pins).
-- D-14 desktop font: see DESKTOP-FONT-1 (open decision).
+- D-14 desktop font: DESKTOP-FONT-1 decided (keep the stack, document),
+  in DESIGN-MD-1.
 - D-15 Library toolbar at 1400 px: the last chip wraps alone
   (`kit.css:809`, `:813`): chips in their own row under search and tools.
 - D-16 progress bar animates `width` (`app.css:654`): `transform:scaleX`.
@@ -2473,14 +2480,16 @@ Cleanup:
   `cmd/vault-agent/version.go`, the presence tests and
   `packaging/windows/tests/test-packaging-unit.ps1`: add them (the 58
   "Python" comment lines in `agent/go/acf/*.go` are history and may stay).
-- C-28 freeze exit: see FREEZE-EXIT-1 (open decision).
+- C-28 freeze exit: FREEZE-EXIT-1 decided, done in ADR-0016 (addendum
+  2026-11-21).
 - C-29 old name "SteamVAULT" in the hidden kit example
   (`web/js/views/kit.js:195`): change it with the next golden refresh.
 
 Uncertain or deliberate (U-items):
 - U-1 57 "older server" fallback branches in the web (e.g.
   `web/js/lib/update-check.js:23-27`, `views/downloads.js:1949`) vs
-  ADR-0022:155-156: see OLD-SERVER-FALLBACK-1 (open decision).
+  ADR-0022:155-156: OLD-SERVER-FALLBACK-1 decided (remove the web
+  fallbacks), own package.
 - U-2 `VAULT_PREFILL_MODE=subprocess` is the code default
   (`api/vault_api/config.py:1219-1220`), compose always ships `queue`
   (`deploy/compose.yaml:504`, `:1013`); deliberate (ADR-0012 §6):
@@ -2507,7 +2516,8 @@ Uncertain or deliberate (U-items):
   merge; at most a note in `docs/learnings/web.md`.
 - U-9 agent compatibility with rc8/rc16 servers
   (`agent/go/client/client.go:37-70`, `docs/learnings/agent.md:143-149`):
-  see AGENT-RC8-COMPAT-1 (open decision).
+  AGENT-RC8-COMPAT-1 decided (removed before
+  `v0.1.0` final), own package.
 
 Not covered by this audit (candidates for the next one): OS packages of
 the base images (no trivy/grype), SteamPrefill and its .NET dependencies,
