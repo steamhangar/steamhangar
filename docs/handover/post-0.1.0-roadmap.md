@@ -2159,9 +2159,22 @@ AUDIT-DECISIONS-1, GO-LINE-1 (with ROLLOUT-DOC-1, README-KEYS-1),
 APP-AUDIT-1 (PERSONA-LOAD-1, BACKOFF-DEAD-1), CONTRAST-1 (LINE-CONTRAST-1,
 GLYPH-CONTRAST-1), ACTIVE-STATUS-1, NITS-AUDIT-API-1 (with CLOCK-SEAM-1),
 AGENT-RC8-COMPAT-1, NITS-AUDIT-OPS-1, SEC-HARDEN-1, PILL-TONE-1,
-FONT-FLOOR-1, TM-CROSS-SITE-1. Finishing on their branches:
-NITS-AUDIT-APP-1 with VERIFY-ALL-LABEL-1 (`wp/nits-audit-app-1`, review
-passed, goldens round) and NGINX-DUP-1 (`wp/nginx-dup-1`, review fixes).
+FONT-FLOOR-1, TM-CROSS-SITE-1, NGINX-DUP-1 (follow-up
+CORE-LIVE-PARITY-1), NITS-AUDIT-APP-1 with VERIFY-ALL-LABEL-1,
+AUDIT-STATUS-1 (all on `main` at `f98da86`, CI green).
+Found 2026-11-21: **CI-NIGHTLY-1** (deploy/ci; S): the nightly
+`deploy / verify-stack` (full) is red since 2026-11-16 on an unchanged
+commit; 2 of 656 checks fail because newer Docker on the runner prints
+the zero `GlobalIPv6Address` as `invalid IP` in the inspect template
+(`deploy/tests/verify-stack.sh:2303`); local `verify full` passes 656/0.
+Decided 2026-11-21 in the DESIGN-NITS-1 review: **D15-TAB-ORDER**
+Weg A, the Library toolbar DOM becomes search, tools, chips so the tab
+order follows the two-row desktop layout (phone shows tools above chips
+too); **ANDROID-INSTALLED-WORDING-1** (android; S; rc23, own package with
+an Android goldens round): align `library_installed_not_cached` to
+"Installed, not cached · %1$s", decide `detail_installed_not_cached_warning`
+like the web (no "the vault is not protecting it"), and add a Kotlin twin
+pin that reads `installedBadgeText` in `web/js/lib/game-status.js`.
 Not started: DESIGN-NITS-1, then NEUTRAL-RAMP-1, then DESIGN-MD-1 (in this
 order, each with one goldens round); OLD-SERVER-FALLBACK-1;
 NITS-AUDIT-WEB-1; moving the StatusIconLogic arrow helpers to the test
