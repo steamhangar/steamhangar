@@ -4035,3 +4035,25 @@ Updated pins: `now-loading.test.js`, `runner-split.test.js`,
 `downloads-components.test.js`, `downloads-stats-wiring.test.js`,
 `traffic-view.test.js`, `clients-page.test.js` (+ `clientTitle`),
 `clients-view-wiring.test.js`.
+
+## WP CONTRAST-1 (2026-11-21) — control borders and grey status glyphs (audit 2026-11-20)
+
+New token `--line-strong` `#5F727E` (tokens.json, theme.css, Android
+`VaultColors.LineStrong`) for controls identified by their border: kit
+`.in`, `.sortg`, `.segi` and the legacy app.css inputs still rendered (`.search`, `.inp`,
+`input.inp.txt`); on the `--raised-2` Filters popover, where
+`--line-strong` is 2.72:1, its select and year field take `--dim-2`
+(4.15:1). The selected `.seg` / `.segi` segment gets a `--dim-2` inset
+ring (5.25:1 on `--surface`; the `--raised-2` fill alone is 1.27:1), and
+so does the selected Add-a-device tab (`.ad-tabs`, fill 1.40:1 on `--bg`).
+`--line` stays for separators, cards and buttons. The
+grey `.sic` discs (cancelled, unknown, notinuse, unverified) no longer set
+`color:var(--text)` and draw their glyph in the shared sic ink.
+
+Tests: `css-contrast.test.js` 8 (WCAG ratios computed from tokens.json:
+`--line-strong` 3.82 / 3.45 / 3.13:1 on bg / surface / raised, `--line`
+under 3:1; sic ink on `--dim-2` 5.79:1, `--text` 2.81:1; the six border
+rules use `--line-strong`; `.kit .btn` and the sort divider keep `--line`;
+no `.sic.k-*` rule sets `color`; the popover fields' `--dim-2` border; the
+selected-segment and Add-a-device tab rings). `design-tokens-contract.test.js` covers
+the new token through its both-directions colour check.

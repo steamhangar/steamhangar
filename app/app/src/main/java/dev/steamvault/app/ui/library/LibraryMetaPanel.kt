@@ -50,6 +50,9 @@ import dev.steamvault.app.ui.library.logic.MetaFilterWording
 import dev.steamvault.app.ui.library.logic.RATING_STEPS
 import dev.steamvault.app.ui.library.logic.availableGenres
 import dev.steamvault.app.ui.library.logic.unknownNote
+import dev.steamvault.app.ui.theme.vaultFieldButtonBorder
+import dev.steamvault.app.ui.theme.vaultFilterChipBorder
+import dev.steamvault.app.ui.theme.vaultTextFieldColors
 
 /**
  * WP D23: the metadata filter panel (Android twin of `renderMetaPanel` in
@@ -93,6 +96,8 @@ fun LibraryMetaPanel(
                         onChange(filter.copy(categories = if (on) filter.categories - category else filter.categories + category))
                     },
                     label = { Text(category.label, maxLines = 1, softWrap = false) },
+                    // WP CONTRAST-1: a 3:1 accent edge on a selected chip (web `.fchip`).
+                    border = vaultFilterChipBorder(selected = on),
                 )
             }
         }
@@ -187,7 +192,8 @@ fun LibraryMetaPanel(
 private fun PickerButton(label: String, value: String, options: List<String>, onPick: (Int) -> Unit) {
     var open by remember { mutableStateOf(false) }
     Box {
-        OutlinedButton(onClick = { open = true }) {
+        // WP CONTRAST-1: a select twin (web `.lib-meta select`), identified by its border (3:1).
+        OutlinedButton(onClick = { open = true }, border = vaultFieldButtonBorder()) {
             Text("$label: $value", maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
@@ -212,6 +218,7 @@ private fun YearField(label: String, value: Int?, onCommit: (Int?) -> Unit, modi
     val parsed = text.toIntOrNull()
     val valid = text.isEmpty() || (parsed != null && parsed in META_MIN_YEAR..META_MAX_YEAR)
     OutlinedTextField(
+        colors = vaultTextFieldColors(),
         value = text,
         onValueChange = { raw ->
             val digits = raw.filter { it in '0'..'9' }.take(4)

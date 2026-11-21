@@ -96,6 +96,8 @@ import dev.steamvault.app.ui.settings.logic.effectiveAsFieldText
 import dev.steamvault.app.ui.settings.logic.parseSettingsApplies
 import dev.steamvault.app.ui.settings.logic.parseSettingsSource
 import dev.steamvault.app.ui.settings.logic.sweepTargetsMessage
+import dev.steamvault.app.ui.theme.vaultSegmentedButtonColors
+import dev.steamvault.app.ui.theme.vaultTextFieldColors
 import kotlinx.coroutines.launch
 
 /**
@@ -670,6 +672,7 @@ private fun SettingTextField(
     }
     Column {
         OutlinedTextField(
+            colors = vaultTextFieldColors(),
             value = fieldValue,
             onValueChange = onValueChange,
             label = { Text(label) },
@@ -704,6 +707,7 @@ private fun AutoGcField(
         SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
             options.forEachIndexed { index, (mode, label) ->
                 SegmentedButton(
+                    colors = vaultSegmentedButtonColors(),
                     selected = mode == current,
                     onClick = { onSelect(mode) },
                     enabled = !readonly,
@@ -743,6 +747,7 @@ private fun SweepIncludeCachedField(
         SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
             options.forEachIndexed { index, (value, label) ->
                 SegmentedButton(
+                    colors = vaultSegmentedButtonColors(),
                     selected = value == current,
                     onClick = { onSelect(value) },
                     enabled = !readonly,
@@ -938,6 +943,7 @@ private fun SteamLibraryBlock(
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
     OutlinedTextField(
+        colors = vaultTextFieldColors(),
         value = controller.libraryIdInput,
         onValueChange = { controller.libraryIdInput = it },
         label = { Text(stringResource(R.string.settings_library_id_label)) },

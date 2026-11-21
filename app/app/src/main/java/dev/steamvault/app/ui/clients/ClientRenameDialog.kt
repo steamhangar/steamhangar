@@ -41,6 +41,7 @@ import dev.steamvault.app.ui.clients.logic.renameErrorText
 import dev.steamvault.app.ui.clients.logic.renameHint
 import dev.steamvault.app.ui.clients.logic.renameTitle
 import dev.steamvault.app.ui.clients.logic.renamedToastText
+import dev.steamvault.app.ui.theme.vaultTextFieldColors
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 
@@ -171,6 +172,7 @@ fun ClientRenameDialog(
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 val errorText = flow.error
                 OutlinedTextField(
+                    colors = vaultTextFieldColors(),
                     value = flow.input,
                     onValueChange = { flow.input = it },
                     label = { Text(stringResource(R.string.clients_rename_label)) },
