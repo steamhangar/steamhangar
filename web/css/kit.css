@@ -696,7 +696,7 @@
   margin-top:14px; padding:14px var(--sp-3) 0; border-top:1px solid var(--line-soft);
   display:flex; align-items:center; gap:10px; color:var(--dim); font-size:var(--fs-3);
 }
-.kit.view-settings .exp .tx{ flex:1; min-width:0; line-height:1.3; }
+.kit.view-settings .exp .tx{ flex:1; min-width:0; line-height:1.3; cursor:pointer; }
 .kit.view-settings .exp .ttl{ display:block; }
 .kit.view-settings .exp small{ display:block; color:var(--dim-2); font-size:var(--fs-1); margin-top:2px; }
 .kit.view-settings .settings-panel > .exp{ margin-top:0; padding-inline:0; }

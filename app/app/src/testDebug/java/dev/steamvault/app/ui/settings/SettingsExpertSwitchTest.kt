@@ -12,6 +12,8 @@ import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
+import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.assertHeightIsAtLeast
 import androidx.compose.ui.test.assertIsOff
 import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
@@ -19,6 +21,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.unit.dp
 import dev.steamvault.app.R
 import dev.steamvault.app.demo.DemoAboutRepository
 import dev.steamvault.app.demo.DemoScheduleRepository
@@ -65,9 +68,10 @@ import org.robolectric.annotation.Config
  *    channel), the twin of web css-contrast.test.js.
  *  - Placement: in the About panel the switch row follows the component
  *    list (below Refresh) and the trademark line closes the panel (web
- *    compact layout, settings-expert-placement.test.js).
- *  - The row is one switch for TalkBack and touch: Role.Switch, off, and a
- *    tap anywhere on it turns expert mode on.
+ *    compact layout, settings-sections-wiring.test.js).
+ *  - The row is one switch for TalkBack and touch: the only Role.Switch
+ *    node (the inner Switch has no click handler of its own), off, at
+ *    least 48dp high, and a tap anywhere on it turns expert mode on.
  *
  * Same Robolectric set-up as `GameCardInstalledSemanticsTest` (plain
  * Application, the bare host activity registered).
@@ -123,7 +127,7 @@ class SettingsExpertSwitchTest {
     }
 
     @Test
-    fun `the whole row is one switch for TalkBack and touch`() {
+    fun `MUTATION TARGET -- the whole row is one switch for TalkBack and touch`() {
         val controller = controller()
         render(controller)
         val app = RuntimeEnvironment.getApplication()
@@ -131,6 +135,12 @@ class SettingsExpertSwitchTest {
         val row = composeRule.onNodeWithTag(EXPERT_SWITCH_ROW_TAG)
         row.assert(SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Switch))
         row.assertIsOff()
+        row.assertHeightIsAtLeast(48.dp)
+        // One switch node only: an inner Switch with its own onCheckedChange
+        // would be a second, unlabelled TalkBack stop.
+        composeRule
+            .onAllNodes(SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Switch), useUnmergedTree = true)
+            .assertCountEquals(1)
         val texts = row.fetchSemanticsNode().config.getOrNull(SemanticsProperties.Text).orEmpty().map { it.text }
         assertTrue("the row carries its label: $texts", texts.contains(app.getString(R.string.settings_expert_switch)))
         assertFalse("precondition: expert mode off", controller.expertOn)

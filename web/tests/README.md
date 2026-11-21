@@ -4217,3 +4217,8 @@ on `--surface`; its `--raised-2` track is 1.40:1 and the old `--line` edge
 Robolectric `SettingsExpertSwitchTest`) and the About order in
 `SettingsScreen`. The `settings-1400` golden changes (the switch edge under
 the nav).
+
+Review follow-up: `settings-sections-wiring.test.js` +1 (MUTATION TARGET):
+a click on the row's label text (`.tx`, `data-role="expert-switch-text"`)
+toggles the switch, its storage key and the Expert nav item, the twin of
+the Android row that toggles as a whole.

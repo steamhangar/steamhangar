@@ -297,6 +297,22 @@ test("the switch row sits in the nav, not in a panel", async () => {
   assert.equal(q(section(s, "about"), "expert-switch"), null);
 });
 
+test("MUTATION TARGET: a click on the switch row's label text toggles the switch too (Android twin: the whole row toggles)", async () => {
+  const s = await mount();
+  const sw = q(s, "expert-switch");
+  const text = q(s, "expert-switch-text");
+  assert.equal(text.parentNode, sw.parentNode, "the label text sits in the switch row");
+  assert.equal(sw.getAttribute("aria-checked"), "false");
+  click(text);
+  assert.equal(sw.getAttribute("aria-checked"), "true");
+  assert.equal(storage.get("steamvault.settingsExpert"), "1");
+  assert.equal(navItem(s, "expert").hidden, false, "the nav now offers Expert settings");
+  click(text);
+  assert.equal(sw.getAttribute("aria-checked"), "false");
+  assert.equal(storage.get("steamvault.settingsExpert"), "0");
+  assert.equal(navItem(s, "expert").hidden, true);
+});
+
 test("an expert draft stays visible as a dot when the switch is turned off; nav items show their own dot", async () => {
   storage.set("steamvault.settingsExpert", "1");
   const s = await mount();

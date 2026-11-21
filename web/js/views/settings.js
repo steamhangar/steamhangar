@@ -735,14 +735,20 @@ function buildExpertSwitch(groups) {
   row.append(tx, dot, sw);
   els.dots.set("expert-switch", dot);
   els.sectionKeys.set("expert-switch", new Set(all.map((e) => e.key)));
-  sw.addEventListener("click", () => {
+  const toggle = () => {
     expertOn = !expertOn;
     writeExpertSwitch(getStorage, expertOn);
     sw.setAttribute("aria-checked", String(expertOn));
     const item = els.navItems.get("expert");
     if (item) item.hidden = !expertOn;
     if (!expertOn && activeSection === "expert") selectSection(DEFAULT_SECTION);
-  });
+  };
+  sw.addEventListener("click", toggle);
+  // WP APP-EXPERT-SWITCH-1 (Android twin: the whole row toggles): a click
+  // on the label text toggles too, like a <label> for the switch. The
+  // switch button stays the one keyboard and screen-reader target.
+  tx.dataset.role = "expert-switch-text";
+  tx.addEventListener("click", toggle);
   els.expertRow = row;
   return row;
 }

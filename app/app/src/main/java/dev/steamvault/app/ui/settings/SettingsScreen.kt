@@ -38,6 +38,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.ui.semantics.Role
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.material3.IconButton
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
@@ -581,8 +582,10 @@ private fun StorageBalanceCard(view: StorageBalanceView) {
  * The "Show expert settings" row, twin of web `.exp` (WP
  * APP-EXPERT-SWITCH-1): a --line-soft rule above, then the label and its
  * hint, the unsaved dot while expert drafts exist ([dirty], web `.exp .dot`)
- * and the switch at the row's end. The whole row is one switch for TalkBack
- * and touch (web: the switch is `aria-labelledby` the label).
+ * and the switch at the row's end. The whole row (at least 48dp high) is
+ * one switch for TalkBack and touch; the inner Switch has no click handler
+ * of its own. Web twin: the switch is `aria-labelledby` the label, and a
+ * click on the label text (`.tx`) toggles it too.
  */
 @Composable
 private fun ExpertSwitchRow(on: Boolean, dirty: Boolean, onChange: (Boolean) -> Unit) {
@@ -591,6 +594,7 @@ private fun ExpertSwitchRow(on: Boolean, dirty: Boolean, onChange: (Boolean) -> 
         Row(
             modifier = Modifier
                 .fillMaxWidth()
+                .heightIn(min = 48.dp)
                 .testTag(EXPERT_SWITCH_ROW_TAG)
                 .toggleable(value = on, role = Role.Switch, onValueChange = onChange),
             verticalAlignment = Alignment.CenterVertically,
