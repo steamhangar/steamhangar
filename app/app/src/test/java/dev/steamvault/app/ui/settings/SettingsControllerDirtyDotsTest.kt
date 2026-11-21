@@ -27,7 +27,6 @@ private class DotsNoIdentity : SteamIdentityRepository {
     override fun buildLoginUrl(vaultBaseUrl: String): String? = null
     override suspend fun completeLogin(rawCallbackUrl: String): SteamLoginResult = SteamLoginResult.Failure("n/a")
     override suspend fun refreshPersonaName(): Boolean = false
-    override suspend fun ownedGamesCountPreview(): Result<Int> = Result.success(0)
     override suspend fun ownedGames(): Result<List<OwnedGame>> = Result.success(emptyList())
     override fun signOut() {}
 }

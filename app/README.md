@@ -367,9 +367,11 @@ app/app/src/main/java/dev/steamvault/app/
 ├── repo/
 │   ├── GamesRepository.kt JobsRepository.kt ClientsRepository.kt
 └── polling/
-    ├── PollingIntervals.kt         # pure "how often should the app poll" decisions
-    └── Backoff.kt                  # pure exponential-backoff-with-jitter math
+    └── PollingIntervals.kt         # pure "how often should the app poll" decisions
 ```
+
+(`polling/Backoff.kt` was part of this WP and was deleted unused by
+APP-AUDIT-1, see "Polling primitives (`polling/`)" below.)
 
 ### API client (`net/`)
 
@@ -595,14 +597,21 @@ than hidden.
 
 ### Polling primitives (`polling/`) — decisions only, no scheduler yet
 
-`PollingIntervals` and `Backoff`/`BackoffState` are direct, pure ports of
-`web/js/store.js`'s `hasActiveJob`/`nextJobsIntervalMs`/
-`DEFAULT_INTERVALS` and `web/js/backoff.js`'s `computeBackoffDelay`/
-`createBackoffState` — same numbers (2 s/15 s/15 s/20 s cadence, 1 s
-base / 30 s cap / 20% jitter backoff), so the Android app polls on the
-same cadence the web UI does. **WorkManager wiring — the thing that
-actually calls these on a schedule and respects Doze — is WP 4b.8, not
-this WP.** `GamesRepository`/`JobsRepository`/`ClientsRepository` are the
+`PollingIntervals` is a direct, pure port of `web/js/store.js`'s
+`hasActiveJob`/`nextJobsIntervalMs`/`DEFAULT_INTERVALS` — same numbers
+(2 s/15 s/15 s/20 s cadence), so the Android app polls on the same
+cadence the web UI does while everything answers. **After a failed
+poll the two differ:** the app's foreground loops (`LibraryController`,
+`DownloadsController`, `ClientsController`) simply wait their normal
+`PollingIntervals` delay again, while the web store retries on its own
+schedule (`web/js/backoff.js` with `storeRetryBackoff` in
+`web/js/store.js`: 2.5 s, 5 s, 10 s, then the normal interval). This WP
+also shipped a port of the generic web backoff (`Backoff`/`BackoffState`,
+1 s base / 30 s cap / 20% jitter), but no loop ever used it; APP-AUDIT-1
+(BACKOFF-DEAD-1) deleted it with its test rather than wiring it in,
+which would change behaviour.
+**WorkManager wiring — the thing that actually calls these on a
+schedule and respects Doze — is WP 4b.8, not this WP.** `GamesRepository`/`JobsRepository`/`ClientsRepository` are the
 thin suspend-based seams that future wiring calls through; they exist now
 so 4b.4/4b.5/4b.3 have something to build view-models against without
 waiting on 4b.8.
@@ -657,7 +666,8 @@ Robolectric/emulator dependency:
   redirect-flags configuration assertion (S1b).
 - `net/profile/ConnectivityProfileTest` — both cleartext-policy layers,
   including the brief's named "throws before any socket I/O" case.
-- `polling/BackoffTest` / `polling/PollingIntervalsTest` — growth/cap/
+- `polling/BackoffTest` (deleted with `Backoff.kt` by APP-AUDIT-1) /
+  `polling/PollingIntervalsTest` — growth/cap/
   jitter math both directions, and the fast/slow cadence decision. The
   jitter-floor test now uses `jitterRatio=1.5` (mirroring
   `web/tests/backoff.test.js`'s own load-bearing case exactly), not the
@@ -966,11 +976,16 @@ for the current shape.
 from `CredentialStore` on every call. `completeLogin` never throws — every
 failure (malformed callback, unsigned `claimed_id`, a rejected assertion,
 an invalid SteamID64) becomes `SteamLoginResult.Failure` with a fixed,
-secret-free reason string. `ownedGamesCountPreview()` returns a
+secret-free reason string. `ownedGamesCountPreview()` returned a
 `Result<Int>` (game COUNT only — the brief's explicit boundary: "library
 fetch happens in 4b.4, expose the repository, render a count preview
-only"); `refreshPersonaName()` is best-effort and requires both a
-signed-in state and a configured key. `signOut()` calls
+only"); it lost its last caller when the identity screen
+left the release build (WP 4b.10) and was removed by APP-AUDIT-1, `ownedGames()` is the
+one library call.
+`refreshPersonaName()` is best-effort and requires a signed-in state
+(since WP 4h.4 no device key, the name comes through the vault relay).
+It had no caller until APP-AUDIT-1 (PERSONA-LOAD-1); see "What WP 4b.3
+deliberately did NOT do" below for when it runs now. `signOut()` calls
 `CredentialStore.clearSteamIdentity()` — pinned to clear exactly the three
 Steam fields and leave the vault connection (`apiKey`/`baseUrl`/`profileKind`)
 untouched.
@@ -1038,11 +1053,12 @@ Robolectric/emulator dependency:
   entries, `games` not a list, name/icon truncation, the `MAX_GAMES` bound,
   no-usable-`response` / non-object / non-JSON documents, and
   `parsePlayerSummary`'s steamid cross-check + persona truncation.
-- `repo/SteamIdentityRepositoryTest` (16) — the full `completeLogin`
-  branch set against fakes (success, malformed callback, unsigned
-  claimed_id, rejected assertion, invalid SteamID64), `ownedGamesCountPreview`/
-  `refreshPersonaName`'s missing-state paths, and `signOut`'s
-  scoped-clear pin.
+- `repo/SteamIdentityRepositoryTest` (16 in WP 4b.3, 27 since
+  APP-AUDIT-1) — the full `completeLogin` branch set against fakes
+  (success, malformed callback, unsigned claimed_id, rejected assertion,
+  invalid SteamID64), `ownedGamesCountPreview` (removed by APP-AUDIT-1)/
+  `refreshPersonaName`'s missing-state paths, and `signOut`'s scoped-clear
+  pin.
 - `net/SteamKeyIsolationTest` (2) — the grep-provable structural pin.
 - `storage/InMemoryCredentialStoreTest` gained 1 more test
   (`clearSteamIdentity` scoped-clear) on top of the existing four, updated
@@ -1158,7 +1174,8 @@ they can be called confirmed:
 ### What WP 4b.3 deliberately did NOT do
 
 - **No library grid, no game list UI** — `ownedGamesCountPreview()`
-  exposes a COUNT only; the full grid is WP 4b.4.
+  exposed a COUNT only; the full grid is WP 4b.4 (the count call itself
+  was removed unused by APP-AUDIT-1).
 - **No settings UI for entering the Steam Web API key** —
   `setWebApiKey()` exists on the repository; a real input screen is WP
   4b.7 (onboarding/settings, serial after 4b.3 per
@@ -1175,9 +1192,21 @@ they can be called confirmed:
   A real Toast/Snackbar/inline-message CONVENTION for the whole app is
   still left to whichever later WP establishes one, rather than guessed
   at here.
-- **No WorkManager-driven persona/library refresh** — `refreshPersonaName`/
-  `ownedGamesCountPreview` are both manual, button-triggered calls; any
-  background refresh is WP 4b.8's polling work.
+- **No WorkManager-driven persona/library refresh** — there is still no
+  background refresh. The library is fetched by the screens that show it
+  (`ownedGames()`; Settings' "Check library" button). The persona name
+  had no caller at all until APP-AUDIT-1 (PERSONA-LOAD-1, audit
+  2026-11-20), so Settings and Onboarding showed "Persona name not loaded
+  yet" for good. Since then `refreshPersonaName()` runs once after every
+  successful Steam sign-in (Settings and Onboarding controllers), and
+  Settings' `load()` retries it when a SteamID64 is stored without a name.
+  A first-run onboarding sign-in has no stored vault connection yet, so
+  its fetch fails silently and the name arrives on the first Settings
+  visit. Every failure (no connection, relay `409`, network) keeps the
+  "not loaded yet" text; a name answered after a sign-out is dropped.
+  While the name stays missing (relay `409`, or an empty `players`
+  answer), every Settings visit makes one more
+  `GET /v1/steam/player-summaries` call.
 
 ## Downloads + job control (WP 4b.5)
 

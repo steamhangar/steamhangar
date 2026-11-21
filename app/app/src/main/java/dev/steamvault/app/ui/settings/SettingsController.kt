@@ -254,6 +254,7 @@ class SettingsController(
         } catch (e: VaultApiError) {
             null
         }
+        loadMissingPersonaName()
     }
 
     // WP WEB-FIX-8: any edit (or Discard) clears a previous save error, so
@@ -491,6 +492,19 @@ class SettingsController(
         identityState = identityRepository.state()
     }
 
+    /**
+     * PERSONA-LOAD-1: a stored SteamID64 without a persona name (a sign-in
+     * whose name fetch failed, e.g. during first-run onboarding before any
+     * vault connection existed) gets one more best-effort fetch each time
+     * Settings loads. Silent on failure: the screen keeps "Persona name not
+     * loaded yet". No call at all when signed out or the name is known.
+     */
+    suspend fun loadMissingPersonaName() {
+        val current = identityRepository.state()
+        if (current.steamId64 == null || current.personaName != null) return
+        if (identityRepository.refreshPersonaName()) refreshIdentity()
+    }
+
     /** @return the `checkid_setup` URL to open in a Custom Tab -- caller
      * ([dev.steamvault.app.MainActivity]) launches it; the redirect back
      * arrives at `onNewIntent`, which must call [completeSteamLogin] on
@@ -508,6 +522,9 @@ class SettingsController(
             is SteamLoginResult.Success -> {
                 refreshIdentity()
                 loginError = null
+                // PERSONA-LOAD-1: best effort, after the signed-in state is
+                // already on screen; a failure keeps "not loaded yet".
+                if (identityRepository.refreshPersonaName()) refreshIdentity()
             }
             is SteamLoginResult.Failure -> {
                 refreshIdentity()
