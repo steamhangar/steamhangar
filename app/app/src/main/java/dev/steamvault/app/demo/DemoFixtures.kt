@@ -275,6 +275,42 @@ internal fun seedJobs(): MutableList<DemoJob> = mutableListOf(
     ),
 )
 
+/**
+ * WP CAP-503-FIX-1b (web demo twin `buildHoldJobs`): the client-priority
+ * hold scenario [DemoState.withClientHold] adds -- a device loads through
+ * the cache, so vault-api paused this prefill for it (Duskfall Array: done,
+ * no needs-force, completeness or update flag, so finishing it after the
+ * hold changes nothing showcased), and a garbage
+ * collection dry run waits in the queue (operator decision 2026-11-21,
+ * Weg A) on the game whose download already runs, so no other showcase is
+ * blocked; a dry run changes nothing when it finishes.
+ */
+internal fun seedHoldJobs(): List<DemoJob> = listOf(
+    DemoJob(
+        id = 900_102,
+        appid = 4_010_010,
+        type = "prefill",
+        status = DemoState.STATUS_PAUSED,
+        createdAt = isoAgo(300L),
+        startedAt = isoAgo(240L),
+        pausedAt = isoAgo(90L),
+        logExcerpt = "[vault-api] worker claimed job 900102\nDownloading depot 4010011 ...",
+        ticksLeft = 2,
+        pauseReason = "client",
+    ),
+    DemoJob(
+        id = 900_103,
+        appid = 4_010_030,
+        type = "gc",
+        status = DemoState.STATUS_QUEUED,
+        createdAt = isoAgo(30L),
+        startedAt = null,
+        gcExecute = false,
+        logExcerpt = "[vault-api] GC for app 4010030: DRY RUN.",
+        ticksLeft = 1,
+    ),
+)
+
 internal fun seedClients(): List<ClientOut> = listOf(
     ClientOut(
         client_id = "demo-livingroom-pc",

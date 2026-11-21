@@ -90,7 +90,9 @@ import dev.steamvault.app.ui.downloads.logic.historySubtitle
 import dev.steamvault.app.ui.downloads.logic.isHistoryCapped
 import dev.steamvault.app.ui.downloads.logic.showMoreLabel
 import dev.steamvault.app.ui.downloads.logic.showMoreText
+import dev.steamvault.app.ui.downloads.logic.ClientPriorityNotes
 import dev.steamvault.app.ui.downloads.logic.JobCardModel
+import dev.steamvault.app.ui.downloads.logic.clientPriorityNotes
 import dev.steamvault.app.ui.downloads.logic.PartitionedJobs
 import dev.steamvault.app.ui.downloads.logic.QueueMove
 import dev.steamvault.app.ui.downloads.logic.QueueRowModel
@@ -189,6 +191,12 @@ fun DownloadsScreen(
             controller.pollGamesForever()
         }
     }
+    // WP CAP-503-FIX-1b: the client-priority hold, asked only while a job is active.
+    LaunchedEffect(lifecycleOwner, controller) {
+        lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            controller.pollClientPriorityForever()
+        }
+    }
     LaunchedEffect(controller.jobs) { onJobsSnapshot(controller.jobs) }
 
     // WP D15d: statistics header + per-job speed (one poll), History filter.
@@ -231,6 +239,11 @@ fun DownloadsScreen(
         activeModels.filter { it.kind == StatusKind.VERIFY }.map { it.jobId }.toSet()
     }
     val speedLines = jobSpeedLines(statsPoll, verifyingJobIds, etaSmoother)
+    // WP CAP-503-FIX-1b: hold texts (paused for a device, pausing, runs
+    // alongside by choice, the queue waiting), from the jobs and the hold.
+    val clientNotes = remember(partition, controller.clientPriority) {
+        clientPriorityNotes(partition, controller.clientPriority)
+    }
     val queueModels = remember(partition, gamesByAppid, ownedNames) {
         partition.queued.mapIndexed { index, job -> buildQueueRowModel(job, index + 1, gamesByAppid, ownedNames) }
     }
@@ -344,6 +357,7 @@ fun DownloadsScreen(
             }
             DownloadsBody(
                 partition = partition,
+                clientNotes = clientNotes,
                 activeModels = activeModels,
                 pausedModels = pausedModels,
                 updateRows = updateRows,
@@ -368,6 +382,7 @@ fun DownloadsScreen(
 @Composable
 private fun DownloadsBody(
     partition: PartitionedJobs,
+    clientNotes: ClientPriorityNotes,
     activeModels: List<JobCardModel>,
     pausedModels: List<JobCardModel>,
     updateRows: List<UpdateRowModel>,
@@ -424,6 +439,8 @@ private fun DownloadsBody(
                 JobCard(
                     model = model,
                     speedLine = speedLines[model.jobId],
+                    clientNote = clientNotes.alongside[model.jobId],
+                    pausingNote = clientNotes.pausing[model.jobId],
                     busy = model.jobId in controller.busyJobIds,
                     onPause = { controller.pause(scope, model.jobId) },
                     onResume = { controller.resume(scope, model.jobId) },
@@ -434,6 +451,7 @@ private fun DownloadsBody(
                 JobCard(
                     model = model,
                     speedLine = null,
+                    holdNote = clientNotes.hold[model.jobId],
                     busy = model.jobId in controller.busyJobIds,
                     onPause = { controller.pause(scope, model.jobId) },
                     onResume = { controller.resume(scope, model.jobId) },
@@ -445,6 +463,9 @@ private fun DownloadsBody(
         // ---- Queue ---------------------------------------------------------
         item(key = "queue-heading") {
             SectionHead(stringResource(R.string.downloads_section_queue), queueModels.size)
+        }
+        clientNotes.queue?.let { note ->
+            item(key = "queue-hold-note") { ClientNote(note) }
         }
         if (queueModels.isEmpty()) {
             item(key = "queue-empty") { EmptyLine(stringResource(R.string.downloads_queue_empty)) }
@@ -619,6 +640,13 @@ private fun JobCard(
     model: JobCardModel,
     speedLine: JobSpeedLine?,
     busy: Boolean,
+    /** WP CAP-503-FIX-1b: a paused card's note when vault-api paused it for a
+     * loading device (replaces the manual-pause note). */
+    holdNote: String? = null,
+    /** WP CAP-503-FIX-1b: "Runs alongside <device> by your choice." */
+    clientNote: String? = null,
+    /** WP CAP-503-FIX-1b: the stop note while vault-api pauses it for a device. */
+    pausingNote: String? = null,
     onPause: () -> Unit,
     onResume: () -> Unit,
     onCancel: () -> Unit,
@@ -667,9 +695,11 @@ private fun JobCard(
                 )
             }
 
+            if (clientNote != null) ClientNote(clientNote, Modifier.padding(top = 6.dp))
+
             if (model.mode == JobCardMode.HELD) {
                 Text(
-                    text = stringResource(
+                    text = holdNote ?: stringResource(
                         if (model.gcHold) R.string.downloads_paused_hold_note_gc else R.string.downloads_paused_hold_note,
                     ),
                     style = MaterialTheme.typography.bodySmall,
@@ -680,7 +710,7 @@ private fun JobCard(
 
             val action = model.action
             if (action.pausing) {
-                StopNote(stringResource(R.string.downloads_stopnote_pausing))
+                StopNote(pausingNote ?: stringResource(R.string.downloads_stopnote_pausing))
             } else if (action.cancelling) {
                 StopNote(stringResource(R.string.downloads_stopnote_cancelling))
             }
@@ -714,6 +744,18 @@ private fun JobCard(
             }
         }
     }
+}
+
+/** WP CAP-503-FIX-1b: a client-priority note (web `.hint.holdnote`): the
+ * queue waiting for a device, or a job running alongside one by choice. */
+@Composable
+private fun ClientNote(text: String, modifier: Modifier = Modifier) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = modifier,
+    )
 }
 
 @Composable

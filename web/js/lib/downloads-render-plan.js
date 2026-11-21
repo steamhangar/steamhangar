@@ -92,9 +92,17 @@ export function planJobsUpdate(diff) {
     }
   }
 
+  // WP CAP-503-FIX-1b: `pause_reason` and `client_override` (schema v34)
+  // change the card's notes, never its section or icon: a client pause
+  // turned manual keeps `status: "paused"`, and a client pause request
+  // arrives together with its `stop_request`. Same text-only patch.
   const patchStopRequest = [];
   for (const { prev, curr } of updated) {
-    if (prev.stop_request !== curr.stop_request) {
+    if (
+      prev.stop_request !== curr.stop_request ||
+      prev.pause_reason !== curr.pause_reason ||
+      prev.client_override !== curr.client_override
+    ) {
       patchStopRequest.push(curr.id);
     }
   }

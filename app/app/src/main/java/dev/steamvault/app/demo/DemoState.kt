@@ -12,7 +12,9 @@ import dev.steamvault.app.net.model.CacheSummaryOut
 import dev.steamvault.app.net.model.StorageBalanceOut
 import dev.steamvault.app.net.model.TopConsumerOut
 import dev.steamvault.app.net.model.UnmappedDepotsOut
+import dev.steamvault.app.net.model.ClientLoadOut
 import dev.steamvault.app.net.model.ClientOut
+import dev.steamvault.app.net.model.ClientPriorityOut
 import dev.steamvault.app.net.model.DeleteMemberOut
 import dev.steamvault.app.net.model.DeletePlanOut
 import dev.steamvault.app.net.model.DeletedDepotOut
@@ -103,6 +105,31 @@ class DemoState private constructor(
     private val ownedGamesFixture: List<OwnedGame>,
 ) {
     private var nextJobId = (jobs.maxOfOrNull { it.id } ?: 900_099) + 1
+
+    /** WP CAP-503-FIX-1b: job polls the client-priority hold still lasts
+     * (0 = not holding); counted by [tick] like a job's ticksLeft. */
+    private var holdPollsLeft = 0
+    private var holdEndedAt: Instant? = null
+
+    private fun holding(): Boolean = holdPollsLeft > 0
+
+    /**
+     * WP CAP-503-FIX-1b (web demo twin, on in the app's demo mode): add the
+     * client-priority hold scenario ([seedHoldJobs]) -- a device loads
+     * through the cache for [DEMO_HOLD_POLLS] job polls; the running seed
+     * job was resumed during it by choice. While it holds no new job
+     * starts; when it ends, the job paused for the device resumes and the
+     * queue drains. [fresh] alone (tests) has no hold.
+     */
+    @Synchronized
+    fun withClientHold(): DemoState {
+        jobs.addAll(seedHoldJobs())
+        jobs.find { it.id == 900_101 }?.clientOverride = true
+        nextJobId = maxOf(nextJobId, (jobs.maxOfOrNull { it.id } ?: 900_099) + 1)
+        holdPollsLeft = DEMO_HOLD_POLLS
+        holdEndedAt = null
+        return this
+    }
     private val settingsOverrides = mutableMapOf<String, String>()
 
     // ---- games ------------------------------------------------------------
@@ -418,17 +445,20 @@ class DemoState private constructor(
             )
             games.add(game)
         }
+        // WP CAP-503-FIX-1b: during the client-priority hold a new job waits
+        // in the queue; the hold's end drains it ([tickHold]).
+        val held = holding()
         val job = DemoJob(
             id = nextJobId++,
             appid = appid,
             type = "prefill",
-            status = STATUS_RUNNING,
+            status = if (held) STATUS_QUEUED else STATUS_RUNNING,
             createdAt = nowIso(),
-            startedAt = nowIso(),
+            startedAt = if (held) null else nowIso(),
             ticksLeft = PREFILL_TICKS,
         )
         jobs.add(job)
-        game.status = STATUS_RUNNING
+        if (!held) game.status = STATUS_RUNNING
         return PrefillJobRef(appid = appid, job_id = job.id, status = job.status, deduplicated = false)
     }
 
@@ -447,11 +477,19 @@ class DemoState private constructor(
             ?: throw VaultApiError.NotFound("no such job in the demo library", 404, "job $id not found")
         return when (action) {
             JobControlAction.PAUSE -> {
+                // WP CAP-503-FIX-1a: Pause on a job paused for a device turns
+                // it into a manual pause (immediate), never a 409.
+                if (job.status == STATUS_PAUSED && job.pauseReason == "client") {
+                    job.pauseReason = "manual"
+                    return JobControlOut(job_id = id, status = job.status, outcome = "immediate", detail = "now paused manually")
+                }
                 if (job.status != STATUS_RUNNING) {
                     throw VaultApiError.Validation("job is not running", 409, "job $id is '${job.status}', cannot pause")
                 }
                 job.status = STATUS_PAUSED
                 job.pausedAt = nowIso()
+                job.pauseReason = "manual" // WP CAP-503-FIX-1b: an operator's pause
+                job.clientOverride = false // ends the override (CAP-503-FIX-1a)
                 JobControlOut(job_id = id, status = job.status, outcome = "paused", detail = "paused on request")
             }
             JobControlAction.RESUME -> {
@@ -460,6 +498,10 @@ class DemoState private constructor(
                 }
                 job.status = STATUS_RUNNING
                 job.pausedAt = null
+                // WP CAP-503-FIX-1b: a Resume during the hold overrides it for
+                // this job (operator Weg B).
+                job.pauseReason = null
+                job.clientOverride = holding()
                 JobControlOut(job_id = id, status = job.status, outcome = "resumed", detail = "resumed on request")
             }
             JobControlAction.CANCEL -> {
@@ -474,6 +516,36 @@ class DemoState private constructor(
         }
     }
 
+    /**
+     * WP CAP-503-FIX-1b: `GET /v1/client-priority` in demo mode (web demo
+     * twin). While the hold lasts: holding, a device -- the online demo
+     * agent's address -- seen just now, resuming one idle gap (120 s) later,
+     * named like the real route (the Clients page name, `null` when none is
+     * set). After it: not holding, the last sighting one idle gap before the
+     * end. Without [withClientHold]: never held.
+     */
+    @Synchronized
+    fun clientPriority(): ClientPriorityOut {
+        val now = Instant.ofEpochSecond(Instant.now().epochSecond) // whole seconds, like the API
+        val held = holding()
+        val lastSeen = if (held) now else holdEndedAt?.let { Instant.ofEpochSecond(it.epochSecond).minusSeconds(120L) }
+        return ClientPriorityOut(
+            enabled = true,
+            holding = held,
+            since = if (held) now.minusSeconds(90L).toString() else null,
+            last_client_at = lastSeen?.toString(),
+            resume_at = if (held) now.plusSeconds(120L).toString() else null,
+            idle_gap_seconds = 120,
+            clients = if (held) {
+                listOf(ClientLoadOut(addr = DEMO_HOLD_ADDR, name = clientNames[DEMO_HOLD_ADDR], miss_bytes_per_second = 9_400_000.0))
+            } else {
+                emptyList()
+            },
+            paused_job_ids = jobs.filter { it.status == STATUS_PAUSED && it.pauseReason == "client" }.map { it.id }.sorted(),
+            override_job_ids = jobs.filter { it.clientOverride && (it.status == STATUS_QUEUED || it.status == STATUS_RUNNING) }.map { it.id }.sorted(),
+        )
+    }
+
     /** Advances every still-active job by one tick — see class kdoc. */
     private fun tick() {
         for (job in jobs) {
@@ -484,6 +556,28 @@ class DemoState private constructor(
                 "prefill" -> finishPrefillJob(job)
                 "gc" -> finishGcJob(job)
             }
+        }
+        tickHold() // WP CAP-503-FIX-1b
+    }
+
+    /** WP CAP-503-FIX-1b (web `tickDemoHold`): one job poll of the hold. When
+     * it ends, the jobs paused for the device resume and the queue drains
+     * (the demo runs jobs side by side). */
+    private fun tickHold() {
+        if (holdPollsLeft <= 0) return
+        holdPollsLeft -= 1
+        if (holdPollsLeft > 0) return
+        holdEndedAt = Instant.now()
+        for (job in jobs) {
+            val resume = job.status == STATUS_PAUSED && job.pauseReason == "client"
+            if (!resume && job.status != STATUS_QUEUED) continue
+            if (resume) {
+                job.pauseReason = null
+                job.pausedAt = null
+            }
+            job.status = STATUS_RUNNING
+            if (job.startedAt == null) job.startedAt = nowIso()
+            if (job.type == "prefill") games.find { it.appid == job.appid }?.status = STATUS_RUNNING
         }
     }
 
@@ -698,13 +792,15 @@ class DemoState private constructor(
         if (games.none { it.appid == appid }) {
             throw VaultApiError.NotFound("no such app in the demo library", 404, "appid $appid not found")
         }
+        // WP CAP-503-FIX-1b: a queued GC job waits during the hold too (Weg A).
+        val held = holding()
         val job = DemoJob(
             id = nextJobId++,
             appid = appid,
             type = "gc",
-            status = STATUS_RUNNING,
+            status = if (held) STATUS_QUEUED else STATUS_RUNNING,
             createdAt = nowIso(),
-            startedAt = nowIso(),
+            startedAt = if (held) null else nowIso(),
             ticksLeft = GC_TICKS,
             gcExecute = execute,
         )
@@ -1056,6 +1152,12 @@ class DemoState private constructor(
         internal const val STATUS_ERROR = "error"
         internal const val STATUS_PAUSED = "paused"
         internal const val STATUS_CANCELLED = "cancelled"
+
+        /** WP CAP-503-FIX-1b: the demo's loading device (demo-livingroom-pc). */
+        private const val DEMO_HOLD_ADDR = "10.0.0.42"
+
+        /** WP CAP-503-FIX-1b (web `DEMO_HOLD_POLLS`): job polls the hold lasts. */
+        internal const val DEMO_HOLD_POLLS = 6
         private val ACTIVE_JOB_STATUSES = setOf(STATUS_RUNNING, STATUS_PAUSED, STATUS_QUEUED)
 
         /** What "Delete history" removes (api/vault_api/history.py). */

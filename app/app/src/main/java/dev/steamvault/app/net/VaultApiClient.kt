@@ -5,6 +5,7 @@ import dev.steamvault.app.net.model.AboutOut
 import dev.steamvault.app.net.model.CacheDeletionOut
 import dev.steamvault.app.net.model.CacheSummaryOut
 import dev.steamvault.app.net.model.ClientOut
+import dev.steamvault.app.net.model.ClientPriorityOut
 import dev.steamvault.app.net.model.ClientsOverviewOut
 import dev.steamvault.app.net.model.DeletePlanOut
 import dev.steamvault.app.net.model.DepotPreviewOut
@@ -231,6 +232,11 @@ class VaultApiClient(
     suspend fun pauseJob(id: Int): JobControlOut = postEmpty("/v1/jobs/$id/pause")
 
     suspend fun resumeJob(id: Int): JobControlOut = postEmpty("/v1/jobs/$id/resume")
+
+    /** WP CAP-503-FIX-1b: `GET /v1/client-priority` (CAP-503-FIX-1a) --
+     * whether the prefill runner is held for a loading device, for whom and
+     * until when. Read-only. `404` from a server before schema v34. */
+    suspend fun clientPriority(): ClientPriorityOut = get("/v1/client-priority")
 
     /** WP D20: `POST /v1/jobs/{id}/move` -- reorder a queued job; [position]
      * counts queued jobs only (0 = runs next). `404`/`409`/`422` per api/README.md. */
