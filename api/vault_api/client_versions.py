@@ -48,7 +48,10 @@ import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 
-#: Same grammar as ``vault_api.dist`` and web ``isReleaseVersion``.
+#: A published release version, as publish.yml derives it from a ``v*`` tag:
+#: a digits-dot triple with an optional pre-release, e.g. ``0.1.0-rc18``.
+#: The one copy in vault-api (``vault_api.dist`` uses :func:`is_release`);
+#: the same grammar as web ``agent-install.js``'s ``RELEASE_VERSION``.
 _RELEASE_VERSION = re.compile(
     r"[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z]+(?:\.[0-9A-Za-z]+)*)?", re.ASCII
 )

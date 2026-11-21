@@ -1315,8 +1315,7 @@ class DepotGcPlan:
     @property
     def extra_problems(self) -> list[ExtraManifestResolution]:
         """Extra manifest ids that could not be used. Never a failure — see
-        ``ExtraManifestResolution`` — but worth surfacing: an oracle whose
-        gids never resolve is protecting nothing."""
+        ``ExtraManifestResolution``."""
         return [extra for extra in self.extras if extra.error]
 
 

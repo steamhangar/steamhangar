@@ -261,12 +261,6 @@ def load_preview(conn: sqlite3.Connection, appid: int) -> StoredPreview | None:
     return StoredPreview(appid, row["outcome"], row["fetched_at"], depots)
 
 
-def clear_preview(conn: sqlite3.Connection, appid: int) -> None:
-    with jobs.immediate_transaction(conn):
-        conn.execute("DELETE FROM depot_preview WHERE appid = ?", (appid,))
-        conn.execute("DELETE FROM depot_preview_state WHERE appid = ?", (appid,))
-
-
 @dataclass(frozen=True)
 class JobExpectation:
     """WP JOB-SIZE-1: what a running first download is EXPECTED to load.

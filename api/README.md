@@ -8114,14 +8114,11 @@ scheduler/worker would apply hours later.
 **One documented exception: `webhook_url`.** WP 3.13 deliberately never
 validates `VAULT_WEBHOOK_URL` as a URL at startup — it is treated as trusted
 operator configuration, and a malformed value simply fails per-delivery at
-WARNING (see "Webhooks → SSRF / trust posture" above). No startup grammar
-therefore exists for `PATCH` to reuse. `config.validate_webhook_url` is a
-**new** function (scheme must be `http`/`https`, blank means disabled) that
-exists ONLY for this endpoint — a human typing a value into a form right now
-gets a `422` immediately for "that is not even a URL" rather than a silent
-warning hours later. `Settings.from_env()` is intentionally left unchanged;
-this is a deliberate, narrow addition, not a change to WP 3.13's shipped
-startup behavior.
+WARNING (see "Webhooks → SSRF / trust posture" above). Since D16b (rc18)
+`webhook_url` is env-only: `PATCH` refuses it with the "environment-only"
+`422` and GET shows it masked, so no PATCH-side URL check exists any more
+(the scheme-only `config.validate_webhook_url` it once used was removed in
+rc23, NITS-AUDIT-API-1).
 
 ### `VAULT_SETTINGS_READONLY` — the operator hard-lock
 

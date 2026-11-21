@@ -23,7 +23,7 @@ twice (once on the code, once on the state it then reads anyway).
 from __future__ import annotations
 
 import sqlite3
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
@@ -32,7 +32,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from vault_api import cache_completeness, deletion, tool_apps
 from vault_api import jobs as jobs_queue
 from vault_api.auth import require_api_key
-from vault_api.deps import DbOpener, db_opener, get_cache_root, get_size_cache
+from vault_api.deps import DbOpener, db_opener, get_cache_root, get_size_cache, request_now
 from vault_api.sizes import SizeCache
 from vault_api.validation import AppId
 
@@ -511,6 +511,7 @@ def list_recent_jobs(
     range: Literal["24h", "7d", "30d", "all"] | None = Query(default=None),  # noqa: A002
     since: str | None = Query(default=None),
     open_db: DbOpener = Depends(db_opener),
+    now: datetime = Depends(request_now),
 ) -> list[JobSummary]:
     """Most recent jobs, newest first — the app's polling list.
 
@@ -539,9 +540,7 @@ def list_recent_jobs(
         # query compares strings, so it must see the canonical padded form.
         cutoff = jobs_queue.to_utc_iso(parsed)
     elif range is not None and range in _HISTORY_RANGES:
-        cutoff = jobs_queue.to_utc_iso(
-            datetime.now(timezone.utc) - _HISTORY_RANGES[range]
-        )
+        cutoff = jobs_queue.to_utc_iso(now - _HISTORY_RANGES[range])
     with open_db() as conn:
         rows = jobs_queue.list_jobs(conn, limit, since=cutoff)
         positions = jobs_queue.queue_positions(conn)

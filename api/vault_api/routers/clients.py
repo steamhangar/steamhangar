@@ -96,7 +96,7 @@ api/README.md "Auth").
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -186,7 +186,7 @@ def list_clients(
 ) -> list[ClientOut]:
     """Every client that has reported installed apps, by ``client_id``."""
     settings: Settings = deps.effective_settings(request)
-    now = datetime.now(timezone.utc)
+    now = deps.request_now(request)
     cutoff_iso = to_utc_iso(now - timedelta(days=settings.bypass_window_days))
 
     with open_db() as conn:

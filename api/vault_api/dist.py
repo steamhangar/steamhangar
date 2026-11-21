@@ -46,13 +46,12 @@ from __future__ import annotations
 
 import hashlib
 import os
-import re
 import stat
 import threading
 from dataclasses import dataclass
 
 from vault_api import UNKNOWN_COMMIT, BuildInfo
-from vault_api.client_versions import ClientVersion
+from vault_api.client_versions import ClientVersion, is_release
 
 #: Public URL prefix the files are served under (``routers/dist.py``).
 DIST_URL_PREFIX = "/dist/"
@@ -65,14 +64,6 @@ APK_ALIAS = "steamhangar-app.apk"
 #: ``tests/test_dist_1a.py`` as a string literal (web/js/lib/agent-install.js
 #: carries the same one).
 RELEASE_DOWNLOAD_BASE = "https://github.com/steamhangar/steamhangar/releases/download"
-
-#: A published release version, as publish.yml derives it from a ``v*`` tag
-#: (the same grammar as ``web/js/lib/agent-install.js``'s RELEASE_VERSION):
-#: a digits-dot triple with an optional pre-release, e.g. ``0.1.0-rc18``.
-_RELEASE_VERSION = re.compile(
-    r"[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z]+(?:\.[0-9A-Za-z]+)*)?", re.ASCII
-)
-
 
 @dataclass(frozen=True)
 class ArtifactSpec:
@@ -104,7 +95,7 @@ def is_release_version(build: BuildInfo) -> bool:
     version alone). The web reads the resulting ``release`` flag from
     ``GET /v1/dist`` and re-checks the version grammar (``isReleaseVersion``)."""
     return (
-        _RELEASE_VERSION.fullmatch(build.version) is not None
+        is_release(build.version)
         and build.commit != UNKNOWN_COMMIT
     )
 
@@ -147,7 +138,7 @@ def release_url(build: BuildInfo, spec: ArtifactSpec) -> str | None:
     """The GitHub Release asset of ``spec``: the release of the file's own
     version (RELEASE-SPLIT-1b), or None when this build is not a published
     release or the file's version is not a release version."""
-    if not is_release_version(build) or _RELEASE_VERSION.fullmatch(spec.version) is None:
+    if not is_release_version(build) or not is_release(spec.version):
         return None
     return f"{RELEASE_DOWNLOAD_BASE}/v{spec.version}/{spec.name}"
 
@@ -215,7 +206,7 @@ class DistCatalog:
             return None
         # A file of a non-release client build (a dev rehearsal) is never
         # served, whatever the server's version.
-        if _RELEASE_VERSION.fullmatch(spec.version) is None:
+        if not is_release(spec.version):
             return None
         path = os.path.join(self.dist_dir, spec.name)
         st = _regular_file(path)

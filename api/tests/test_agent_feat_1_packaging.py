@@ -15,7 +15,9 @@ Pinned here:
    keeps -StartWhenAvailable and -MultipleInstances IgnoreNew, and writes the
    interval into the env file as VAULT_AGENT_REPORT_INTERVAL.
 3. The Go agent mirrors the server: the version regex is the VER-1 grammar
-   anchored, the interval bounds are the server's, the default is 10m.
+   anchored, the interval bounds and the report limits (client id length,
+   appids and local addresses per report) are the server's, the default
+   is 10m.
 """
 
 from __future__ import annotations
@@ -148,14 +150,21 @@ def test_go_version_regex_is_the_ver1_grammar() -> None:
     assert got == want, VALUE.format(where=where, got=got, want=want)
 
 
-def test_go_interval_bounds_are_the_servers() -> None:
+def test_go_limits_are_the_servers() -> None:
+    """The interval bounds (AGENT-FEAT-1) and the report limits the Go agent
+    mirrors (audit C-25): client id length, appids per report, local
+    addresses per report."""
     report_go = GO / "report" / "report.go"
-    for name, server_value in (
-        ("MinReportIntervalSeconds", agent_reports.MIN_REPORT_INTERVAL_SECONDS),
-        ("MaxReportIntervalSeconds", agent_reports.MAX_REPORT_INTERVAL_SECONDS),
+    localaddr_go = GO / "localaddr" / "localaddr.go"
+    for path, name, server_value in (
+        (report_go, "MinReportIntervalSeconds", agent_reports.MIN_REPORT_INTERVAL_SECONDS),
+        (report_go, "MaxReportIntervalSeconds", agent_reports.MAX_REPORT_INTERVAL_SECONDS),
+        (report_go, "MaxClientIDLength", agent_reports.MAX_CLIENT_ID_LENGTH),
+        (report_go, "MaxAppIDs", agent_reports.MAX_APPIDS_PER_REPORT),
+        (localaddr_go, "MaxAddrs", agent_reports.MAX_LOCAL_ADDRS),
     ):
-        where = f"report.go {name}"
-        expr = _scrape(report_go, rf"^\s*{name}\s*=\s*([0-9][0-9 *]*?)\s*$", where, re.M)
+        where = f"{path.name} {name}"
+        expr = _scrape(path, rf"^\s*(?:const\s+)?{name}\s*=\s*([0-9][0-9_ *]*?)\s*$", where, re.M)
         got = math.prod(int(factor) for factor in expr.split("*"))
         assert got == server_value, VALUE.format(where=where, got=f"{expr} = {got}", want=server_value)
     # The server side itself, as literals (user decision, not derived).
