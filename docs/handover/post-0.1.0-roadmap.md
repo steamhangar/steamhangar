@@ -2078,6 +2078,11 @@ and VERIFY-COLD-1 is prose in the Sunday-test box of the rc19.3 block.
   device(s) and the resume time; an overridden job reads "runs alongside
   <device> by your choice"; `restored` (after a restart, no device seen
   yet) must not claim a sighting; twin pins web <-> Android.
+  **Demo hold decided by orchestrator (RC23-AUTONOMOUS, operator may
+  revise), 2026-11-21:** Weg A, the demo's client-priority hold ends by
+  itself after a few job polls; while it holds, new demo downloads and GC
+  jobs stay queued (Resume overrides), then the queue drains (Weg B would
+  have ended the hold at the first enqueue).
 - **APP-EXPERT-SWITCH-1 (android, operator 2026-11-01, screenshot; rc23):**
   the "Show expert settings" switch at the bottom of Settings > About
   needs a rework: in the off state the dark track and thumb read as
@@ -2097,7 +2102,7 @@ and VERIFY-COLD-1 is prose in the Sunday-test box of the rc19.3 block.
   Candidate **PROXY-VERSION-CHECK-1**: compare the proxy's version with
   vault-api's (mismatch -> Check), like vault-core. Nit: re-wrap the long
   line in `api/README.md` "Component versions" (~6729).
-- **APP-DL-CARD-1 (android, operator 2026-11-01, screenshot; rc23 by operator decision 2026-11-01):** the
+- **APP-DL-CARD-1 (android, operator 2026-11-01, screenshot; rc23 by operator decision 2026-11-01):** **done 2026-11-21/22** (review FAIL -> fixes -> re-check PASS; web + Android same order: title + status pill, figures bold in mono, notes behind a rule, actions with Cancel as danger button; job card goldens `downloads_job_card_*` new). The
   Downloads page's active-job card ("Breathedge, job #266 ... 0 MB/s · 0
   GB loaded so far", Pause/Cancel) looks unpolished next to the
   throughput card; needs a design pass (layout, spacing, hierarchy).
@@ -2109,6 +2114,60 @@ and VERIFY-COLD-1 is prose in the Sunday-test box of the rc19.3 block.
   hour. Also "highest 19.0 MB/s" above "Limit 16 MB/s" needs an
   explanation (MB vs MiB, sampling). Check web vs app first (twin), then
   the API feeds behind the cards.
+  **Twin check 2026-11-21:** no divergence; web and Android read the same
+  feeds (`/v1/throughput?range=1h` summary + `jobs[]`, merged with
+  `/v1/throughput/live`), same fields, same 1024 base. **Root cause:** the
+  tiles and the job card read the swept tiers (event sweep every 5 min +
+  scheduler tick, plus the live view's 30 s summary cache) while the graph
+  and "Loading now" read the live ring; in a job's first minutes every
+  swept figure is 0, and the card speed stays diluted over a window that
+  started before the job (GRAPH-RECENT-1 kept summary tiles swept on
+  purpose). Prod data for job #266 confirms the bytes arrived later.
+  "highest" vs "Limit": same unit; a graph point averages all served bytes
+  (hits included) over 5/15/60 s, the cap applies to MISS over minutes;
+  the caption now names the point's period and an explanatory note
+  (wp/app-dl-stats-1).
+  **Open decision DL-STATS-ZERO (operator):** Weg A (rec.) the API
+  stitches the live ring since the last sweep into summary and job figures
+  like `/series` `prefer_ring` does (api freeze exception, ADR-0016
+  addendum, reverses the GRAPH-RECENT-1 rule; per-depot bytes kept in the
+  ring); Weg B client only: card speed from the live runner row in
+  `loading_sources`, swept figures labelled "as of the last log read N min
+  ago" or hidden while loading; Weg C shorter prod sweep interval
+  (`VAULT_EVENT_SWEEP_INTERVAL_MINUTES=1`, Antrag), combinable.
+  **Decided (operator, 2026-11-21): Weg A, in rc23** as **APP-DL-STATS-1b**
+  (api + web/Android follow-ups, api freeze exception with an ADR-0016
+  addendum, ADR-0025 note that summary tiles and job figures now include
+  the unswept ring span). APP-DL-STATS-1 counts as done for RC23-HOLD only
+  with 1b on `main`.
+  **APP-DL-STATS-1 + 1b done 2026-11-21** (caption part review PASS +
+  re-check PASS; 1b review PASS + re-check PASS; job "so far" decides per
+  job on its own depot bytes, never below swept-only). Built as: `traffic_stitch.py`,
+  per bucket the swept row or the ring total stands (larger wins), swept
+  figures read in one SQLite snapshot, ring per-depot store capped at
+  4096 entries (incomplete buckets keep the swept value), no contract
+  change. Decided by orchestrator (RC23-AUTONOMOUS), operator may revise:
+  every range is stitched (7d/30d/all too); bytes only (request counts,
+  hit_rate, active_clients stay swept); job speed is the ring's current
+  window on the counted depots; `miss_bytes_per_second` stays swept;
+  clients unchanged (live view keeps its 30 s summary cache, so tiles may
+  lag "Loading now" by up to 30 s; candidate DL-STATS-CACHE-1 if wanted).
+- **APP-EXPERT-SWITCH-1 placement decided (operator, 2026-11-21): Weg A**,
+  the switch stays on the About tab (before the disclaimer), like the web's
+  narrow layout.
+  **APP-EXPERT-SWITCH-1 done 2026-11-21** (review PASS + re-check PASS):
+  shared switch off edge `--line-strong` (3.83:1 on bg), Android row before
+  the disclaimer as one switch node with 48 dp minimum height, web
+  disclaimer is the About panel's last line and the label text toggles too.
+  Stale `settings-1400` golden: re-record in the wave-2 goldens round.
+- **RC23-AUTONOMOUS (operator, 2026-11-21 evening):** while the operator is
+  away the orchestrator (1) tags `v0.1.0-rc23` itself once all six 11-01
+  packages (incl. APP-DL-STATS-1b, APP-DL-CARD-1) are on `main` and tests,
+  `dev.sh verify`, branch CI and goldens are green; (2) files the rc23
+  rollout Antrag itself (read_only services, schema v34); (3) settles new
+  small, reversible Weg A/B questions with its recommendation, recorded
+  here as "decided by orchestrator, operator may revise"; plan deviations
+  and prod topics still stop for the operator.
 - **OUTPUT-TRIM-TAP-1 (dev tooling, found 2026-11-01):** the DEV-MODS-1
   output-trim mod omitted only 596 of 13,520 lines of `dev.sh test-web`
   (node TAP) and gave no file hint, so the harness still persisted 528 KB.
@@ -2124,10 +2183,18 @@ and VERIFY-COLD-1 is prose in the Sunday-test box of the rc19.3 block.
   all output) and **OUTPUT-TRIM-NITS-1** (review: unreadable or still
   oversized read-back leaves core's result alone, `yamlEnd` stops at a
   dedent, version 0.2.0). Measured: passing test-web 2,293 lines -> 9.
-  Open: **OUTPUT-TRIM-LIVE-1** live check after the mod rollout Antrag
-  (inline result once the persisted fields are removed, `$.fs.read` on
-  the `tool-results` path, `seq 1 40000; exit 3` shows its output,
-  installed version 0.2.0). Nit: TAP drops `#` comments (a failing test's
+  **OUTPUT-TRIM-LIVE-1 done 2026-11-21** (after Antrag A-20261121-02):
+  the live mod is 0.2.0; `seq 1 40000` trims to head/tail with footer
+  "40000 lines" and a complete file (read-back of the `tool-results`
+  path works); `seq 1 40000; exit 3` shows "Exit code 3" and core's
+  ~30 KB cut output, no `tool_use_error`; passing `dev.sh test-web`
+  (2285/0) is 9 lines inline, file complete. The kept file is **not**
+  stdout only: core already interleaves stderr into stdout in run order,
+  so the mod's `--- stderr ---` section only applies when core reports
+  stderr separately. Follow-up **OUTPUT-TRIM-FAIL-1** (open, low): a long
+  failing command still puts ~30 KB into context (core refused the old
+  error answer); find an answer shape core accepts for non-zero exits,
+  or document the limit. Nit: TAP drops `#` comments (a failing test's
   console output) while spec keeps them (documented).
   Test nits (OUTPUT-TRIM-NITS-1 re-review): the test "read back but not
   shorter" (`tests/output-trim.test.ts`, ~450) passes only through the
@@ -2264,6 +2331,17 @@ APP-DL-CARD-1, APP-EXPERT-SWITCH-1, CAP-503-FIX-1b (pause reason in the
 Downloads UI, web + app); one goldens round, RC23-RELEASE-NOTES-2, tag. The rc23 release notes get a section for them before the tag.
 ANDROID-TWIN-DETAIL-1 and CORE-LIVE-PARITY-1 stay rc24 candidates.
 
+**Status 2026-11-22 (rc23 wave 2 complete, RC23-HOLD satisfied):**
+APP-DL-STATS-1 + 1b, APP-EXPERT-SWITCH-1, CAP-503-FIX-1b, APP-DL-CARD-1 and
+RC23-RELEASE-NOTES-2 merged in `wp/rc23-wave2` after reviews PASS (each with
+re-check), one goldens round (`wp/rc23-wave2-goldens`, bot commits 3623b88
+app + 58b42ac web; new job card goldens looked at), verifying CI 44962722588
+green (incl. lintDebug + testReleaseUnitTest), local gates test-api (4867
+passed before the goldens; the only failure was the missing new goldens),
+test-web 2330/0, test-go, test-core green, `dev.sh verify lean` 207/0. All
+six packages planned on 2026-11-01 are on `main` with this merge; tag
+`v0.1.0-rc23` and the rollout Antrag follow (RC23-AUTONOMOUS).
+
 **Status 2026-11-21 night (rc23 wave 1 on `main` c7315ef, CI green):**
 CAP-503-FIX-1a, PROXY-VERSION-1 (+ -NITS-1), OUTPUT-TRIM-TAP-1, -2,
 -NITS-1 merged after reviews PASS, gates test-api/-go/-web/-core and
@@ -2273,7 +2351,7 @@ APP-EXPERT-SWITCH-1, CAP-503-FIX-1b (scope above); one goldens round;
 RC23-RELEASE-NOTES-2 (sections for the six packages); then tag and the
 rollout Antrag (flag the read_only services; new: schema v34). Antrag
 A-20261121-02 (output-trim 0.2.0 into the managed mods) is filed; after
-it: OUTPUT-TRIM-LIVE-1.
+it: OUTPUT-TRIM-LIVE-1 (done 2026-11-21, passed; see the OUTPUT-TRIM-2 entry).
 **MUTATION-PATH-1 (open, operator decision 2026-11-21: Weg C, clarify
 auto mode):** auto mode refuses mutation runs that edit a scratch worktree
 and run `dev.sh test-api` (coder and reviewer, "Undermining Oversight");
@@ -2472,6 +2550,41 @@ each side keeps its helpers "for the other", and C-19),
 need no change; C-26 stays with its rc22 nit.
 
 ### Low findings (nits)
+
+Follow-up of the rc23 wave 2 reviews (2026-11-21), rc24:
+- CAP503-NITS-1 (web + app) Android keeps polling `GET /v1/client-priority`
+  every 5 s on a pre-v34 server (404) while a job is active; stop for the
+  rest of the visit after a 404. A past `resume_at` (clock skew, tick lag)
+  still shows "at about HH:MM"; fall back to the no-time text when it is
+  more than ~30 s in the past.
+- DL-STATS-NITS-1 (api) the newest series bucket is averaged over its
+  elapsed seconds, but the caption names the bucket's full length; carry
+  the covered seconds in the series payload so the period is exact.
+  Also (APP-DL-STATS-1b re-check): `test_d15b_endpoints.py` ~186-212
+  still uses the real clock (pin `LiveTier(clock=...)` like
+  `test_job_size_1`); `_with_eta` reports `eta_bytes_per_second=0.0` with
+  source `live` for a non-running preview job whose ring rate is 0
+  (cosmetic, clients ignore 0).
+- CAP503-NAME-1 (api + web/app, found in CAP-503-FIX-1b) the hold texts
+  name a device by its Clients-page name, else its address
+  (`GET /v1/client-priority` sends only Clients-page names), while
+  "Loading now" names the same address by its agent name (demo:
+  `10.10.0.21` vs `workshop-pc`). Use one name resolution for both.
+- DL-CARD-NITS-1 (app, from APP-DL-CARD-1) candidate APP-DL-CARD-SHOT-1:
+  a Roborazzi shot of a running and a held job card at 360dp / font 1.3
+  (no Android golden renders the job card); Android Pause stays a
+  Material outlined accent button while web uses plain `.btn` (app-wide
+  convention, 37 call sites); `GameDetailSheet` Delete edge uses danger at
+  alpha 0.6 instead of `vaultDangerButtonBorder`. At 360dp / font 1.3 a
+  long GC pill ("Garbage collection paused", ~240dp, never wraps on web or
+  Android) leaves the job title column ~55dp: the name breaks inside a word
+  and the mono meta wraps line by line (pinned as a KNOWN NIT test in
+  `JobCardLayoutTest`; decide whether the pill may wrap or gets capped). Operator: the extra
+  remote branch `wp/app-dl-card-1-ci2` (CI rerun) can be deleted; the
+  devbox may not delete remote branches.
+- EXPERT-SWITCH-NITS-1 (app) the 48 dp row-height assert in
+  `SettingsExpertSwitchTest` passes without `heightIn` at Robolectric's
+  default width (the hint wraps); add a `w800dp` case or a source pin.
 
 Follow-up of CI-CLOCK-1 (review 2026-11-21):
 - CLOCK-SEAM-1 (freeze) four api handlers still read the wall clock with

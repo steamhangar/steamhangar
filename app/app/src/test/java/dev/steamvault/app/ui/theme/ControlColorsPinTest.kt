@@ -162,8 +162,9 @@ class ControlColorsPinTest {
         }
         fun cardIn(file: String, dir: String, function: String): String {
             val source = stripComments(File("src/main/java/dev/steamvault/app/ui/$dir/$file").readText(Charsets.UTF_8))
-            val start = source.indexOf("private fun $function(")
-            assertTrue("$file has no `private fun $function(`", start >= 0)
+            // WP APP-DL-CARD-1: JobCard is `internal` (its Robolectric layout test calls it).
+            val start = listOf("private fun $function(", "internal fun $function(").map { source.indexOf(it) }.filter { it >= 0 }.minOrNull() ?: -1
+            assertTrue("$file has no `private fun $function(` or `internal fun $function(`", start >= 0)
             val next = source.indexOf("\nprivate fun ", start + 1).let { if (it < 0) source.length else it }
             val body = source.substring(start, next)
             return found.filter { it.file == file }.map { it.args }.singleOrNull { body.contains(it) }
@@ -339,7 +340,7 @@ class ControlColorsPinTest {
             "BottomSheetDefaults.DragHandle(width = 38.dp, height = 4.dp, color = VaultColors.Line)",
             "val VaultDialogShape: Shape = RoundedCornerShape(18.dp)",
             "fun Modifier.vaultDialogBorder(): Modifier = this.border(1.dp, VaultColors.Line, VaultDialogShape)",
-            "uncheckedThumbColor = VaultColors.Dim,", "uncheckedTrackColor = VaultColors.Raised2,", "uncheckedBorderColor = VaultColors.Line,",
+            "uncheckedThumbColor = VaultColors.Dim,", "uncheckedTrackColor = VaultColors.Raised2,", "uncheckedBorderColor = VaultColors.LineStrong,",
             "checkedThumbColor = VaultColors.Accent,", "checkedTrackColor = VaultColors.AccentGlow,", "checkedBorderColor = VaultColors.Accent,",
             "this.background(VaultColors.Bg, RoundedCornerShape(8.dp))",
             ".border(1.dp, VaultColors.Line, RoundedCornerShape(8.dp))",

@@ -205,3 +205,22 @@ test("the selected Add-a-device tab has the same --dim-2 inset ring (fill 1.40:1
   assert.match(body, /background:\s*var\(--raised-2\)/);
   assert.match(body, /box-shadow:\s*inset 0 0 0 1px var\(--dim-2\)/);
 });
+
+test("APP-EXPERT-SWITCH-1: the off switch (.sw) has a --line-strong edge, its --dim knob 3:1 on the track", () => {
+  // The --raised-2 track alone is 1.40:1 on --bg (nav column, compact About
+  // panel), so the edge identifies the control; --line was 1.52:1 and the
+  // off switch read as disabled.
+  assert.ok(ratio(color("raised-2"), color("bg")) < 3, "the track alone would pass; recheck");
+  assert.ok(ratio(color("line"), color("bg")) < 3, "--line would pass; recheck");
+  const body = ruleBody(kitCss, ".kit.view-settings .sw");
+  assert.ok(body !== null, 'kit.css has no ".kit.view-settings .sw{...}" rule');
+  assert.match(body, /background:\s*var\(--raised-2\)/, "the off track changed; recheck the edge");
+  assert.match(body, /border:\s*1px solid var\(--line-strong\)/);
+  assert.equal(round2(ratio(color("line-strong"), color("bg"))), 3.83);
+  assert.equal(round2(ratio(color("line-strong"), color("surface"))), 3.45);
+  assert.match(ruleBody(kitCss, ".kit.view-settings .sw::after") ?? "", /background:\s*var\(--dim\)/);
+  assert.equal(round2(ratio(color("dim"), color("raised-2"))), 5.06);
+  // On: --accent edge and knob (the track is the 16 % accent glow).
+  assert.match(ruleBody(kitCss, '.kit.view-settings .sw[aria-checked="true"]') ?? "", /border-color:\s*var\(--accent\)/);
+  assert.ok(ratio(color("accent"), color("bg")) >= 3);
+});

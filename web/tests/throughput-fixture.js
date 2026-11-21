@@ -64,5 +64,22 @@ export function throughputFixture(url) {
       points: [],
     };
   }
+  // WP CAP-503-FIX-1b: the Downloads view also polls the client-priority
+  // hold while a job is active; with the feed off nothing is ever held.
+  if (url.pathname === "/v1/client-priority") {
+    return {
+      enabled: false,
+      holding: false,
+      since: null,
+      last_client_at: null,
+      resume_at: null,
+      idle_gap_seconds: 120,
+      clients: [],
+      paused_job_ids: [],
+      override_job_ids: [],
+      restored: false,
+      runner_address_unknown: false,
+    };
+  }
   return null;
 }

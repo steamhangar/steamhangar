@@ -310,3 +310,13 @@ at the end, under a dated heading, one entry each with the WP that proved it.
   12 Downloads harnesses hang instead of fail; find them by running test
   files one at a time with a timeout, and serve a minimal real fixture
   (`web/tests/throughput-fixture.js`) instead of an error path.
+
+## 2026-11-21 — rc23 wave 2
+
+- A web golden that passes under the 0.2 % pixel tolerance can still be
+  stale: a 1 px border colour (124 px, 0.010 %) or a caption suffix stays
+  green. When a package knowingly changes pixels in a golden's view,
+  re-record that golden in the `-goldens` round anyway, or later changes
+  silently use up the threshold (APP-EXPERT-SWITCH-1, APP-DL-STATS-1).
+- A new visible block needs demo data that renders it, or no golden ever
+  sees it (the CAP-503-FIX-1b hold texts had no demo state in round 1).

@@ -485,7 +485,8 @@ class MainActivity : ComponentActivity() {
      * `Vault*Repository`.
      */
     private fun enterDemoMode() {
-        val demo = DemoState.fresh()
+        // WP CAP-503-FIX-1b: the demo shows the client-priority hold.
+        val demo = DemoState.fresh().withClientHold()
         demoState = demo
         settingsControllerState = SettingsController(
             DemoSettingsRepository(demo),

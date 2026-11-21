@@ -87,7 +87,9 @@ only.
 Graph series and live values reuse existing tokens; there is no separate
 data palette. "Served from cache" is `--ok`, "From the internet" the accent,
 a live speed the accent, an idle or unattributed row `--dim` with a dashed
-border.
+border. Secondary figures that are not the live ring (averages, peaks,
+totals in the Throughput caption and mini line, a job card's speed line)
+are bold `--text` in a `--dim` line, not the accent (APP-DL-CARD-1).
 
 ### Status
 
@@ -127,7 +129,9 @@ contrast):
 - Text 4.5:1 on its ground. `--dim-2` is the dimmest text tone allowed
   (5.26:1 on `--surface`).
 - A control identified by its border (text input, select, the fused sort
-  box, the icon segmented switch) takes `--line-strong`: 3.83:1 on `--bg`,
+  box, the icon segmented switch, the off toggle switch `.sw` / Android
+  `vaultSwitchColors`, whose `--raised-2` track is only 1.40:1 on `--bg`,
+  APP-EXPERT-SWITCH-1) takes `--line-strong`: 3.83:1 on `--bg`,
   3.45:1 on `--surface`, 3.12:1 on `--raised` (WCAG 1.4.11, CONTRAST-1 /
   LINE-CONTRAST-1). `--line` stays for separators and cards; it is 1.52:1
   on `--bg` and never the only edge of a control. Control borders on the

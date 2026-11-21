@@ -472,6 +472,58 @@ export function generateSyntheticGames(count) {
  * undefined, e.g. every headless test in web/tests/) — tests that want the
  * large fixture pass an explicit `librarySize` to `resetDemoData()` instead
  * (see its own header). */
+/** WP CAP-503-FIX-1b: how many job polls (`GET /v1/jobs`, the clock every
+ * demo job runs on) the demo's hold lasts: long enough that a page shot at
+ * load shows it (the seeded running job, 3 ticks, is still running there),
+ * short enough that a demo visitor sees it end and the queue drain. */
+const DEMO_HOLD_POLLS = 6;
+
+/** WP CAP-503-FIX-1b: the hold scenario is on in a browser demo
+ * (`steamvault.demoClientHold` = "0" turns it off) and off outside a
+ * browser, so bare-Node tests start without it unless they ask
+ * (`resetDemoData({ clientHold: true })`), like `readRelayPlaytimePreference`. */
+function readClientHoldPreference() {
+  try {
+    if (typeof window === "undefined" || !window.localStorage) return false;
+    return window.localStorage.getItem("steamvault.demoClientHold") !== "0";
+  } catch {
+    return false;
+  }
+}
+
+/** WP CAP-503-FIX-1b: the runner is held right now. */
+function demoHolding() {
+  return demoHoldPollsLeft > 0;
+}
+
+/** WP CAP-503-FIX-1b: a queued job starts (the hold ended, or none holds). */
+function startDemoJob(job) {
+  job.status = "running";
+  job.started_at = job.started_at || new Date().toISOString();
+  if (typeof job._demoTicksLeft !== "number") job._demoTicksLeft = job.type === "gc" ? 1 : 3;
+  const game = job.type === "prefill" ? findGame(job.appid) : null;
+  if (game && game.status !== "running") game.status = "running";
+}
+
+/** WP CAP-503-FIX-1b: one job poll of the hold. When it ends, the jobs
+ * paused for the device resume and the queue drains (the demo runs jobs
+ * side by side, as everywhere else in this module). */
+function tickDemoHold() {
+  if (demoHoldPollsLeft <= 0) return;
+  demoHoldPollsLeft -= 1;
+  if (demoHoldPollsLeft > 0) return;
+  demoHoldEndedAt = Date.now();
+  for (const job of jobs) {
+    if (job.status === "paused" && job.pause_reason === "client") {
+      job.pause_reason = null;
+      job.paused_at = null;
+      startDemoJob(job);
+    } else if (job.status === "queued") {
+      startDemoJob(job);
+    }
+  }
+}
+
 function readLibrarySizePreference() {
   try {
     if (typeof window === "undefined" || !window.localStorage) return DEFAULT_LIBRARY_SIZE;
@@ -495,8 +547,57 @@ function buildGames(librarySize = DEFAULT_LIBRARY_SIZE) {
   );
 }
 
-function buildJobs() {
+/** WP CAP-503-FIX-1b: the demo's client-priority hold scenario (see
+ * `DEMO_HOLD_POLLS` below): a device loads through the cache, so vault-api
+ * paused one prefill for it (an update run of Frostline Convoy: done,
+ * confirmed current, no completeness or update flag, so finishing it after
+ * the hold changes nothing showcased; its shared-depot delete is blocked
+ * only while the job is active) and a queued garbage-collection dry run
+ * waits (operator decision 2026-11-21, Weg A) on the game whose download
+ * already runs; a dry run changes nothing when it finishes. */
+function buildHoldJobs() {
   return [
+    {
+      id: 900003,
+      appid: 2010030,
+      type: "gc",
+      status: "queued",
+      created_at: isoAgo(30_000),
+      started_at: null,
+      finished_at: null,
+      updated: null,
+      up_to_date: null,
+      summary_parse_ok: null,
+      gc_execute: false,
+      paused_at: null,
+      stop_request: null,
+      log_excerpt: "[vault-api] GC for app 2010030: DRY RUN.",
+      _demoTicksLeft: 1,
+    },
+    {
+      id: 900002,
+      appid: 2010050,
+      type: "prefill",
+      status: "paused",
+      created_at: isoAgo(5 * 60_000),
+      started_at: isoAgo(4 * 60_000),
+      finished_at: null,
+      updated: null,
+      up_to_date: null,
+      summary_parse_ok: null,
+      gc_execute: null,
+      paused_at: isoAgo(90_000),
+      stop_request: null,
+      pause_reason: "client",
+      log_excerpt: "[vault-api] worker claimed job 900002\nDownloading depot 2010060 ...",
+      _demoTicksLeft: 2,
+    },
+  ];
+}
+
+function buildJobs(clientHold = false) {
+  return [
+    ...(clientHold ? buildHoldJobs() : []),
     {
       id: 900001,
       appid: 2010030,
@@ -513,6 +614,9 @@ function buildJobs() {
       stop_request: null,
       log_excerpt:
         "[vault-api] worker claimed job 900001\nDownloading depot 2010031 ...",
+      // WP CAP-503-FIX-1b: with the hold on, the operator resumed this one
+      // during it (Weg B): it runs alongside the device by choice.
+      client_override: clientHold,
       // Demo-only bookkeeping (never serialized into a response): how many
       // more GET /v1/jobs polls before this job "finishes". Call-count
       // driven rather than wall-clock so demo mode needs no timers of its
@@ -966,9 +1070,13 @@ function handleGetAbout() {
 }
 
 let games = buildGames(readLibrarySizePreference());
-let jobs = buildJobs();
+// WP CAP-503-FIX-1b: the client-priority hold scenario (see
+// `readClientHoldPreference`), counted down in job polls like _demoTicksLeft.
+let jobs = buildJobs(readClientHoldPreference());
+let demoHoldPollsLeft = jobs.some((j) => j.pause_reason === "client") ? DEMO_HOLD_POLLS : 0;
+let demoHoldEndedAt = null;
 let clients = buildClients();
-let nextJobId = 900002;
+let nextJobId = 900004;
 // Seeded in the /v1/updates section below (its constants must exist first).
 let updateCheck = null;
 
@@ -1000,20 +1108,25 @@ let updateCheck = null;
  * browser preference (`readRelayPlaytimePreference`: ON in a browser demo,
  * OFF outside a browser), so every bare-Node test still starts from the
  * unconfigured, gate-off baseline unless it asks otherwise.
- * @param {{ librarySize?: number, relayExposePlaytime?: boolean, relayExposeLastPlayed?: boolean, demoSteamAccount?: boolean }} [options]
+ * WP CAP-503-FIX-1b: `clientHold` seeds the client-priority hold scenario
+ * (two hold jobs, the hold itself); same browser-on / Node-off default.
+ * @param {{ librarySize?: number, clientHold?: boolean, relayExposePlaytime?: boolean, relayExposeLastPlayed?: boolean, demoSteamAccount?: boolean }} [options]
  */
 export function resetDemoData({
   librarySize,
+  clientHold = readClientHoldPreference(),
   relayExposePlaytime: rp = readRelayPlaytimePreference(),
   relayExposeLastPlayed: rl = false,
   demoSteamAccount: seedAccount = readRelayPlaytimePreference(),
 } = {}) {
   games = buildGames(librarySize ?? readLibrarySizePreference());
-  jobs = buildJobs();
+  jobs = buildJobs(clientHold);
+  demoHoldPollsLeft = clientHold ? DEMO_HOLD_POLLS : 0;
+  demoHoldEndedAt = null;
   clients = buildClients();
   clientNameMap = new Map();
   historySinceMs = null;
-  nextJobId = 900002;
+  nextJobId = 900004;
   updateCheck = seedDemoUpdateCheck();
   resetDemoSettings();
   resetDemoSteamRelay();
@@ -2135,6 +2248,43 @@ function jobSummary(j) {
     paused_at,
     stop_request,
     queue_position: demoQueuePosition(j),
+    // WP CAP-503-FIX-1b (schema v34): "client" for the job the demo hold
+    // paused, else "manual" while paused or pausing; null otherwise. The
+    // override is reported while the job is queued or running.
+    pause_reason: status === "paused" || stop_request === "pause" ? j.pause_reason || "manual" : null,
+    client_override: (status === "queued" || status === "running") && j.client_override === true,
+  };
+}
+
+/** WP CAP-503-FIX-1b: the demo's device loading through the cache (the
+ * online agent `workshop-pc`'s address) while the hold lasts. */
+const DEMO_HOLD_ADDR = "10.10.0.21";
+
+/** WP CAP-503-FIX-1b: `GET /v1/client-priority` (CAP-503-FIX-1a). While the
+ * hold lasts (`DEMO_HOLD_POLLS` job polls): holding, the device seen just
+ * now (the screenshot clock is frozen, so `resume_at` is stable), named like
+ * the real route (the Clients page name, `null` when none is set: the UI
+ * then shows the address). After it: not holding, the last sighting one
+ * idle gap before the end. Without the scenario: never held. */
+function handleGetClientPriority() {
+  const now = Date.now();
+  const ids = (pred) => jobs.filter(pred).map((j) => j.id).sort((a, b) => a - b);
+  const holding = demoHolding();
+  const lastSeen = holding ? now : demoHoldEndedAt === null ? null : demoHoldEndedAt - 120_000;
+  return {
+    enabled: true,
+    holding,
+    since: holding ? utcIsoSeconds(now - 90_000) : null,
+    last_client_at: lastSeen === null ? null : utcIsoSeconds(lastSeen),
+    resume_at: holding ? utcIsoSeconds(now + 120_000) : null,
+    idle_gap_seconds: 120,
+    clients: holding
+      ? [{ addr: DEMO_HOLD_ADDR, name: demoAddressName(DEMO_HOLD_ADDR).name, miss_bytes_per_second: 9_400_000 }]
+      : [],
+    paused_job_ids: ids((j) => j.status === "paused" && j.pause_reason === "client"),
+    override_job_ids: ids((j) => (j.status === "queued" || j.status === "running") && j.client_override === true),
+    restored: false,
+    runner_address_unknown: false,
   };
 }
 
@@ -2260,8 +2410,13 @@ function enqueuePrefillForAppid(appid) {
   // enqueueing sees visible progress, matching the mockup's "job start"
   // transition rather than sitting at "queued" forever (this module has no
   // real worker draining a queue).
-  job.status = "running";
-  job.started_at = job.created_at;
+  // WP CAP-503-FIX-1b: during the client-priority hold a new job waits in
+  // the queue (no job without an override is claimed); the hold's end
+  // drains it (`tickDemoHold`).
+  if (!demoHolding()) {
+    job.status = "running";
+    job.started_at = job.created_at;
+  }
   return { appid, job_id: job.id, status: job.status, deduplicated: false };
 }
 
@@ -2399,6 +2554,7 @@ function finishGcJob(job) {
 
 function tickAllJobs() {
   for (const job of jobs) advanceJob(job);
+  tickDemoHold(); // WP CAP-503-FIX-1b
 }
 
 // ---------------------------------------------------------------------
@@ -2918,12 +3074,24 @@ export async function demoRequest(method, path, { body, params } = {}) {
     if (!job) throw notFound(`Unknown job id ${id}`);
     // WP PAUSE-ALL-GC-1: a queued job of either type can be paused; a
     // running one only if it is a prefill (a running GC job is 409).
+    // WP CAP-503-FIX-1a: Pause on a job paused for a device makes it a
+    // manual pause (immediate), never a 409.
+    if (job.status === "paused" && job.pause_reason === "client") {
+      job.pause_reason = "manual";
+      return jobControlResponse(job, {
+        status: "paused",
+        outcome: "immediate",
+        detail: "Paused for a client; now paused manually and no longer resumed automatically.",
+      });
+    }
     const pausable =
       (job.status === "queued" && (job.type === "prefill" || job.type === "gc")) ||
       (job.status === "running" && job.type === "prefill");
     if (!pausable) {
       throw conflict(`Job ${id} cannot be paused from status ${job.status}`);
     }
+    job.pause_reason = "manual"; // WP CAP-503-FIX-1b: an operator's pause
+    job.client_override = false; // ends the override (CAP-503-FIX-1a)
     if (job.status === "queued") {
       // WP WEB-FEAT-5: the real API parks a queued prefill at once
       // (`outcome: "immediate"`) — nothing was running, nothing is stopped.
@@ -2948,13 +3116,21 @@ export async function demoRequest(method, path, { body, params } = {}) {
     const job = findJob(id);
     if (!job) throw notFound(`Unknown job id ${id}`);
     if (job.status !== "paused") throw conflict(`Job ${id} is not paused`);
-    job.status = "running";
+    // WP CAP-503-FIX-1b: a Resume during the hold overrides it for this job
+    // (operator decision 2026-11-21, Weg B).
+    job.pause_reason = null;
+    job.client_override = demoHolding();
     job._demoTicksLeft = 2;
-    return jobControlResponse(job, {
+    const resumed = jobControlResponse(job, {
       status: "queued",
       outcome: "resumed",
       detail: "Job resumed at the front of the queue.",
     });
+    // Back in the queue (the wire answer). During the hold the override
+    // lets the worker claim it at once (Weg B), so the demo starts it;
+    // otherwise it keeps the demo's old "back at queued" shape.
+    if (job.client_override) startDemoJob(job);
+    return resumed;
   }
 
   if (method === "POST" && (m = path.match(JOB_MOVE_RE))) {
@@ -3197,8 +3373,12 @@ export async function demoRequest(method, path, { body, params } = {}) {
       _demoTicksLeft: 1,
     };
     jobs.unshift(job);
-    job.status = "running";
-    job.started_at = job.created_at;
+    // WP CAP-503-FIX-1b: a queued GC job waits during the hold too (operator
+    // decision 2026-11-21, Weg A).
+    if (!demoHolding()) {
+      job.status = "running";
+      job.started_at = job.created_at;
+    }
 
     return {
       appid,
@@ -3267,6 +3447,9 @@ export async function demoRequest(method, path, { body, params } = {}) {
   }
   if (method === "GET" && path === "/v1/schedule") {
     return handleGetSchedule();
+  }
+  if (method === "GET" && path === "/v1/client-priority") {
+    return handleGetClientPriority();
   }
 
   if (method === "GET" && path === "/v1/steam/key") {

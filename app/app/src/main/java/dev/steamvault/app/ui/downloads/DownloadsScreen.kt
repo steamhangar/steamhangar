@@ -7,6 +7,18 @@ import dev.steamvault.app.ui.theme.VaultColors
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.TextButton
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.LayoutDirection
+import androidx.compose.ui.unit.sp
+import dev.steamvault.app.ui.theme.vaultDangerButtonBorder
+import dev.steamvault.app.ui.theme.vaultDangerButtonColors
+import dev.steamvault.app.ui.traffic.logic.HeroStatus
+import dev.steamvault.app.ui.traffic.logic.jobFigureParts
 import dev.steamvault.app.ui.downloads.logic.FailureHintView
 import dev.steamvault.app.ui.downloads.logic.NEWER_JOB_LINE
 import dev.steamvault.app.ui.downloads.logic.failureHintViewFor
@@ -36,6 +48,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -50,6 +63,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.isTraversalGroup
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
@@ -90,7 +104,9 @@ import dev.steamvault.app.ui.downloads.logic.historySubtitle
 import dev.steamvault.app.ui.downloads.logic.isHistoryCapped
 import dev.steamvault.app.ui.downloads.logic.showMoreLabel
 import dev.steamvault.app.ui.downloads.logic.showMoreText
+import dev.steamvault.app.ui.downloads.logic.ClientPriorityNotes
 import dev.steamvault.app.ui.downloads.logic.JobCardModel
+import dev.steamvault.app.ui.downloads.logic.clientPriorityNotes
 import dev.steamvault.app.ui.downloads.logic.PartitionedJobs
 import dev.steamvault.app.ui.downloads.logic.QueueMove
 import dev.steamvault.app.ui.downloads.logic.QueueRowModel
@@ -189,6 +205,12 @@ fun DownloadsScreen(
             controller.pollGamesForever()
         }
     }
+    // WP CAP-503-FIX-1b: the client-priority hold, asked only while a job is active.
+    LaunchedEffect(lifecycleOwner, controller) {
+        lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            controller.pollClientPriorityForever()
+        }
+    }
     LaunchedEffect(controller.jobs) { onJobsSnapshot(controller.jobs) }
 
     // WP D15d: statistics header + per-job speed (one poll), History filter.
@@ -231,6 +253,11 @@ fun DownloadsScreen(
         activeModels.filter { it.kind == StatusKind.VERIFY }.map { it.jobId }.toSet()
     }
     val speedLines = jobSpeedLines(statsPoll, verifyingJobIds, etaSmoother)
+    // WP CAP-503-FIX-1b: hold texts (paused for a device, pausing, runs
+    // alongside by choice, the queue waiting), from the jobs and the hold.
+    val clientNotes = remember(partition, controller.clientPriority) {
+        clientPriorityNotes(partition, controller.clientPriority)
+    }
     val queueModels = remember(partition, gamesByAppid, ownedNames) {
         partition.queued.mapIndexed { index, job -> buildQueueRowModel(job, index + 1, gamesByAppid, ownedNames) }
     }
@@ -344,6 +371,7 @@ fun DownloadsScreen(
             }
             DownloadsBody(
                 partition = partition,
+                clientNotes = clientNotes,
                 activeModels = activeModels,
                 pausedModels = pausedModels,
                 updateRows = updateRows,
@@ -368,6 +396,7 @@ fun DownloadsScreen(
 @Composable
 private fun DownloadsBody(
     partition: PartitionedJobs,
+    clientNotes: ClientPriorityNotes,
     activeModels: List<JobCardModel>,
     pausedModels: List<JobCardModel>,
     updateRows: List<UpdateRowModel>,
@@ -424,6 +453,8 @@ private fun DownloadsBody(
                 JobCard(
                     model = model,
                     speedLine = speedLines[model.jobId],
+                    clientNote = clientNotes.alongside[model.jobId],
+                    pausingNote = clientNotes.pausing[model.jobId],
                     busy = model.jobId in controller.busyJobIds,
                     onPause = { controller.pause(scope, model.jobId) },
                     onResume = { controller.resume(scope, model.jobId) },
@@ -434,6 +465,7 @@ private fun DownloadsBody(
                 JobCard(
                     model = model,
                     speedLine = null,
+                    holdNote = clientNotes.hold[model.jobId],
                     busy = model.jobId in controller.busyJobIds,
                     onPause = { controller.pause(scope, model.jobId) },
                     onResume = { controller.resume(scope, model.jobId) },
@@ -445,6 +477,9 @@ private fun DownloadsBody(
         // ---- Queue ---------------------------------------------------------
         item(key = "queue-heading") {
             SectionHead(stringResource(R.string.downloads_section_queue), queueModels.size)
+        }
+        clientNotes.queue?.let { note ->
+            item(key = "queue-hold-note") { ClientNote(note) }
         }
         if (queueModels.isEmpty()) {
             item(key = "queue-empty") { EmptyLine(stringResource(R.string.downloads_queue_empty)) }
@@ -607,18 +642,37 @@ private fun EmptyLine(text: String) {
 }
 
 /**
- * Active/Paused job card. Only [model] drives [StatusIcon]'s `kind`
- * parameter -- [busy] (client in-flight state) only ever reaches the action
+ * Active/Paused job card. Only [model] drives the status pill's icon `kind`
+ * -- [busy] (client in-flight state) only ever reaches the action
  * buttons below it, which is what keeps the icon's animation untouched by a
  * click's own busy/un-busy transition (same mechanism
  * `ui/library/logic/GameCardModel.kt`'s kdoc documents for the Library
  * grid, applied here to the one extra transient input this screen has).
+ *
+ * WP APP-DL-CARD-1 (design pass, operator report 2026-11-01; web twin
+ * `components/job-row.js` + kit.css `.kit .job`): one hierarchy on both
+ * platforms -- the title block (name as card title, mono meta) beside the
+ * status pill the Throughput card uses, then the figures (the speed line
+ * in mono with its figures bold, like the Throughput caption), the notes
+ * (each behind the web's 2 dp rule), the actions (Cancel as the web's
+ * danger button). One 12 dp rhythm between the blocks (web `gap:
+ * var(--sp-3)`), padding 16 x 12 dp (web `var(--sp-3) var(--sp-4)`; the
+ * Throughput card's 16 dp sides, so both cards' contents line up).
+ * TalkBack order = this order; the pill reads its word once.
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun JobCard(
+internal fun JobCard(
     model: JobCardModel,
     speedLine: JobSpeedLine?,
     busy: Boolean,
+    /** WP CAP-503-FIX-1b: a paused card's note when vault-api paused it for a
+     * loading device (replaces the manual-pause note). */
+    holdNote: String? = null,
+    /** WP CAP-503-FIX-1b: "Runs alongside <device> by your choice." */
+    clientNote: String? = null,
+    /** WP CAP-503-FIX-1b: the stop note while vault-api pauses it for a device. */
+    pausingNote: String? = null,
     onPause: () -> Unit,
     onResume: () -> Unit,
     onCancel: () -> Unit,
@@ -629,63 +683,74 @@ private fun JobCard(
         colors = vaultJobCardColors(),
         border = vaultJobCardBorder(held = model.mode == JobCardMode.HELD),
     ) {
-        Column(modifier = Modifier.padding(12.dp)) {
-            // WP WEB-FIX-9: the status badge centres on the name + job line
-            // block (web `.jobtop > .badge{ align-self:center }`), like the
-            // History rows; top alignment read as "the pause symbol is
-            // shifted upward".
+        Column(
+            modifier = Modifier.padding(horizontal = JOB_CARD_PADDING_H, vertical = JOB_CARD_PADDING_V),
+            verticalArrangement = Arrangement.spacedBy(JOB_CARD_GAP),
+        ) {
+            // Title block and pill (web `.job .t`). WP WEB-FIX-9: the pill
+            // centres on the name + job line block (web `align-items:center`);
+            // the name takes the free width and wraps, so a long name never
+            // pushes the pill out of the card. The title block is a traversal
+            // group, so TalkBack reads name and meta before the pill (the pill
+            // centred on the block would otherwise sort between them).
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
+                horizontalArrangement = Arrangement.spacedBy(JOB_CARD_GAP),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Column {
-                    Text(model.name, style = MaterialTheme.typography.bodyLarge)
+                Column(modifier = Modifier.weight(1f).semantics { isTraversalGroup = true }) {
+                    Text(model.name, style = jobCardTitleStyle())
                     Text(
                         stringResource(R.string.downloads_job_subtitle, model.jobId, model.appid),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = JobCardMetaStyle,
+                        color = VaultColors.Dim,
                     )
                 }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    StatusIcon(kind = model.kind, size = StatusIconSize.SMALL)
-                    Text(model.statusWord, style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(start = 4.dp))
-                }
+                StatusPill(HeroStatus(model.kind, model.statusWord))
             }
 
             // WP D15d (D13 SPEED-1): the job's speed at the cache.
             // WP JOB-SIZE-1: the web's tooltip (jobSpeedNote) is read by
-            // TalkBack after the line.
+            // TalkBack after the line. WP APP-DL-CARD-1: web `.job .m2`
+            // (mono, Dim) with the figures bold in Text (`.m2 b`).
             if (speedLine != null) {
                 Text(
-                    text = speedLine.text,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    text = partsText(jobFigureParts(speedLine.text)),
+                    style = JobCardFigureStyle,
+                    color = VaultColors.Dim,
                     modifier = Modifier
-                        .padding(top = 6.dp)
+                        .fillMaxWidth()
                         .semantics { contentDescription = "${speedLine.text}. ${speedLine.note}" },
                 )
             }
 
+            // Web order: the hold note takes the speed line's place, then the
+            // client note, then the stop note (components/job-row.js).
             if (model.mode == JobCardMode.HELD) {
                 Text(
-                    text = stringResource(
+                    text = holdNote ?: stringResource(
                         if (model.gcHold) R.string.downloads_paused_hold_note_gc else R.string.downloads_paused_hold_note,
                     ),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(top = 6.dp),
+                    modifier = Modifier.fillMaxWidth().jobNoteRule(),
                 )
             }
 
+            if (clientNote != null) ClientNote(clientNote, Modifier.fillMaxWidth().jobNoteRule())
+
             val action = model.action
             if (action.pausing) {
-                StopNote(stringResource(R.string.downloads_stopnote_pausing))
+                StopNote(pausingNote ?: stringResource(R.string.downloads_stopnote_pausing))
             } else if (action.cancelling) {
                 StopNote(stringResource(R.string.downloads_stopnote_cancelling))
             }
 
-            Row(modifier = Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            // Web `.job .acts` (flex-wrap): the buttons wrap at large font scales.
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
                 if (action.showResume) {
                     Button(onClick = onResume, enabled = !busy) { Text(stringResource(R.string.downloads_action_resume)) }
                 }
@@ -701,7 +766,14 @@ private fun JobCard(
                     }
                 }
                 if (action.showCancel) {
-                    OutlinedButton(onClick = onCancel, enabled = action.cancelEnabled && !busy) {
+                    val cancelEnabled = action.cancelEnabled && !busy
+                    // Web `ghost danger` (WP APP-DL-CARD-1).
+                    OutlinedButton(
+                        onClick = onCancel,
+                        enabled = cancelEnabled,
+                        colors = vaultDangerButtonColors(),
+                        border = vaultDangerButtonBorder(enabled = cancelEnabled),
+                    ) {
                         Text(
                             if (action.cancelling) {
                                 stringResource(R.string.downloads_action_cancelling)
@@ -716,13 +788,63 @@ private fun JobCard(
     }
 }
 
+/** WP APP-DL-CARD-1: web `.kit .job{ padding:var(--sp-3) var(--sp-4); gap:var(--sp-3) }`, px = dp. */
+internal val JOB_CARD_PADDING_H = 16.dp
+internal val JOB_CARD_PADDING_V = 12.dp
+internal val JOB_CARD_GAP = 12.dp
+
+/** Web `.job .nm{ font-size:var(--fs-4); font-weight:500 }`: 15 sp Medium, like the
+ * Clients card title (ClientCardViews.kt). */
+@Composable
+@ReadOnlyComposable
+private fun jobCardTitleStyle(): TextStyle = MaterialTheme.typography.titleMedium.copy(fontSize = 15.sp, fontWeight = FontWeight.Medium)
+
+/** Web `.job .meta{ font:var(--fs-1) var(--mono) }`: mono, 11 sp, regular. */
+private val JobCardMetaStyle = TextStyle(fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Normal, fontSize = 11.sp)
+
+/** Web `.job .m2{ font:var(--fs-2) var(--mono) }`: mono, 12 sp, regular (figures Medium via [partsText]). */
+private val JobCardFigureStyle = TextStyle(fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Normal, fontSize = 12.sp)
+
+/**
+ * WP APP-DL-CARD-1: web `.kit .job .holdnote, .kit .job .stopnote{
+ * border-left:2px solid var(--line); padding-left:var(--sp-2) }` -- the
+ * card's notes stand behind a 2 dp rule on the start edge (one hairline,
+ * DESIGN.md "one separator per level"). The queue's note has none (web:
+ * the rule is scoped to `.job`).
+ */
+private fun Modifier.jobNoteRule(): Modifier = this
+    .drawBehind {
+        val w = JOB_NOTE_RULE.toPx()
+        val x = if (layoutDirection == LayoutDirection.Ltr) w / 2 else size.width - w / 2
+        drawLine(VaultColors.Line, Offset(x, 0f), Offset(x, size.height), strokeWidth = w)
+    }
+    .padding(start = JOB_NOTE_INSET)
+
+/** The note rule's width and the text inset behind it (web 2px, `--sp-2`). */
+internal val JOB_NOTE_RULE = 2.dp
+internal val JOB_NOTE_INSET = 8.dp
+
+/** WP CAP-503-FIX-1b: a client-priority note (web `.hint.holdnote`): the
+ * queue waiting for a device, or a job running alongside one by choice. */
+@Composable
+private fun ClientNote(text: String, modifier: Modifier = Modifier) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = modifier,
+    )
+}
+
+/** The pause / cancel stop note (web `.hint.stopnote`: Dim behind the card's
+ * note rule; WP APP-DL-CARD-1, was the error colour). */
 @Composable
 private fun StopNote(text: String) {
     Text(
         text = text,
         style = MaterialTheme.typography.bodySmall,
-        color = MaterialTheme.colorScheme.error,
-        modifier = Modifier.padding(top = 6.dp),
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.fillMaxWidth().jobNoteRule(),
     )
 }
 

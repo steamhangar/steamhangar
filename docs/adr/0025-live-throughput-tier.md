@@ -50,3 +50,32 @@ freshness. Reading faster all the time would add idle load, and persisting
   bucket), so memory is bounded.
 - Android gets the same series after the web part; the contract is the
   endpoint, not the ring.
+
+## Addendum 2026-11-21 — the summary tiles and job figures read the ring too (WP APP-DL-STATS-1b)
+
+Operator decision 2026-11-21 (Weg A, roadmap APP-DL-STATS-1, open
+decision DL-STATS-ZERO). GRAPH-RECENT-1 (rc21) let the graph and the "now"
+figures read the ring but kept the range summary tiles swept. While a
+prefill started after an idle hour, the Downloads page then showed the live
+graph and "Loading now" at ~13 MB/s next to "0 MB/s · 0 GB loaded so far",
+Served 0 and Peak 0 until the next sweep (operator screenshot 2026-11-01).
+
+- `GET /v1/throughput`'s summary byte figures and each job's
+  `bytes_since_start` now include the unswept span: per bucket the ring
+  reaches, the larger of the swept row and the ring's totals stands
+  (`prefer_ring`), swapped into the swept total (`vault_api/traffic_stitch.py`;
+  a job's "so far" decides on its own depot bytes the same way). Exactly
+  once comes from ONE source per bucket (each source holds a subset of the
+  bucket's lines, the larger stands, nothing is added on top); the single
+  read transaction keeps the swept total and the swept rows subtracted from
+  it consistent, so a sweep committing in between cannot unbalance the
+  subtraction. A figure can be short until the next sweep reads a bucket,
+  never doubled. Request counts and `active_clients` stay swept.
+- A job's `bytes_per_second` is the ring's "current speed" window on its
+  counted depots (the read "Loading now" uses).
+- The ring keeps served bytes per address and depot per 5-minute bucket for
+  its whole span, bounded at 4096 entries (oldest bucket dropped first;
+  such a bucket keeps its swept value in the job figures).
+- Without a fresh feed or before the tailer has read the log, the swept
+  figures stand alone, as before. The ring is still memory only.
+

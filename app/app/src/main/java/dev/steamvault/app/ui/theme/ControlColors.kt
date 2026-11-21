@@ -7,6 +7,8 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.BottomSheetDefaults
+import androidx.compose.material3.ButtonColors
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CardColors
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -176,6 +178,28 @@ fun vaultJobCardBorder(held: Boolean): BorderStroke =
     BorderStroke(1.dp, if (held) VaultColors.LineSoft else srgbMix(VaultColors.Line, VaultColors.StatusRun, 0.40f))
 
 /**
+ * WP APP-DL-CARD-1: a danger action on an outlined button, web `.kit
+ * .btn.danger` (the job card's Cancel, `ghost danger`): transparent, label
+ * in --danger, edge `color-mix(in srgb, var(--danger) 45%, var(--line))`.
+ * Disabled follows the web `.btn:disabled{ opacity:.45 }` on label and edge.
+ */
+@Composable
+fun vaultDangerButtonColors(): ButtonColors =
+    ButtonDefaults.outlinedButtonColors(
+        contentColor = VaultColors.StatusDanger,
+        disabledContentColor = VaultColors.StatusDanger.copy(alpha = VAULT_DISABLED_ALPHA),
+    )
+
+/** The edge of [vaultDangerButtonColors]' button (web `.kit .btn.danger` border-color). */
+fun vaultDangerButtonBorder(enabled: Boolean): BorderStroke {
+    val edge = srgbMix(VaultColors.Line, VaultColors.StatusDanger, 0.45f)
+    return BorderStroke(1.dp, if (enabled) edge else edge.copy(alpha = VAULT_DISABLED_ALPHA))
+}
+
+/** Web `.btn:disabled{ opacity:.45 }`. */
+const val VAULT_DISABLED_ALPHA = 0.45f
+
+/**
  * A panel card on --surface: the Clients sheet row (web `.jobcard`,
  * components/clients-sheet.js) and the History failure hint (web
  * `.kit .hpanel`, the panel that holds `.failhint`). On its wide layout the
@@ -280,15 +304,21 @@ fun vaultMenuBorder(): BorderStroke = BorderStroke(1.dp, VaultColors.Line)
 
 /**
  * Switch colours, web `.kit.view-settings .sw`: off = --raised-2 track,
- * --line edge, --dim knob (`.sw::after`); on = --accent-glow track, --accent
- * edge and knob (`.sw[aria-checked="true"]`).
+ * --line-strong edge, --dim knob (`.sw::after`); on = --accent-glow track,
+ * --accent edge and knob (`.sw[aria-checked="true"]`).
+ *
+ * WP APP-EXPERT-SWITCH-1: the off track is only 1.40:1 on --bg, so the edge
+ * is what tells the control apart; it is a control identified by its border
+ * (DESIGN.md "Contrast floors") and takes [VaultColors.LineStrong], 3.83:1
+ * on Bg and 3.45:1 on Surface (the old --line edge was 1.52:1 and the off
+ * switch read as disabled). The --dim knob is 5.06:1 on the --raised-2 track.
  */
 @Composable
 fun vaultSwitchColors(): SwitchColors =
     SwitchDefaults.colors(
         uncheckedThumbColor = VaultColors.Dim,
         uncheckedTrackColor = VaultColors.Raised2,
-        uncheckedBorderColor = VaultColors.Line,
+        uncheckedBorderColor = VaultColors.LineStrong,
         checkedThumbColor = VaultColors.Accent,
         checkedTrackColor = VaultColors.AccentGlow,
         checkedBorderColor = VaultColors.Accent,

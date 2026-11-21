@@ -5,6 +5,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import dev.steamvault.app.net.error.VaultApiError
+import dev.steamvault.app.net.model.ClientPriorityOut
 import dev.steamvault.app.net.model.GameSummary
 import dev.steamvault.app.net.model.JobSummary
 import dev.steamvault.app.net.model.ScheduleOut
@@ -16,6 +17,7 @@ import dev.steamvault.app.repo.JobsRepository
 import dev.steamvault.app.repo.ScheduleRepository
 import dev.steamvault.app.repo.SettingsRepository
 import dev.steamvault.app.ui.downloads.logic.BULK_TOAST_MS
+import dev.steamvault.app.ui.downloads.logic.CLIENT_PRIORITY_POLL_MS
 import dev.steamvault.app.ui.downloads.logic.BulkKind
 import dev.steamvault.app.ui.downloads.logic.QueueMove
 import dev.steamvault.app.ui.downloads.logic.TOAST_MS
@@ -39,6 +41,10 @@ import dev.steamvault.app.ui.downloads.logic.runBulkResume
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+
+/** WP CAP-503-FIX-1b: how often an idle hold poll looks for an active job
+ * (no request is made while nothing is active). */
+private const val IDLE_HOLD_CHECK_MS = 1000L
 
 /**
  * Everything the Downloads screen needs (WP 4b.5 brief) — same thin-glue
@@ -83,6 +89,12 @@ class DownloadsController(
     var loadError by mutableStateOf<String?>(null)
         private set
     var toast by mutableStateOf<String?>(null)
+        private set
+
+    /** WP CAP-503-FIX-1b: the last `GET /v1/client-priority` answer while a
+     * job is queued, running or paused; `null` = not known, nothing active,
+     * or an older server without the route (no hold texts then). */
+    var clientPriority by mutableStateOf<ClientPriorityOut?>(null)
         private set
 
     /** How long the screen shows [toast]; the aggregate bulk toast may carry
@@ -173,6 +185,39 @@ class DownloadsController(
         while (true) {
             refreshGamesOnce()
             delay(PollingIntervals.GAMES_MS)
+        }
+    }
+
+    /** WP CAP-503-FIX-1b (web `holdPoll`): the client-priority hold every
+     * 5 s, asked only while a job is active ([refreshClientPriorityOnce]).
+     * An idle tick asks nothing, so it looks again after a second: a job
+     * that appears (the first jobs poll of a visit included) gets its hold
+     * text at once, like the web's nudge when a job becomes active. */
+    suspend fun pollClientPriorityForever() {
+        try {
+            while (true) {
+                refreshClientPriorityOnce()
+                delay(if (PollingIntervals.hasActiveJob(jobs)) CLIENT_PRIORITY_POLL_MS else IDLE_HOLD_CHECK_MS)
+            }
+        } finally {
+            // The screen stopped (left or backgrounded): no stale hold text
+            // when it starts again before the next read.
+            clientPriority = null
+        }
+    }
+
+    /** One hold read: nothing is asked while no job is queued, running or
+     * paused (nothing can be held or waiting then); a failed read (an older
+     * server's `404` included) shows no hold text rather than a stale one. */
+    suspend fun refreshClientPriorityOnce() {
+        if (!PollingIntervals.hasActiveJob(jobs)) {
+            clientPriority = null
+            return
+        }
+        clientPriority = try {
+            jobsRepository.clientPriority()
+        } catch (_: VaultApiError) {
+            null
         }
     }
 

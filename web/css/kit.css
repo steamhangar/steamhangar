@@ -523,6 +523,10 @@
 .kit .graph .glegend i{ width:8px; height:8px; border-radius:50%; background:var(--accent); flex:none; }
 .kit .graph .glegend .srv i{ background:var(--ok); }
 .kit .graph .ax{ display:flex; justify-content:space-between; gap:var(--sp-2); font:var(--fs-1) var(--mono); color:var(--dim); margin-top:var(--sp-1); }
+/* WP APP-DL-STATS-1: the middle caption ("highest ... (1 day avg)") centres when it wraps (Android twin: GraphAxisCaptions). */
+.kit .graph .ax span:nth-child(2):not(:last-child){ text-align:center; }
+/* WP APP-DL-STATS-1: the edge captions keep one line at their own width (Android GraphAxisCaptions: maxLines 1, no wrap). */
+.kit .graph .ax span:first-child, .kit .graph .ax span:last-child{ white-space:nowrap; flex:none; }
 .kit .mini{
   grid-column:1; display:flex; gap:var(--sp-2) var(--sp-5); flex-wrap:wrap; font-size:var(--fs-2); color:var(--dim);
   border-top:1px solid var(--line-soft); padding-top:var(--sp-3);
@@ -547,19 +551,28 @@
 .kit .sechd .hacts{ display:flex; align-items:center; justify-content:flex-end; gap:var(--sp-2); flex-wrap:wrap; min-width:0; }
 .kit .dl-updates-acts{ display:flex; gap:var(--sp-2); }
 
-/* active job card; the progress bar exists only with real progress data */
+/* active job card; the progress bar exists only with real progress data.
+   WP APP-DL-CARD-1 (design pass, Android twin JobCard): title (name in
+   --fs-4, the card-title role, over the mono meta) beside the status pill,
+   then the figures (speed line, figures in bold like the Throughput card's
+   caption), the notes, the actions; one --sp-3 rhythm between them and
+   the card padding on the scale (16 px sides, the Android column inset).
+   Secondary figures that are not the live ring (averages, peaks, totals,
+   the job's speed line) are bold --text in a --dim line, not the accent,
+   like `.hcap b` (accent = the live ring). */
 .kit .job{
   background:var(--raised); border:1px solid color-mix(in srgb, var(--run) 40%, var(--line));
-  border-radius:var(--r-m); padding:var(--sp-3) 14px; display:grid; gap:10px; min-width:0;
+  border-radius:var(--r-m); padding:var(--sp-3) var(--sp-4); display:grid; gap:var(--sp-3); min-width:0;
 }
 .kit .job.held{ border-color:var(--line-soft); }
-.kit .job .t{ display:flex; justify-content:space-between; gap:10px; align-items:center; }
+.kit .job .t{ display:flex; justify-content:space-between; gap:var(--sp-3); align-items:center; }
 .kit .job .t > div{ min-width:0; }
-.kit .job .nm{ font-weight:500; overflow-wrap:anywhere; }
+.kit .job .nm{ font-size:var(--fs-4); font-weight:500; overflow-wrap:anywhere; }
 .kit .job .meta{ font:var(--fs-1) var(--mono); color:var(--dim); }
 .kit .bar{ height:6px; border-radius:999px; background:var(--raised-2); overflow:hidden; }
 .kit .bar i{ display:block; height:100%; background:var(--accent); }
 .kit .job .m2{ margin:0; font:var(--fs-2) var(--mono); color:var(--dim); overflow-wrap:anywhere; }
+.kit .job .m2 b{ color:var(--text); font-weight:500; }
 .kit .job .holdnote, .kit .job .stopnote{ border-left:2px solid var(--line); padding-left:var(--sp-2); }
 .kit .job .acts{ display:flex; gap:var(--sp-2); flex-wrap:wrap; }
 
@@ -689,17 +702,19 @@
 .kit.view-settings .snav-item[aria-current="true"] .snav-state{ color:var(--accent); opacity:.8; }
 .kit.view-settings .dot{ width:7px; height:7px; border-radius:50%; background:var(--run); flex:none; display:inline-block; }
 
-/* "Show expert settings" row with the small switch. */
+/* "Show expert settings" row with the small switch. The off switch's edge
+   is --line-strong: its --raised-2 track is only 1.40:1 on --bg, so it is a
+   control identified by its border (DESIGN.md, WP APP-EXPERT-SWITCH-1). */
 .kit.view-settings .exp{
   margin-top:14px; padding:14px var(--sp-3) 0; border-top:1px solid var(--line-soft);
   display:flex; align-items:center; gap:10px; color:var(--dim); font-size:var(--fs-3);
 }
-.kit.view-settings .exp .tx{ flex:1; min-width:0; line-height:1.3; }
+.kit.view-settings .exp .tx{ flex:1; min-width:0; line-height:1.3; cursor:pointer; }
 .kit.view-settings .exp .ttl{ display:block; }
 .kit.view-settings .exp small{ display:block; color:var(--dim-2); font-size:var(--fs-1); margin-top:2px; }
 .kit.view-settings .settings-panel > .exp{ margin-top:0; padding-inline:0; }
 .kit.view-settings .sw{
-  width:36px; height:20px; border-radius:999px; background:var(--raised-2); border:1px solid var(--line);
+  width:36px; height:20px; border-radius:999px; background:var(--raised-2); border:1px solid var(--line-strong);
   position:relative; padding:0; flex:none; cursor:pointer;
 }
 .kit.view-settings .sw::after{

@@ -358,6 +358,10 @@ export const api = {
   patchSettings: (body, { confirmRisky = false } = {}) =>
     request("PATCH", "/v1/settings", { body, params: confirmRisky ? { confirm_risky: "true" } : undefined }),
   schedule: () => request("GET", "/v1/schedule"),
+  // WP CAP-503-FIX-1b: whether the prefill runner is held for a loading
+  // device (CAP-503-FIX-1a). Polled by the Downloads view while a job is
+  // active; read-only.
+  clientPriority: () => request("GET", "/v1/client-priority"),
   // WP UPD-2: the always-on update check (WP UPD-1). No body; never starts a
   // download.
   checkUpdates: () => request("POST", "/v1/updates/check"),

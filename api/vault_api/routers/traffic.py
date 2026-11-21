@@ -22,8 +22,23 @@ now" and the runner flag, all over the one live "now" window the Clients
 page's ``live_now`` uses) next to the swept ``current`` it keeps for older
 clients, and ``/v1/throughput/series`` stitches the ring into its newest 1-
 and 5-minute buckets (``1h``/``6h``/``24h``), so the graph shows the minutes
-since the last sweep and agrees with the header. The range's summary tiles
-(served, average, peak, hit rate) stay swept, as in the live view.
+since the last sweep and agrees with the header. (Until rc23 the range's
+summary tiles stayed swept; see APP-DL-STATS-1b below.)
+
+WP APP-DL-STATS-1b (operator decision 2026-11-21, Weg A; reverses the
+GRAPH-RECENT-1 rule "the summary tiles stay swept"): the summary's byte
+figures (served, HIT / MISS, internet, the runner's share, peak and active
+buckets, so average) and each job's ``bytes_per_second`` and
+``bytes_since_start`` include the span the sweep has not read yet, from the
+ring, by the series' rule: per bucket ONE source, the larger
+(``live_tier.prefer_ring`` for the summary; for a job's "so far" the larger
+of its own swept and ring bytes, so it never goes below the swept value),
+the swept total and the swept bucket rows from one SQLite snapshot
+(``vault_api/traffic_stitch.py``). A job's speed is the
+ring's "current speed" window on its counted depots (the read "Loading now"
+uses), not the swept 5-10 minute window. Request counts (hits, misses,
+errors) and ``active_clients`` stay swept. Without a fresh feed, or before
+the tailer has read the log once, every figure is swept as before.
 
 WP NOW-LOADING-1: ``now.loading_sources`` (``/v1/throughput``) and
 ``loading_sources`` (``/v1/throughput/live``, same rows) say WHAT loads in
@@ -127,6 +142,7 @@ from vault_api import (
     peer_hops,
     runner_identity,
     traffic,
+    traffic_stitch,
 )
 from vault_api.auth import require_api_key
 from vault_api.config import Settings
@@ -702,13 +718,16 @@ def _job_throughput(
     expect: ExpectFn | None = None,
     figure_of: FigureFn | None = None,
     runner: traffic.Scope | None = None,
+    counts: list["_JobCount"] | None = None,
 ) -> list[JobThroughputOut]:
     """``expect`` (WP JOB-SIZE-1) answers the expected depots of an app the
     vault has not mapped yet, ``figure_of`` the stored completeness figure of
     a mapped one (for ``remaining_bytes``); ``runner`` scopes the job's own
     progress to the prefill runner's rows (``None``: every address, tests of
     older callers). ``None`` callables leave their fields at the
-    pre-JOB-SIZE-1 defaults. The ETA speed is filled in by ``_with_eta``."""
+    pre-JOB-SIZE-1 defaults. The ETA speed is filled in by ``_with_eta``.
+    ``counts`` (WP APP-DL-STATS-1b) collects what each job counts (depots,
+    scope, start bucket) for the ring stitch (``_jobs_with_ring``)."""
     rows = conn.execute(
         "SELECT id, appid, started_at FROM jobs WHERE status = ? AND type = ? ORDER BY id",
         (STATUS_RUNNING, JOB_TYPE_PREFILL),
@@ -752,6 +771,21 @@ def _job_throughput(
                     / window.seconds
                 )
             started = parse_utc_iso(started_at) if isinstance(started_at, str) else None
+            if counts is not None:
+                since_tier = _since_tier(now, started) if started is not None else None
+                counts.append(
+                    _JobCount(
+                        job_id=int(row["id"]),
+                        depots=tuple(counted),
+                        runner_only=expectation is not None,
+                        tier=since_tier,
+                        start_bucket=(
+                            traffic.bucket_iso(started, since_tier)
+                            if started is not None and since_tier is not None
+                            else None
+                        ),
+                    )
+                )
             if started is not None:
                 tier = _since_tier(now, started)
                 start_bucket = traffic.bucket_iso(started, tier)
@@ -792,17 +826,156 @@ def _job_throughput(
     return result
 
 
+@dataclass(frozen=True)
+class _JobCount:
+    """WP APP-DL-STATS-1b: what a running job's figures count, for the ring
+    stitch: the counted depots, whether only the runner's rows count (a first
+    download's expected depots), and the tier and bucket ``bytes_since_start``
+    starts at (``None`` without a start time)."""
+
+    job_id: int
+    depots: tuple[int, ...]
+    runner_only: bool
+    tier: str | None
+    start_bucket: str | None
+
+
+@dataclass(frozen=True)
+class _StitchRows:
+    """WP APP-DL-STATS-1b: the swept side of the stitch, read in ONE snapshot
+    with the range summary (``traffic.read_snapshot``)."""
+
+    #: The summary's unit buckets the ring reaches, by start epoch.
+    units: dict[int, traffic_stitch.PersistedBucket]
+    #: Per job: swept bytes on its depots since its start bucket...
+    job_since: dict[int, int]
+    #: ...and per 5-minute bucket the ring reaches.
+    job_buckets: dict[int, dict[int, int]]
+
+
+def _epoch_keyed(rows: dict[str, traffic.Totals]) -> dict[int, traffic.Totals]:
+    out: dict[int, traffic.Totals] = {}
+    for iso, totals in rows.items():
+        when = live_tier.minute_epoch(iso)
+        if when is not None:
+            out[when] = totals
+    return out
+
+
+def _stitch_rows(
+    conn: sqlite3.Connection,
+    spec: traffic.RangeSpec,
+    now: datetime,
+    ring_seconds: int,
+    runner: traffic.Scope,
+    counts: list[_JobCount],
+) -> _StitchRows:
+    """The swept rows the ring stitch needs, for the buckets the ring can
+    reach (``ring_seconds`` back). Call inside the summary's snapshot."""
+    unit = traffic.peak_unit_seconds(spec.tier)
+    unit_tier = traffic.TIER_1M if unit == traffic.TIER_SECONDS[traffic.TIER_1M] else traffic.TIER_5M
+    reach = now - timedelta(seconds=ring_seconds)
+    first_unit = traffic.bucket_iso(reach, unit_tier)
+    first_five = traffic.bucket_iso(reach, traffic.TIER_5M)
+    unit_spec = traffic.RangeSpec(
+        name="stitch",
+        tier=unit_tier,
+        bucket_seconds=unit,
+        start=first_unit,
+        end=traffic.bucket_iso(now, unit_tier),
+    )
+    all_rows = _epoch_keyed(traffic.server_bucket_rows(conn, unit_tier, first_unit))
+    runner_rows = _epoch_keyed(traffic.scoped_bucket_totals(conn, unit_spec, runner))
+    units = {
+        when: traffic_stitch.PersistedBucket(
+            all=all_rows.get(when, traffic.Totals()),
+            runner=runner_rows.get(when, traffic.Totals()),
+        )
+        for when in set(all_rows) | set(runner_rows)
+    }
+    job_since: dict[int, int] = {}
+    job_buckets: dict[int, dict[int, int]] = {}
+    for count in counts:
+        if count.start_bucket is None or count.tier is None or not count.depots:
+            continue
+        scope = runner if count.runner_only else None
+        depots = list(count.depots)
+        job_since[count.job_id] = traffic.depots_bytes_since(
+            conn, depots, count.tier, count.start_bucket, scope
+        )
+        by_bucket: dict[int, int] = {}
+        for iso, size in traffic.depots_bytes_by_bucket(
+            conn, depots, traffic.TIER_5M, first_five, scope
+        ).items():
+            when = live_tier.minute_epoch(iso)
+            if when is not None:
+                by_bucket[when] = size
+        job_buckets[count.job_id] = by_bucket
+    return _StitchRows(units=units, job_since=job_since, job_buckets=job_buckets)
+
+
+def _jobs_with_ring(
+    jobs: list[JobThroughputOut],
+    counts: list[_JobCount],
+    rows: _StitchRows,
+    view: live_tier.StitchView,
+    now_view: live_tier.NowView,
+    is_runner: Callable[[str, str], bool],
+) -> list[JobThroughputOut]:
+    """WP APP-DL-STATS-1b: each job's speed from the ring's "current speed"
+    window on its counted depots (the same read as "Loading now", never
+    diluted by minutes before the job started) and its "loaded so far" with
+    the unswept 5-minute buckets stitched in (``traffic_stitch``). A first
+    download's preview remainder follows the stitched "so far"."""
+    by_id = {count.job_id: count for count in counts}
+    out: list[JobThroughputOut] = []
+    for job in jobs:
+        count = by_id.get(job.job_id)
+        if count is None or not count.depots:
+            out.append(job)
+            continue
+        update: dict[str, object] = {
+            "bytes_per_second": traffic_stitch.job_ring_rate(
+                now_view, count.depots, count.runner_only
+            )
+        }
+        start_epoch = (
+            live_tier.minute_epoch(count.start_bucket) if count.start_bucket is not None else None
+        )
+        if start_epoch is not None and count.job_id in rows.job_since:
+            since = traffic_stitch.stitch_job_since(
+                rows.job_since[count.job_id],
+                rows.job_buckets.get(count.job_id, {}),
+                view,
+                count.depots,
+                count.runner_only,
+                is_runner,
+                start_epoch,
+            )
+            update["bytes_since_start"] = since
+            if job.remaining_source == REMAINING_PREVIEW and job.expected_download_bytes is not None:
+                update["remaining_bytes"] = max(0, job.expected_download_bytes - since)
+        out.append(job.model_copy(update=update))
+    return out
+
+
 def _with_eta(
     jobs: list[JobThroughputOut],
     live: LiveCurrentOut | None,
     window: traffic.CurrentWindow | None,
+    ring_jobs: frozenset[int] = frozenset(),
 ) -> list[JobThroughputOut]:
     """WP JOB-SIZE-1: the ETA speed of each job with a remainder.
 
     ``live`` (the ring's runner speed) belongs to the running prefill job:
     the runner loads one job at a time, the oldest running one when a crash
-    ever left two (``_running_prefill_job``). Without it, the job's swept
-    figure is used only when its window started at or after the job did.
+    ever left two (``_running_prefill_job``). For any other job:
+    ``ring_jobs`` (WP APP-DL-STATS-1b) are the jobs whose
+    ``bytes_per_second`` came from the ring's "current speed" window, never
+    diluted, so a ``preview`` remainder divides by it (source ``live``);
+    otherwise (and always for a ``completeness`` remainder, whose MISS speed
+    stays swept) the job's swept figure is used only when its window started
+    at or after the job did.
     """
     running_id = min((job.job_id for job in jobs), default=None)
     window_start = parse_utc_iso(window.start) if window is not None else None
@@ -815,6 +988,9 @@ def _with_eta(
             pass
         elif live is not None and job.job_id == running_id:
             rate = live.runner_bytes_per_second if preview else live.runner_miss_bytes_per_second
+            source = "live"
+        elif preview and job.job_id in ring_jobs and job.bytes_per_second is not None:
+            rate = job.bytes_per_second
             source = "live"
         else:
             started = parse_utc_iso(job.started_at) if job.started_at else None
@@ -883,12 +1059,30 @@ def get_throughput(
         runner_now: bool | None = None
         summary: SummaryOut | None = None
         now_out: ThroughputNowOut | None = None
+        swept: traffic.ServerSummary | None = None
+        ring_jobs: frozenset[int] = frozenset()
+        swept_runner = traffic.Totals()
+        stitch_rows: _StitchRows | None = None
+        counts: list[_JobCount] = []
+        jobs = _job_throughput(
+            conn,
+            window,
+            now,
+            feed_on,
+            settings.manifest_oracle_enabled,
+            _job_expectation(request, settings),
+            _job_figure(settings),
+            runner,
+            counts,
+        )
         if feed_on:
-            summary = _summary(
-                traffic.server_summary(conn, spec, clients),
-                traffic.scoped_totals(conn, spec.tier, spec.start, runner),
-                spec.tier,
-            )
+            # WP APP-DL-STATS-1b: the swept totals and the rows the ring
+            # stitch subtracts from them, from one snapshot.
+            with traffic.read_snapshot(conn):
+                swept = traffic.server_summary(conn, spec, clients)
+                swept_runner = traffic.scoped_totals(conn, spec.tier, spec.start, runner)
+                if window is not None:
+                    stitch_rows = _stitch_rows(conn, spec, now, ring.ring_seconds, runner, counts)
             if window is not None:
                 runner_window = traffic.scoped_totals(
                     conn, traffic.TIER_5M, window.start, runner
@@ -905,20 +1099,23 @@ def get_throughput(
                 )
                 active_now = len(traffic.active_addrs(conn, now, minutes, clients))
                 runner_now = bool(traffic.active_addrs(conn, now, minutes, runner))
-        jobs = _job_throughput(
-            conn,
-            window,
-            now,
-            feed_on,
-            settings.manifest_oracle_enabled,
-            _job_expectation(request, settings),
-            _job_figure(settings),
-            runner,
-        )
     # The ring is read after the connection is closed: tailing the log never
     # holds SQLite open.
     if feed_on and window is not None:
-        now_out = _ring_now(ring, settings, now, windows, open_db)
+        now_out, now_view = _ring_now(ring, settings, now, windows, open_db)
+        # WP APP-DL-STATS-1b: the minutes the sweep has not read, from the
+        # ring, into the summary tiles and the job figures (traffic_stitch).
+        is_runner = _runner_test(windows)
+        view = ring.stitch_view(now, traffic.peak_unit_seconds(spec.tier), is_runner)
+        if view.read and stitch_rows is not None and swept is not None:
+            start_epoch = live_tier.minute_epoch(spec.start) if spec.start is not None else None
+            swept, swept_runner, _replaced = traffic_stitch.stitch_summary(
+                swept, swept_runner, stitch_rows.units, view.units, start_epoch
+            )
+            jobs = _jobs_with_ring(jobs, counts, stitch_rows, view, now_view, is_runner)
+            ring_jobs = frozenset(count.job_id for count in counts if count.depots)
+    if swept is not None:
+        summary = _summary(swept, swept_runner, spec.tier)
     return ThroughputOut(
         event_feed=feed,
         range=range,
@@ -930,7 +1127,7 @@ def get_throughput(
         active_clients_now=active_now,
         runner_active_now=runner_now,
         summary=summary,
-        jobs=_with_eta(jobs, now_out.current if now_out is not None else None, window),
+        jobs=_with_eta(jobs, now_out.current if now_out is not None else None, window, ring_jobs),
         now=now_out,
     )
 
@@ -969,21 +1166,25 @@ def _ring_now(
     now: datetime,
     windows: tuple[runner_identity.RunnerWindow, ...],
     open_db: DbOpener,
-) -> ThroughputNowOut:
-    """Arm and tail the live tier, then read the "now" figures from it."""
+) -> tuple[ThroughputNowOut, live_tier.NowView]:
+    """Arm and tail the live tier, then read the "now" figures from it
+    (and the read itself, for the job speeds, WP APP-DL-STATS-1b)."""
     ring.touch(now)
     ring.refresh(settings.event_log_path, now)
     # One read of the window for every figure (WP NOW-LOADING-1): speed,
     # counts (the Clients page's rule) and the per-source rows agree.
     view = ring.now_view(now, _runner_test(windows))
     sources = _loading_sources(open_db, settings, view, now)
-    return ThroughputNowOut(
-        current=_live_current_out(view.current),
-        active_clients=_loading_device_count(sources),
-        runner_active=live_tier.loading_counts(view.activity)[1],
-        window_seconds=view.current.window_seconds,
-        live_since=ring.covered_from(),
-        loading_sources=sources,
+    return (
+        ThroughputNowOut(
+            current=_live_current_out(view.current),
+            active_clients=_loading_device_count(sources),
+            runner_active=live_tier.loading_counts(view.activity)[1],
+            window_seconds=view.current.window_seconds,
+            live_since=ring.covered_from(),
+            loading_sources=sources,
+        ),
+        view,
     )
 
 

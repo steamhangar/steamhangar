@@ -297,6 +297,22 @@ test("the switch row sits in the nav, not in a panel", async () => {
   assert.equal(q(section(s, "about"), "expert-switch"), null);
 });
 
+test("MUTATION TARGET: a click on the switch row's label text toggles the switch too (Android twin: the whole row toggles)", async () => {
+  const s = await mount();
+  const sw = q(s, "expert-switch");
+  const text = q(s, "expert-switch-text");
+  assert.equal(text.parentNode, sw.parentNode, "the label text sits in the switch row");
+  assert.equal(sw.getAttribute("aria-checked"), "false");
+  click(text);
+  assert.equal(sw.getAttribute("aria-checked"), "true");
+  assert.equal(storage.get("steamvault.settingsExpert"), "1");
+  assert.equal(navItem(s, "expert").hidden, false, "the nav now offers Expert settings");
+  click(text);
+  assert.equal(sw.getAttribute("aria-checked"), "false");
+  assert.equal(storage.get("steamvault.settingsExpert"), "0");
+  assert.equal(navItem(s, "expert").hidden, true);
+});
+
 test("an expert draft stays visible as a dot when the switch is turned off; nav items show their own dot", async () => {
   storage.set("steamvault.settingsExpert", "1");
   const s = await mount();
@@ -579,7 +595,7 @@ test("MUTATION TARGET: the Expert section shows vault-core's apply state (D16c c
   assert.equal(q(section(s, "expert"), "core-apply").textContent, "vault-core: a change is waiting to be applied.");
 });
 
-test("compact layout: at a container width of 760px or less the expert switch is the last item of About, not in the nav; same state and ids", async () => {
+test("MUTATION TARGET: compact layout: at a container width of 760px or less the expert switch sits in About between the card and the trademark footer, not in the nav; same state and ids", async () => {
   // The view measures its own root with a ResizeObserver (the same 760px
   // as kit.css's @container settings); this fake hands it a width.
   const observers = [];
@@ -600,15 +616,32 @@ test("compact layout: at a container width of 760px or less the expert switch is
   };
   try {
     const s = await mount();
-    resize(500);
     const about = section(s, "about");
+    // WP APP-EXPERT-SWITCH-1: the trademark line is the panel's own footer,
+    // not the card's last line, and closes the panel while wide.
+    const legal = q(about, "about-legal");
+    assert.ok(legal, "the trademark footer");
+    assert.match(legal.textContent, /not affiliated with Valve Corporation/);
+    assert.equal(legal.parentNode, about, "a direct child of the panel, not inside the card");
+    assert.equal(about.children.at(-1), legal, "wide: the footer closes the panel");
+    resize(500);
     const nav = s.querySelectorAll("nav")[0];
     const sw = q(s, "expert-switch");
     assert.ok(sw, "switch rendered");
     assert.equal(nav.querySelectorAll("button").includes(sw), false, "not in the nav when compact");
-    const last = about.children[about.children.length - 1];
-    assert.ok(last.classList.contains("exp"), "last child of the About panel");
-    assert.ok(last.querySelectorAll("button").includes(sw));
+    // Compact: the row follows the About card and directly precedes the
+    // footer, so the switch never sits below the disclaimer (operator
+    // report 2026-11-01; Android twin: SettingsScreen "about").
+    const kids = about.children;
+    const row = sw.parentNode;
+    assert.ok(row.classList.contains("exp"), "the switch row");
+    assert.equal(row.parentNode, about, "a direct child of the About panel");
+    const card = kids.find((c) => c.classList.contains("fcard") && c.getAttribute("data-group") === "about");
+    assert.ok(card, "the About card");
+    assert.equal(q(card, "about-legal"), null, "the disclaimer is not inside the card");
+    assert.ok(kids.indexOf(card) < kids.indexOf(row), "the card comes before the switch row");
+    assert.equal(kids.indexOf(row) + 1, kids.indexOf(legal), "the trademark footer directly follows the switch row");
+    assert.equal(kids.at(-1), legal, "the footer still closes the panel");
     assert.equal(s.querySelectorAll("button").filter((b) => b.getAttribute("data-role") === "expert-switch").length, 1);
     const ids = s.querySelectorAll("span").map((x) => x.id).filter(Boolean);
     assert.equal(ids.filter((i) => i === "settings-expert-switch-label").length, 1, "no duplicate id");
@@ -621,6 +654,7 @@ test("compact layout: at a container width of 760px or less the expert switch is
     resize(761);
     assert.equal(nav.querySelectorAll("button").includes(sw), true, "wide: under the nav");
     assert.equal(about.querySelectorAll("button").includes(sw), false);
+    assert.equal(about.children.at(-1), legal, "wide again: the footer closes the panel");
     assert.equal(sw.getAttribute("aria-checked"), "true", "state kept");
     resize(760);
     assert.equal(about.querySelectorAll("button").includes(sw), true, "760px itself is compact (the CSS max-width is inclusive)");

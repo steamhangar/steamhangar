@@ -141,10 +141,32 @@ test("WP WEB-FIX-20.2: graphModel carries the split when the points have it, nul
   const split = graphModel({ ...base, points: [{ t: iso(600_000), bytes_per_second: 10 * MIB, bytes_served: 10, hit_bytes: 4 }, { t: iso(300_000), bytes_per_second: 20 * MIB, bytes_served: 10, hit_bytes: 10 }] }, "6h");
   assert.ok(split.split, "split present");
   assert.equal(split.split.internet.line, split.line, "the top line equals the total line");
-  assert.equal(split.axis[1], "highest 20.0 MB/s");
+  assert.equal(split.axis[1], "highest 20.0 MB/s (5 min avg)");
   const old = graphModel({ ...base, points: [{ t: iso(600_000), bytes_per_second: 10 * MIB }, { t: iso(300_000), bytes_per_second: 20 * MIB }] }, "6h");
   assert.equal(old.split, null, "an older tier without hit/miss: no split");
-  assert.equal(old.axis[1], "highest 20.0 MB/s");
+  assert.equal(old.axis[1], "highest 20.0 MB/s (5 min avg)");
+});
+
+test("WP APP-DL-STATS-1: graphModel names the highest point's period, explains it next to the limit (tooltip + accessible name)", async () => {
+  const { HIGHEST_NOTE, liveSeries } = await import("../js/lib/traffic-view.js");
+  const live = liveSeries({
+    event_feed: { state: "ok" },
+    range_start: null,
+    points: [
+      { t: iso(120_000), bucket_seconds: 60, bytes_per_second: 2 * MIB, bytes_served: 1, hit_bytes: 0 },
+      { t: iso(30_000), bucket_seconds: 5, bytes_per_second: 19 * MIB, bytes_served: 1, hit_bytes: 0 },
+    ],
+  });
+  const g = graphModel(live, "live");
+  assert.equal(g.axis[1], "highest 19.0 MB/s (5 s avg)");
+  assert.equal(g.axisTitle, HIGHEST_NOTE);
+  assert.ok(g.label.endsWith(` The highest point is an average over 5 seconds. ${HIGHEST_NOTE}`), "the svg's name carries the period and the note (the captions are aria-hidden)");
+  assert.ok(g.label.startsWith("Average speed per 5 seconds in the last hour. Highest: 19.0 MB/s."), "the pinned label stays first");
+  const hero = createDownloadsHero({ range: "live", onRangeChange() {} });
+  hero.paint({ throughput: { ...throughput(), range: "live" }, series: live, range: "live", rateCap: null, error: null, noFigures: false });
+  const axis = hero.el.querySelector('[data-role="stats-graph"]').querySelector(".ax");
+  assert.equal(axis.title, HIGHEST_NOTE);
+  assert.equal(axis.children[1].textContent, "highest 19.0 MB/s (5 s avg)");
 });
 
 test("WP WEB-FIX-20.2: createDownloadsHero draws two series and a legend, or the single accent line without one", () => {
@@ -186,7 +208,7 @@ test("MUTATION PIN: graphModel — 600x96 geometry, highest caption (Android twi
   series.range_start = series.points[0].t;
   const g = graphModel(series, "6h");
   assert.equal(g.line, "M0 96 L300 0 L600 48");
-  assert.deepEqual(g.axis, ["6 h ago", "highest 10.0 MB/s", "now"]);
+  assert.deepEqual(g.axis, ["6 h ago", "highest 10.0 MB/s (5 min avg)", "now"]);
   assert.equal(graphModel(series, "24h"), null, "an answer for another range is not drawn");
   // WP DOWNLOADS-3: no traffic is a flat baseline at 0 with a note, not nothing.
   const flat = graphModel({ ...series, points: series.points.map((p) => ({ ...p, bytes_per_second: 0 })) }, "6h");
@@ -378,4 +400,12 @@ test("paintHistoryPanel: generic failure keeps the log unfolded; a done job show
   paintHistoryPanel(panel, { display: selectExcerptDisplay({ expanded: false }) });
   assert.equal(panel.hidden, true);
   assert.equal(panel.children.length, 0);
+});
+
+test("WP APP-DL-STATS-1 (review): the middle axis caption centres when it wraps (kit.css; Android GraphAxisCaptions)", async () => {
+  const { readFileSync } = await import("node:fs");
+  const css = readFileSync(new URL("../css/kit.css", import.meta.url), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+  assert.match(css, /\.kit \.graph \.ax span:nth-child\(2\):not\(:last-child\)\{\s*text-align:\s*center;\s*\}/);
+  // The edge captions never wrap or shrink (Android: maxLines 1, softWrap false, no weight).
+  assert.match(css, /\.kit \.graph \.ax span:first-child, \.kit \.graph \.ax span:last-child\{\s*white-space:\s*nowrap;\s*flex:\s*none;\s*\}/);
 });
