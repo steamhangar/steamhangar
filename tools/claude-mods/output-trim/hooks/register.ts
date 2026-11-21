@@ -6,6 +6,8 @@ import {
   footer,
   fullOutputFile,
   isLong,
+  isTap,
+  trimTapText,
   trimText,
   type TrimSettings,
 } from './trim.ts'
@@ -57,6 +59,59 @@ async function keep(
   return footer(path, full)
 }
 
+/** The text of a file, or undefined when it cannot be read (missing, over 4 MiB). */
+async function readText($: EngineInterface, path: string): Promise<string | undefined> {
+  try {
+    const text = await $.fs.read(path)
+    return typeof text === 'string' ? text : undefined
+  } catch {
+    return undefined
+  }
+}
+
+// Fields with which the Bash record says that the harness kept the output in
+// its own file and that `stdout` is only the start of it.
+const PERSISTED_FIELDS = ['persistedOutputPath', 'persistedOutputSize', 'stdoutHoldsOutputEnd'] as const
+
+/**
+ * The Bash record with its TAP stdout trimmed (see trimTapText), or
+ * undefined to leave the record to the generic trimming.
+ *
+ * Output above about 30 KB reaches the hook already cut by the harness,
+ * which keeps the whole output in its own file (`persistedOutputPath`) and
+ * shows the model a 2 KB preview of `stdout`. The TAP summary sits at the
+ * end, so the whole text is read back from that file, trimmed, and the
+ * record is answered without the persisted fields: the trimmed text is then
+ * shown inline, footer included, instead of a preview that cuts it off.
+ */
+async function trimTapRecord(
+  $: EngineInterface,
+  configuredDir: string,
+  toolUseId: string,
+  record: BashRecord,
+  settings: TrimSettings,
+): Promise<BashRecord | undefined> {
+  const persisted = typeof record.persistedOutputPath === 'string' && record.persistedOutputPath !== ''
+    ? record.persistedOutputPath
+    : undefined
+  const stdout = persisted === undefined ? record.stdout : await readText($, persisted)
+  if (stdout === undefined) return undefined
+  const { stderr } = record
+  const full = fullOutputFile(stdout, stderr)
+  if (!isLong(full, settings)) return undefined
+
+  const newStdout = trimTapText(stdout, settings)
+  if (newStdout === undefined) return undefined
+  const newStderr = isLong(stderr, settings) ? trimText(stderr, settings) : undefined
+
+  const line = await keep($, configuredDir, toolUseId, full)
+  if (line === undefined) return undefined
+
+  const result: BashRecord = { ...record, stdout: `${newStdout}\n${line}`, stderr: newStderr ?? stderr }
+  for (const field of PERSISTED_FIELDS) delete result[field]
+  return result
+}
+
 export const register: Register = (on, options) => {
   const settings = settingsFrom(options)
   const configuredDir = typeof options.outputDir === 'string' ? options.outputDir.trim() : ''
@@ -78,6 +133,10 @@ export const register: Register = (on, options) => {
       const text = typeof ran.text === 'string' ? ran.text
         : typeof ran.result === 'string' ? ran.result : undefined
       if (text === undefined || !isLong(text, settings)) return ran
+      // A failing TAP run: the error text holds only the first ~30 KB (no
+      // summary, no persisted file to read it from), so it is left as the
+      // harness gave it rather than trimmed into a misleading excerpt.
+      if (isTap(text)) return ran
       const trimmed = trimText(text, settings)
       if (trimmed === undefined) return ran
       const line = await keep($, configuredDir, toolUseId, text)
@@ -88,6 +147,10 @@ export const register: Register = (on, options) => {
 
     if (!isBashRecord(ran.result)) return ran
     const { stdout, stderr } = ran.result
+    if (isTap(stdout)) {
+      const tap = await trimTapRecord($, configuredDir, toolUseId, ran.result, settings)
+      if (tap !== undefined) return { result: tap, context: ran.context } as ToolCallResult
+    }
     const full = fullOutputFile(stdout, stderr)
     if (!isLong(full, settings)) return ran
 

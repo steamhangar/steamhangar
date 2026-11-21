@@ -13,7 +13,7 @@ a plugin option the operator sets.
 |---|---|
 | `token-meter` | one JSONL line per model request (main loop and subagents) with token counts; `/tokens` prints a summary |
 | `read-brake` | denies whole-file reads of the big planning docs and of very large files |
-| `output-trim` | keeps long Bash output in a file, returns head, tail and failure lines |
+| `output-trim` | keeps long Bash output in a file, returns head, tail and failure lines (TAP: summary and `not ok` blocks) |
 | `dev-commands` | `/ci`, `/antraege`, `/wp` answered without a model turn |
 
 ## token-meter
@@ -89,6 +89,7 @@ Options:
 ```sh
 claude plugin test tools/claude-mods/token-meter
 claude plugin test tools/claude-mods/read-brake
+claude plugin test tools/claude-mods/output-trim
 claude plugin validate --strict tools/claude-mods
 claude plugin validate --strict tools/claude-mods/token-meter
 claude plugin validate --strict tools/claude-mods/read-brake
@@ -176,6 +177,46 @@ Never trimmed:
 
 The kept files are not cleaned up by the mod; prune the directory now and
 then.
+
+### TAP output
+
+Output with a `TAP version N` line and at least one `ok`/`not ok` test
+point (`node --test --test-reporter=tap`) is trimmed by its structure
+instead of by head and tail. The model gets:
+
+- the `TAP version` line and one marker line saying what was left out,
+- every `not ok` test point with its whole YAML block (`---` to `...`),
+  verbatim, after the `# Subtest:` names of its parent subtests (each
+  parent once),
+- `Bail out!` lines and the closing `# tests` / `# suites` / `# pass` /
+  `# fail` / `# cancelled` / `# skipped` / `# todo` / `# duration_ms`
+  summary,
+- every line that is not TAP (noise around the run, stack traces printed
+  outside a YAML block), where it stood,
+- the line naming the file with the full output, as above.
+
+Left out: `ok` test points with their YAML blocks, the other `# Subtest:`
+headers, plans (`1..N`) and other `#` comments (node writes a test's
+console output as such comments). A passing run thus shrinks to the
+summary. If the result is still above `maxLines` or `maxBytes` (many
+failures), it is cut once more like any output, the middle lines kept
+being the `not ok` lines, numbered as in the full output.
+
+Output above about 30 KB reaches the mod already cut by Claude Code, which
+keeps the whole output in its own file (`persistedOutputPath` in the Bash
+result) and shows the model only a 2 KB preview. For TAP the mod reads that
+file back, trims the whole text, keeps it in its own output directory as
+usual, and answers the result without the persisted-output fields, so the
+trimmed text and the file line are shown inline instead of being cut by the
+preview. If that file cannot be read, the output is trimmed as any other.
+
+A TAP run that fails with a non-zero exit is left as Claude Code gave it:
+its error text holds only the first ~30 KB of the output and no persisted
+file to read the rest from, so a TAP trim would show neither the summary
+nor the later failures.
+
+Node 24 prints the `spec` reporter by default, also when stdout is not a
+terminal; that output is not TAP and is trimmed as any other.
 
 ## dev-commands
 

@@ -2,7 +2,7 @@
   "name": "output-trim",
   "version": "0.1.0",
   "author": { "name": "SteamHangar contributors" },
-  "description": "Trims long Bash output to head, tail and failure lines; keeps the full output in a file.",
+  "description": "Trims long Bash output to head, tail and failure lines (TAP to its summary and not ok blocks); keeps the full output in a file.",
   "userConfig": {
     "outputDir": {
       "type": "string",
