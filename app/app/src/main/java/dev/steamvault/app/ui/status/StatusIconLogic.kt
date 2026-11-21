@@ -1,6 +1,7 @@
 package dev.steamvault.app.ui.status
 
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.compositeOver
 import dev.steamvault.app.ui.theme.VaultColors
 
 /**
@@ -60,38 +61,92 @@ fun shouldAnimate(kind: StatusKind, animatorsEnabled: Boolean): Boolean =
     animatorsEnabled && kind in ANIMATED_KINDS
 
 /**
- * Background colour for a status-icon circle — 1:1 with the `.sic.k-*`
- * background rules in web/css/theme.css. [StatusKind.PAUSED] intentionally
- * shares `--run` with RUNNING/UPDATING (same as the web CSS), and
- * [StatusKind.VERIFY] uses the accent colour, not a status colour — both
- * ported unchanged from the CSS, not independent Android choices.
+ * The status tone of a kind (WP PILL-TONE-1, audit D-1): one tone per
+ * state for the disc, the pill word and the pill ground, the `tone` of
+ * `docs/design/status-vocabulary.json` (web `DEFAULT_PILL_TONE` in
+ * `components/pill.js`). [wireName] is the JSON value; `null` is the
+ * neutral grey pill. There is no accent tone: status colours never double
+ * as the accent (mockup NOTES, "Palette").
  */
-fun backgroundFor(kind: StatusKind): Color = when (kind) {
-    StatusKind.CACHED -> VaultColors.StatusOk
-    StatusKind.NONE -> VaultColors.StatusNone
-    StatusKind.STALE -> VaultColors.StatusStale
-    StatusKind.PAUSED -> VaultColors.StatusRun
-    StatusKind.RUNNING -> VaultColors.StatusRun
-    StatusKind.UPDATING -> VaultColors.StatusRun
-    StatusKind.VERIFY -> VaultColors.Accent
-    StatusKind.ERROR -> VaultColors.StatusDanger
-    StatusKind.WARN -> VaultColors.StatusStale
-    StatusKind.CANCELLED -> VaultColors.Dim2
-    // web theme.css: `.sic.k-unknown, .sic.k-notinuse{ background:var(--dim-2); }`
-    StatusKind.NOTINUSE -> VaultColors.Dim2
-    // web theme.css (WP CACHE-COMPLETE-1c): `.sic.k-partial { background:var(--stale); }`,
-    // `.sic.k-unverified{ background:var(--dim-2); }`
-    StatusKind.PARTIAL -> VaultColors.StatusStale
-    StatusKind.UNVERIFIED -> VaultColors.Dim2
+enum class StatusTone(val wireName: String?) {
+    OK("ok"),
+    RUN("run"),
+    STALE("stale"),
+    DANGER("danger"),
+    NONE("none"),
+    NEUTRAL(null),
 }
+
+/**
+ * [StatusKind] -> [StatusTone], 1:1 with the vocabulary JSON (checked by
+ * `StatusVocabularyContractTest`). Paused is the run tone of its disc (the
+ * mockup's "static yellow" paused dot; the pause glyph and the missing
+ * motion tell it from Downloading); verify turns on the run hue like
+ * Updating (it was the accent until PILL-TONE-1); the update state and
+ * "Partially cached" are orange ("a download would fix this").
+ */
+fun toneFor(kind: StatusKind): StatusTone = when (kind) {
+    StatusKind.CACHED -> StatusTone.OK
+    StatusKind.RUNNING, StatusKind.UPDATING, StatusKind.VERIFY, StatusKind.PAUSED -> StatusTone.RUN
+    StatusKind.STALE, StatusKind.WARN, StatusKind.PARTIAL -> StatusTone.STALE
+    StatusKind.ERROR -> StatusTone.DANGER
+    StatusKind.NONE, StatusKind.UNVERIFIED -> StatusTone.NONE
+    StatusKind.CANCELLED, StatusKind.NOTINUSE -> StatusTone.NEUTRAL
+}
+
+/**
+ * Disc colour of a tone (web: the `.sic.k-*` backgrounds in theme.css).
+ * The neutral tone's disc is Dim2 (WP CONTRAST-1), its word Dim
+ * ([pillTextColor]), the one split of the "one tone" rule.
+ */
+fun discColorFor(tone: StatusTone): Color = when (tone) {
+    StatusTone.OK -> VaultColors.StatusOk
+    StatusTone.RUN -> VaultColors.StatusRun
+    StatusTone.STALE -> VaultColors.StatusStale
+    StatusTone.DANGER -> VaultColors.StatusDanger
+    StatusTone.NONE -> VaultColors.StatusNone
+    StatusTone.NEUTRAL -> VaultColors.Dim2
+}
+
+/** Word colour of a pill in [tone] (web kit.css `.kit .pill.<tone>`, the
+ * plain `.kit .pill` is Dim). */
+fun pillTextColor(tone: StatusTone): Color = when (tone) {
+    StatusTone.NEUTRAL -> VaultColors.Dim
+    else -> discColorFor(tone)
+}
+
+/** Ground of a pill in [tone]: the tone at 14% composited over Surface,
+ * an OPAQUE colour (web `color-mix(in srgb, var(--T) 14%, var(--surface))`),
+ * so the word's contrast does not depend on what the pill sits on (a
+ * translucent tint over a lighter parent would lower it); Raised2 for the
+ * neutral pill (web `.kit .pill`). The none pill sat on Raised2 too until
+ * WP PILL-TONE-1: its word was 4.46:1 there, under 4.5 for small text;
+ * 4.60:1 on its own tint. `StatusIconLogicTest` asserts 4.5:1 or more for
+ * every tone. */
+fun pillGroundColor(tone: StatusTone): Color = when (tone) {
+    StatusTone.NEUTRAL -> VaultColors.Raised2
+    else -> discColorFor(tone).copy(alpha = PILL_GROUND_ALPHA).compositeOver(VaultColors.Surface)
+}
+
+/** Share of the tone in a coloured pill's ground (web `14%`). */
+const val PILL_GROUND_ALPHA = 0.14f
+
+/**
+ * Background colour for a status-icon circle: the disc colour of the
+ * kind's [toneFor] tone, so disc and pill word can never disagree (WP
+ * PILL-TONE-1). 1:1 with the `.sic.k-*` background rules in
+ * web/css/theme.css (the web test checks those against the same JSON).
+ */
+fun backgroundFor(kind: StatusKind): Color = discColorFor(toneFor(kind))
 
 /**
  * Glyph ink colour for a status-icon circle: the shared dark ink
  * (`.sic { color:#08120F }`) for every kind. The muted Dim2 discs
- * (cancelled, notinuse, unverified) used the light Text ink until WP
- * CONTRAST-1 (GLYPH-CONTRAST-1, audit 2026-11-20): Text on Dim2 is 2.81:1,
- * under the 3:1 a glyph needs; the dark ink is 5.79:1. Web twin: no
- * `.sic.k-*` rule in theme.css sets its own `color` any more.
+ * (cancelled, notinuse; unverified until WP PILL-TONE-1, now StatusNone,
+ * 6.22:1) used the light Text ink until WP CONTRAST-1 (GLYPH-CONTRAST-1,
+ * audit 2026-11-20): Text on Dim2 is 2.81:1, under the 3:1 a glyph needs;
+ * the dark ink is 5.79:1. Web twin: no `.sic.k-*` rule in theme.css sets
+ * its own `color` any more.
  */
 fun inkFor(@Suppress("UNUSED_PARAMETER") kind: StatusKind): Color = VaultColors.StatusIconInk
 

@@ -130,6 +130,9 @@ import dev.steamvault.app.ui.library.logic.verifySpokenLabel
 import dev.steamvault.app.ui.status.StatusIcon
 import dev.steamvault.app.ui.status.StatusIconSize
 import dev.steamvault.app.ui.status.StatusKind
+import dev.steamvault.app.ui.status.pillGroundColor
+import dev.steamvault.app.ui.status.pillTextColor
+import dev.steamvault.app.ui.status.toneFor
 import dev.steamvault.app.ui.theme.VaultColors
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
@@ -427,38 +430,37 @@ private fun DetailHeader(
                 // WP WEB-FEAT-6 review: no queued job in the header state.
                 val liveJob = headerLiveJob(jobs, appid)
                 val kind = dispKind(gameSummaryFrom(detail), liveJob)
+                // WP API-FIX-4: a tool app without a live job reads
+                // "Steam tool package" (from the kind, not the flag).
+                // WP UPD-6 review fix: the Library card's "Update
+                // available" overlay (orange glyph and word) for a
+                // cached game whose row -- the group row for a game with
+                // packages -- is flagged.
+                val row = updateRow ?: gameSummaryFrom(detail)
+                val updateState = showsUpdateState(row, kind)
+                // WP CACHE-COMPLETE-1c (web `buildDetailStatusRow` via
+                // `cardDisplay`): the card's completeness overlay.
+                val overlay = completenessOverlay(row, kind, isGroup)
+                val word = when {
+                    updateState -> stringResource(R.string.library_update_available_badge)
+                    overlay != null -> overlay.word
+                    else -> toolAppStateWordFor(kind, isNotOwned(row)) ?: stringResource(kind.labelRes)
+                }
+                // WP PILL-TONE-1 (web `createPill`'s default tone): word and
+                // ground take the disc's tone, one tone per state.
+                val tone = toneFor(cardIconKind(row, kind, isGroup))
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier
                         .padding(top = 6.dp)
-                        .background(VaultColors.Raised2, RoundedCornerShape(percent = 50))
+                        .background(pillGroundColor(tone), RoundedCornerShape(percent = 50))
                         .padding(start = 4.dp, end = 10.dp, top = 3.dp, bottom = 3.dp),
                 ) {
-                    // WP API-FIX-4: a tool app without a live job reads
-                    // "Steam tool package" (from the kind, not the flag).
-                    // WP UPD-6 review fix: the Library card's "Update
-                    // available" overlay (orange glyph and word) for a
-                    // cached game whose row -- the group row for a game with
-                    // packages -- is flagged.
-                    val row = updateRow ?: gameSummaryFrom(detail)
-                    val updateState = showsUpdateState(row, kind)
-                    // WP CACHE-COMPLETE-1c (web `buildDetailStatusRow` via
-                    // `cardDisplay`): the card's completeness overlay.
-                    val overlay = completenessOverlay(row, kind, isGroup)
-                    val word = when {
-                        updateState -> stringResource(R.string.library_update_available_badge)
-                        overlay != null -> overlay.word
-                        else -> toolAppStateWordFor(kind, isNotOwned(row)) ?: stringResource(kind.labelRes)
-                    }
                     StatusIcon(kind = cardIconKind(row, kind, isGroup), size = StatusIconSize.SMALL, spokenLabel = word)
                     Text(
                         text = word,
                         style = MaterialTheme.typography.bodyMedium,
-                        color = when {
-                            updateState || overlay?.icon == StatusKind.PARTIAL -> VaultColors.StatusStale
-                            overlay != null -> MaterialTheme.colorScheme.onSurfaceVariant
-                            else -> Color.Unspecified
-                        },
+                        color = pillTextColor(tone),
                         modifier = Modifier.padding(start = 6.dp),
                     )
                 }

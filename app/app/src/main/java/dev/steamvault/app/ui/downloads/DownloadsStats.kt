@@ -60,7 +60,9 @@ import dev.steamvault.app.ui.downloads.logic.HISTORY_FIRST_PAGE
 import dev.steamvault.app.ui.downloads.logic.nextShown
 import dev.steamvault.app.ui.status.StatusIcon
 import dev.steamvault.app.ui.status.StatusIconSize
-import dev.steamvault.app.ui.status.StatusKind
+import dev.steamvault.app.ui.status.pillGroundColor
+import dev.steamvault.app.ui.status.pillTextColor
+import dev.steamvault.app.ui.status.toneFor
 import dev.steamvault.app.ui.theme.VaultColors
 import dev.steamvault.app.ui.traffic.RangeChips
 import dev.steamvault.app.ui.traffic.TrafficPoll
@@ -403,20 +405,17 @@ private fun partsText(parts: List<HeroPart>): AnnotatedString = buildAnnotatedSt
  */
 @Composable
 private fun StatusPill(status: HeroStatus) {
-    val tone = when (status.kind) {
-        StatusKind.CACHED -> VaultColors.StatusOk
-        StatusKind.RUNNING, StatusKind.VERIFY -> VaultColors.StatusRun
-        else -> VaultColors.Dim
-    }
+    // WP PILL-TONE-1: one tone per state, the disc's (toneFor), no local copy.
+    val tone = toneFor(status.kind)
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
-            .background(if (tone == VaultColors.Dim) VaultColors.Raised2 else tone.copy(alpha = 0.14f), RoundedCornerShape(percent = 50))
+            .background(pillGroundColor(tone), RoundedCornerShape(percent = 50))
             .padding(start = 4.dp, end = 10.dp, top = 3.dp, bottom = 3.dp)
             .clearAndSetSemantics { contentDescription = status.text },
     ) {
         StatusIcon(kind = status.kind, size = StatusIconSize.SMALL)
-        Text(status.text, style = MaterialTheme.typography.labelMedium, color = tone, modifier = Modifier.padding(start = 6.dp))
+        Text(status.text, style = MaterialTheme.typography.labelMedium, color = pillTextColor(tone), modifier = Modifier.padding(start = 6.dp))
     }
 }
 

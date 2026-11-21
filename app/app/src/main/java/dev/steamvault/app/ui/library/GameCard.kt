@@ -211,17 +211,22 @@ internal fun cardStatusWord(model: GameCardModel, compact: Boolean = false): Str
             ?: stringResource(model.kind.labelRes)
     }
 
-/** WP UPD-6 (twin of web `tx-stale`): the status word in the orange
- * "update ready" colour for the update state -- and WP CACHE-COMPLETE-1c
- * for "Partially cached" (web `tx-partial`) -- the muted text colour
- * otherwise ("Cached · not verified" too, web `tx-unverified`). */
+/** The card's status word colour, twin of web kit.css `.kit .stt .state`
+ * (card word rule, operator decision 2026-11-21 Weg A, docs/design/rc20/
+ * README.md): the alert and grey states take the tone of their pill and
+ * disc -- orange for the update state (WP UPD-6, web `tx-stale`) and
+ * "Partially cached" (`tx-partial`), red for Failed (`tx-error`), the
+ * StatusNone grey for "Not cached" and "Cached · not verified" (WP
+ * PILL-TONE-1, `tx-none` / `tx-unverified`, 5.65:1 on Surface); the muted
+ * text colour for Current and the active states, whose dot carries the
+ * tone. */
 @Composable
-internal fun cardStatusWordColor(model: GameCardModel): Color =
-    if (model.updateState || model.completeness?.icon == StatusKind.PARTIAL) {
-        VaultColors.StatusStale
-    } else {
-        MaterialTheme.colorScheme.onSurfaceVariant
-    }
+internal fun cardStatusWordColor(model: GameCardModel): Color = when (cardIconKind(model)) {
+    StatusKind.STALE, StatusKind.PARTIAL -> VaultColors.StatusStale
+    StatusKind.ERROR -> VaultColors.StatusDanger
+    StatusKind.NONE, StatusKind.UNVERIFIED -> VaultColors.StatusNone
+    else -> MaterialTheme.colorScheme.onSurfaceVariant
+}
 
 /** The status icon + size pill riding on the cover art (round-6 "one object
  * instead of a colour dot plus a duplicate line"). Inert (no click target)

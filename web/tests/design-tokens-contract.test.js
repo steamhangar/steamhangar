@@ -13,7 +13,12 @@
  *   (b) --fs-N, --sp-N, --r-X equal the JSON's fs/sp/r, both directions;
  *   (c) status-vocabulary.json equals STATUS_LABEL (kinds, order, words),
  *       KIND_GLYPH, DEFAULT_PILL_TONE, and the animated set equals the
- *       kinds that have a `.sic.k-<kind>` animation rule in theme.css.
+ *       kinds that have a `.sic.k-<kind>` animation rule in theme.css;
+ *   (d) one tone per state (WP PILL-TONE-1, audit D-1): every kind's disc
+ *       (`.sic.k-<kind>` background in theme.css) and its pill word
+ *       (`.kit .pill.<tone>` colour in kit.css) use the token of the kind's
+ *       vocabulary tone; the neutral tone (null) is the one documented
+ *       split, word --dim, disc --dim-2.
  *
  * Run: node --test "web/tests/*.test.js"   (see web/tests/README.md)
  */
@@ -34,6 +39,7 @@ const tokens = JSON.parse(read("docs", "design", "tokens.json"));
 const vocabulary = JSON.parse(read("docs", "design", "status-vocabulary.json"));
 const themeCss = stripComments(read("web", "css", "theme.css"));
 const statusIconJs = read("web", "js", "components", "status-icon.js");
+const kitCss = stripComments(read("web", "css", "kit.css"));
 
 /** Every `--name:value;` in theme.css, as name -> list of values (a token may be redefined). */
 function customProperties(css) {
@@ -168,4 +174,66 @@ test("status-vocabulary.json animated set equals theme.css's .sic.k-* animation 
   assert.deepEqual(css, ["running", "updating", "verify"]);
   assert.deepEqual(vocabulary.filter((e) => e.animated).map((e) => e.kind).sort(), css);
   for (const entry of vocabulary) assert.equal(typeof entry.animated, "boolean", entry.kind);
+});
+
+/** Disc colour token per kind: the `.sic.k-<kind>` rules (a selector list of
+ * bare `.sic.k-*` items) that set a background. */
+function discTokens() {
+  const out = {};
+  for (const m of themeCss.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+    const selectors = m[1].split(",").map((x) => x.trim());
+    if (!selectors.every((x) => /^\.sic\.k-[a-z]+$/.test(x))) continue;
+    const bg = /(?:^|[;\s])background\s*:\s*var\(--([a-z0-9-]+)\)/.exec(m[2]);
+    if (!bg) continue;
+    for (const x of selectors) {
+      const kind = x.slice(".sic.k-".length);
+      assert.equal(out[kind], undefined, `two background rules for .sic.k-${kind}`);
+      out[kind] = bg[1];
+    }
+  }
+  return out;
+}
+
+/** The colour token the kit pill's word takes per tone (null = the plain `.kit .pill`). */
+function pillTextTokens() {
+  const out = {};
+  for (const m of kitCss.matchAll(/\.kit \.pill(\.[a-z]+)?\s*\{([^{}]*)\}/g)) {
+    const color = /(?:^|[;\s{])color\s*:\s*var\(--([a-z0-9-]+)\)/.exec(m[2]);
+    if (color) out[m[1] ? m[1].slice(1) : "null"] = color[1];
+  }
+  return out;
+}
+
+/** Literal tone -> token table (constants-vs-literals: not derived from the CSS). */
+const TONE_TOKEN = Object.freeze({
+  ok: { text: "ok", disc: "ok" },
+  run: { text: "run", disc: "run" },
+  stale: { text: "stale", disc: "stale" },
+  danger: { text: "danger", disc: "danger" },
+  none: { text: "none", disc: "none" },
+  null: { text: "dim", disc: "dim-2" },
+});
+
+test("one tone per state: every kind's disc and pill word use its vocabulary tone's token (PILL-TONE-1)", () => {
+  const discs = discTokens();
+  const texts = pillTextTokens();
+  assert.deepEqual(Object.keys(discs).sort(), vocabulary.map((e) => e.kind).sort(), "a kind without its own disc rule");
+  for (const entry of vocabulary) {
+    const want = TONE_TOKEN[String(entry.tone)];
+    assert.ok(want, `${entry.kind}: unknown tone ${entry.tone}`);
+    assert.equal(discs[entry.kind], want.disc, `${entry.kind}: .sic.k-${entry.kind} background vs tone ${entry.tone}`);
+    assert.equal(texts[String(entry.tone)], want.text, `${entry.kind}: kit.css pill word colour of tone ${entry.tone}`);
+  }
+});
+
+test("PILL-TONE-1 decisions: update orange, paused and verify run, partial orange; no accent pill or disc", () => {
+  const tone = Object.fromEntries(vocabulary.map((e) => [e.kind, e.tone]));
+  assert.equal(tone.stale, "stale");
+  assert.equal(STATUS_LABEL.stale, "Update available");
+  assert.equal(tone.paused, "run");
+  assert.equal(tone.verify, "run");
+  assert.equal(tone.partial, "stale");
+  assert.ok(!Object.values(discTokens()).includes("accent"), "a status disc in the accent colour");
+  assert.equal(pillTextTokens().acc, undefined, "kit.css still has an accent pill tone");
+  assert.ok(!Object.values(STATUS_LABEL).includes("Update ready"), "the old update word is back");
 });

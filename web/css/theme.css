@@ -357,7 +357,11 @@ a{ color:var(--accent); }
 .sic.k-paused  { background:var(--run); }
 .sic.k-running { background:var(--run); }
 .sic.k-updating{ background:var(--run); }
-.sic.k-verify  { background:var(--accent); }
+/* WP PILL-TONE-1 (audit D-1): a forced re-run turns on the run hue like
+   Updating, the tone its pill and word always had. The accent was the only
+   disc outside the status set (mockup NOTES "Palette": status colours never
+   double as accent); the word "Verifying" and the pill tell it apart. */
+.sic.k-verify  { background:var(--run); }
 .sic.k-error   { background:var(--danger); }
 .sic.k-warn    { background:var(--stale); }
 /* WP CONTRAST-1 (GLYPH-CONTRAST-1, audit 2026-11-20): the grey --dim-2
@@ -374,9 +378,11 @@ a{ color:var(--accent); }
 /* WP CACHE-COMPLETE-1c: a cached game with only part of the current build
    on disk (half-disc glyph) is "a download would fix this", the hue the
    update state already uses; a game whose completeness is not known is
-   neither good nor bad news, so it takes the neutral tone of "Check". */
+   neither good nor bad news: the grey of "Not cached", like its pill and
+   the card's status dot (WP PILL-TONE-1: one tone per state; it was the
+   --dim-2 of "Check" until then; sic-ink on --none is 6.22:1). */
 .sic.k-partial { background:var(--stale); }
-.sic.k-unverified{ background:var(--dim-2); }
+.sic.k-unverified{ background:var(--none); }
 
 .sic-lg{ --sz:19px; }
 .sic-sm{ --sz:16px; }

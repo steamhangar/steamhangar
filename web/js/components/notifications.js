@@ -151,7 +151,7 @@ function textFor(entry) {
     case "job_failed":
       return `Job #${entry.jobId} failed — open Downloads for the log.`;
     case "update_ready":
-      return "A newer manifest is available upstream — an update is ready to download.";
+      return "A newer manifest exists upstream — an update is available to download.";
     case "bypass_suspected":
       return "Reports installed games, but none of its downloads have reached the cache.";
     case "bypass_resolved":

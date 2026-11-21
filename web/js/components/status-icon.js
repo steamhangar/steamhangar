@@ -30,7 +30,10 @@ export const STATUS_LABEL = {
   cached: "Current",
   running: "Downloading",
   updating: "Updating",
-  stale: "Update ready",
+  // WP PILL-TONE-1 (UPDATE-WORD-1, operator 2026-11-21): one word for the
+  // update state everywhere, the card's "Update available"; "Update ready"
+  // is gone.
+  stale: "Update available",
   none: "Not cached",
   paused: "Paused",
   verify: "Verifying",

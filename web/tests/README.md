@@ -4057,3 +4057,41 @@ rules use `--line-strong`; `.kit .btn` and the sort divider keep `--line`;
 no `.sic.k-*` rule sets `color`; the popover fields' `--dim-2` border; the
 selected-segment and Add-a-device tab rings). `design-tokens-contract.test.js` covers
 the new token through its both-directions colour check.
+
+## WP PILL-TONE-1 (2026-11-21) — one tone and one word per status (audit D-1)
+
+Disc and pill word share one tone per state, as in the kit (disc =
+`currentColor` = pill tone): verify's disc and card word move from the
+accent to `--run`; paused's pill to `run`; partial's pill to `stale`;
+unverified's disc from `--dim-2` to `--none`; the update state (`stale`)
+is orange and reads "Update available" in the pill, STATUS_LABEL, the
+notification log and the vocabulary (UPDATE-TONE-1, UPDATE-WORD-1). No
+accent pill tone any more (`PILL_TONES`, kit.css `.pill.acc` removed).
+The neutral tone writes its word in `--dim` and draws its disc in
+`--dim-2`. The `none` pill gets the tinted ground of the other tones
+(`--none` 14% into `--surface`): on `--raised-2` its word was 4.46:1, now
+4.60:1.
+
+Tests: `design-tokens-contract.test.js` +2 (every kind's `.sic.k-*`
+background and kit.css pill word colour equal its vocabulary tone's token,
+literal table; the decided tones, no accent disc or pill);
+`css-contrast.test.js` +1 (pill word on its ground: ok 7.39, run 8.21,
+stale 5.16, danger 5.24, none 4.60, neutral 5.05:1, each asserted at
+4.5:1 or more for every tone kit.css defines; sic ink on every disc colour 5.79 to 12.46:1; unverified's `--none`
+disc); `kit-pill.test.js` +1 (every kit vocabulary pill takes its kind's
+default tone, no "Update ready"). Updated pins: `about-view`,
+`notification-log`, `update-verify` (`.tx-verify` is `--run`),
+`game-card-completeness` (unverified disc `--none`).
+
+Review round: the card word of a not-verified game (`.tx-unverified`,
+kit `.stt .state.tx-unverified`) is `--none` like its pill and dot (5.65:1
+on `--surface`, 6.25:1 on `--bg`; pinned in `game-card-completeness` and
+`css-contrast`); the update notification text says "an update is available
+to download" (`notification-log` source pin); `docs/design/rc21/mobile.html`
+and `vault-app-mockup.html` no longer show "Update ready" or an accent pill.
+
+Operator decision 2026-11-21 (Weg A): the "Not cached" card word takes
+`--none` too (kit `.kit .stt .state.tx-unverified, .kit .stt .state.tx-none`),
+so word, pill and dot agree for both grey states; the card word rule is
+recorded in `docs/design/rc20/README.md`. Pins: `game-card-completeness`,
+`css-contrast` (`--none` word 4.5:1 or more on `--surface` and `--bg`).

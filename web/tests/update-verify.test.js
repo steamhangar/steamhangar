@@ -231,7 +231,8 @@ test("css: tx-updating / tx-verify colours and the vault-turn animation are pres
   const app = readFileSync(path.join(webDir, "css", "app.css"), "utf8");
   const theme = readFileSync(path.join(webDir, "css", "theme.css"), "utf8");
   assert.match(app, /\.tx-updating\{ color:var\(--run\); \}/);
-  assert.match(app, /\.tx-verify\{ color:var\(--accent\); \}/);
+  // WP PILL-TONE-1: verify shares --run with its disc and pill (was --accent).
+  assert.match(app, /\.tx-verify\{ color:var\(--run\); \}/);
   assert.match(theme, /\.sic\.k-updating \.rot,\s*\n\.sic\.k-verify \.rot\{[^}]*animation:vault-turn/);
 });
 

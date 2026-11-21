@@ -4,10 +4,17 @@
  * `<span class="pill TONE"><span class="sic k-KIND">…</span>TEXT</span>`:
  * the existing status-icon disc (components/status-icon.js — shape first,
  * word second, colour third) plus the visible word and, from css/kit.css,
- * a tinted background so the state reads at card size. The disc keeps its
- * own kind colour; the TONE class only tints the pill. Motion is
+ * a tinted background so the state reads at card size. Motion is
  * untouched: it is theme.css's `.sic.k-running`/`.k-updating`/`.k-verify`
  * animation, stopped by prefers-reduced-motion.
+ *
+ * One tone per state (WP PILL-TONE-1, audit D-1): the disc is drawn by
+ * theme.css's `.sic.k-KIND` rule, the word by kit.css's `.pill.TONE`, and
+ * both use the same colour token for every kind (the kit's "disc =
+ * currentColor = pill tone"). DEFAULT_PILL_TONE below, the `.sic.k-*`
+ * backgrounds and docs/design/status-vocabulary.json are pinned against
+ * each other by web/tests/design-tokens-contract.test.js. The one split is
+ * the neutral grey: word in --dim (4.5:1 text contrast), disc in --dim-2.
  *
  * The pill's text IS the status word, so the icon's screen-reader-only
  * fallback is dropped here — otherwise assistive tech would hear
@@ -19,28 +26,33 @@
  */
 import { createStatusIcon } from "./status-icon.js";
 
-/** Pill tones kit.css knows. `null` = the neutral grey pill. */
-export const PILL_TONES = Object.freeze(["ok", "run", "acc", "stale", "danger", "none"]);
+/** Pill tones kit.css knows. `null` = the neutral grey pill. No accent
+ * tone: status colours never double as the accent (mockup NOTES,
+ * "Palette"); the update state was the last `acc` pill (PILL-TONE-1). */
+export const PILL_TONES = Object.freeze(["ok", "run", "stale", "danger", "none"]);
 
 /**
  * Default tone per status kind, from kit.html's vocabulary row: Current and
- * Online are `ok`; the three active kinds are `run` (the verify disc itself
- * stays accent-coloured); "Update ready" is `acc`; a warning (agent
- * outdated) is `stale`; a failure `danger`; the not-cached family `none`;
- * paused, cancelled, check and not-in-use take the neutral pill.
+ * Online are `ok`; the three active kinds and paused are `run` (the mockup's
+ * "static yellow" paused dot; the pause glyph and the missing motion tell
+ * it from Downloading); "Update available", a warning (agent outdated) and
+ * "Partially cached" are `stale` (orange: "a download would fix this");
+ * a failure `danger`; Not cached and Not verified `none`; cancelled, check
+ * and not-in-use take the neutral pill. Since PILL-TONE-1 the disc of
+ * every kind has the same colour as this tone.
  */
 export const DEFAULT_PILL_TONE = Object.freeze({
   cached: "ok",
   running: "run",
   updating: "run",
   verify: "run",
-  stale: "acc",
+  paused: "run",
+  stale: "stale",
   warn: "stale",
+  partial: "stale",
   error: "danger",
   none: "none",
-  partial: "none",
   unverified: "none",
-  paused: null,
   cancelled: null,
   unknown: null,
   notinuse: null,
