@@ -210,7 +210,8 @@ class JobCardLayoutTest {
      * font 1.3 the "Garbage collection paused" pill (about 240dp) leaves the
      * name about 55dp, less than "Wrenfield" needs, so the name breaks inside
      * the word (the web `.nm{ overflow-wrap:anywhere }` does the same at a
-     * narrow column). This test records that state; when a fix lands (pill
+     * narrow column). The mono meta ("job #… · appid …") wraps line by line
+     * in the same ~55dp column. This test records that state; when a fix lands (pill
      * under the name, or a shorter word), flip it to `>=`.
      */
     @Test

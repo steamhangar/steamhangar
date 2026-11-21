@@ -123,7 +123,7 @@ class ClientsScreenshotTest {
      * client note, stop note), and a held GC card with its long pill. */
     @Test
     fun downloads_job_card_360dp_font130() =
-        shoot("downloads_job_card_360dp_font130", widthDp = 360, heightDp = 1000, fontScale = 1.3f, page = Page.JOB_CARDS)
+        shoot("downloads_job_card_360dp_font130", widthDp = 360, heightDp = 1200, fontScale = 1.3f, page = Page.JOB_CARDS)
 
     @Test
     fun downloads_job_card_411dp_font100() =
