@@ -2300,9 +2300,14 @@ say 'vault-api must have no IPv6 address on either, whatever the daemon default.
 for net in "$lan_net" "$egress_net"; do
     net_v6=$(docker network inspect "$net" --format '{{.EnableIPv6}}' 2>&1)
     assert_eq "false" "$net_v6" "network $net has IPv6 disabled"
-    api_v6=$(docker inspect --format "{{with index .NetworkSettings.Networks \"$net\"}}v6=[{{.GlobalIPv6Address}}]{{end}}" "$(dc ps -q vault-api)" 2>&1)
-    # "v6=[]" also proves vault-api IS attached there (empty output would not).
-    assert_eq "v6=[]" "$api_v6" "vault-api is on $net with no IPv6 address"
+    # Rendered through json (WP CI-NIGHTLY-1): newer Docker types the field as
+    # Go's netip.Addr, whose zero value prints "invalid IP" with a plain
+    # {{.GlobalIPv6Address}} but marshals to "" -- the same as the old string
+    # field. So exactly 'v6=[""]' on both generations; any address shows up
+    # quoted inside the brackets and fails.
+    api_v6=$(docker inspect --format "{{with index .NetworkSettings.Networks \"$net\"}}v6=[{{json .GlobalIPv6Address}}]{{end}}" "$(dc ps -q vault-api)" 2>&1)
+    # 'v6=[""]' also proves vault-api IS attached there (empty output would not).
+    assert_eq 'v6=[""]' "$api_v6" "vault-api is on $net with no IPv6 address"
 done
 
 say ''
@@ -2647,7 +2652,10 @@ say 'carries no header a loop guard could stamp, so the boot preflight is the'
 say 'guard. A throwaway vault-core on the same network, pointed at vault-dns,'
 say 'must stop with the resolver FATAL. Bounded by timeout and removed by name,'
 say 'so a regression that lets it boot cannot hang this suite.'
-dns_ip=$(docker inspect --format '{{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}' "$(dc ps -q vault-dns)" 2>/dev/null | awk '{ print $1 }')
+# json + tr (WP CI-NIGHTLY-1): on newer Docker a network without an IPv4
+# address would render "invalid IP" and awk would pick "invalid"; the json
+# form renders it "" on both generations, so awk skips it as before.
+dns_ip=$(docker inspect --format '{{range .NetworkSettings.Networks}}{{json .IPAddress}} {{end}}' "$(dc ps -q vault-dns)" 2>/dev/null | tr -d '"' | awk '{ print $1 }')
 say "    vault-dns address on the project network: $dns_ip"
 loop_name="$PROJECT-loop-probe"
 docker rm -f "$loop_name" >/dev/null 2>&1
@@ -3501,8 +3509,11 @@ compose_up_or_die "$pool_base_env" up -d vault-core
 pool_wait_core_healthy
 say "vault-core health: $core_h"
 assert_eq "healthy" "$core_h" "vault-core is healthy again on the stack's own env (resolver default, shipped edge mode)"
-core_pool_ip_after=$(docker inspect --format "{{with index .NetworkSettings.Networks \"$POOL_NET\"}}{{.IPAddress}}{{end}}" "$(dc ps -q vault-core)" 2>/dev/null)
-assert_eq "" "$core_pool_ip_after" "vault-core is no longer attached to $POOL_NET"
+# A fixed marker, not .IPAddress (WP CI-NIGHTLY-1): an attachment without
+# an IPv4 address rendered "" on older Docker and would have passed as
+# detached. "attached" prints for any attachment, "" only when detached.
+core_pool_attached_after=$(docker inspect --format "{{with index .NetworkSettings.Networks \"$POOL_NET\"}}attached{{end}}" "$(dc ps -q vault-core)" 2>/dev/null)
+assert_eq "" "$core_pool_attached_after" "vault-core is no longer attached to $POOL_NET"
 revert_log=$(dc logs --no-log-prefix vault-core 2>/dev/null)
 assert_contains "$revert_log" "upstream edge mode ON: every MISS goes to dist-fra1.discovery.steamserver.net" "the reverted vault-core is back on the shipped compose default (edge mode, dist-fra1.discovery.steamserver.net)"
 run "docker rm -f '$POOL_EDGE' '$POOL_RESOLVER'"
