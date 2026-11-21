@@ -122,8 +122,3 @@ export function watchScrollCue(row) {
   else paintScrollCue(row);
   return row;
 }
-
-/** Repaint after the row's content changed without its box changing. */
-export function refreshScrollCue(row) {
-  paintScrollCue(row);
-}
