@@ -25,8 +25,10 @@ read the event log at all. Each tick:
    adds up the MISS bytes served to addresses that are NOT the runner. The
    runner is every address of a current runner window
    (``runner_identity.windows``) plus every address that sent a runner
-   marker line inside the ring (``LiveTier.runner_mark_addrs``), so a new
-   runner address counts as the runner from its first marker on;
+   marker line inside the ring (``LiveTier.runner_marks``) whose token is an
+   issued one (``runner_identity.live_mark_valid``, the sweep's rules), so a
+   new runner address counts as the runner from its first marker on and a
+   LAN host requesting the marker path changes nothing;
 3. "a client is loading" = that MISS rate is at least
    ``MIN_CLIENT_MISS_BYTES_PER_SECOND``.
 
@@ -37,11 +39,17 @@ The hold:
   and the worker stops claiming queued jobs (``holding``, the gate in
   ``worker.PrefillWorker._run``), so the next queued job does not start
   SteamPrefill just to be paused again.
+* **Operator override** (operator decision 2026-11-21, Weg B): a manual
+  Resume during a hold marks the job ``client_override``; the worker claims
+  such a job despite the hold and this controller never pauses it. The
+  override ends with the job or with a manual pause.
 * **While holding** each tick repeats the request (a job the worker claimed
   just before the hold started is paused too) and every tick that sees a
   client loading moves ``last_client_at``.
 * **Release** once no client has loaded for ``IDLE_GAP_SECONDS``: a client
-  pause the worker has not honoured yet is withdrawn, every job this
+  pause the worker has not honoured yet is withdrawn (the tag stays, so a
+  job the worker parks in that instant is resumed on the next tick), every
+  job this
   controller paused goes back to ``queued`` with its original id (it runs
   first again, ``jobs.resume_client_paused``), and the gate opens.
 
@@ -68,12 +76,15 @@ Fail-safe directions
   so no hold ever starts, and a job left tagged ``client`` from an earlier
   run is resumed rather than parked forever.
 * **Runner address unknown** while a prefill runs (no current runner window
-  and no marker in the ring): the runner's own MISS traffic would look like
-  a client's and pause the runner in a loop, so no hold starts on that tick
-  and ``state().runner_address_unknown`` says why.
+  and no valid marker in the ring): the runner's own MISS traffic would look
+  like a client's, so no hold starts on that tick and
+  ``state().runner_address_unknown`` says why. The check is global, not per
+  address (see the limits below).
 * **Restart**: the hold lives in memory. On its first tick with work the
   controller adopts every job still tagged ``client`` as a hold that started
-  now, so they resume one idle gap after the restart unless a client loads.
+  now (``state().restored``; ``last_client_at`` is then the restart, not a
+  sighting), so they resume one idle gap after the restart unless a client
+  loads.
 * **A tick that fails** is logged and leaves the hold as it was; the next
   tick retries.
 
@@ -82,7 +93,12 @@ client (both behind one NAT) is the runner's, so that client gets no
 priority; a client that gets no MISS byte through at all (every request
 503) is invisible, in practice it gets a part of the cap (39 Mbit/s
 measured); a job queued while no tick was reading (empty queue) can start
-and is then paused on the next tick.
+and is then paused on the next tick. The unknown-runner guard is global:
+when ANY runner address is known (an older window, or a valid marker) but
+the running runner's own marker did not reach the log (marker request
+failed, a new address before its first marker is read), its MISS counts as
+a client's and it pauses itself, then resumes after the idle gap, about
+every two minutes until a marker for its address is seen.
 """
 
 from __future__ import annotations
@@ -149,6 +165,9 @@ class PriorityState:
     clients: tuple[ClientLoad, ...] = ()
     #: The last tick could not tell the runner from clients (no hold started).
     runner_address_unknown: bool = False
+    #: The hold was adopted from jobs tagged ``client`` after a restart and
+    #: no client has been seen since (``last_client_at`` = the restart).
+    restored: bool = False
     idle_gap_seconds: int = IDLE_GAP_SECONDS
 
     @property
@@ -240,7 +259,7 @@ class ClientPriority:
             with self._lock:
                 self._state = replace(
                     self._state, enabled=False, holding=False, since=None,
-                    clients=(), runner_address_unknown=False,
+                    clients=(), runner_address_unknown=False, restored=False,
                 )
             self._release(conn)
             return self.state()
@@ -251,7 +270,9 @@ class ClientPriority:
             with self._lock:
                 self._adopted = True
                 if self._expired(moment):
-                    self._state = replace(self._state, holding=False, since=None, clients=())
+                    self._state = replace(
+                        self._state, holding=False, since=None, clients=(), restored=False
+                    )
                 return self._state
 
         with self._lock:
@@ -260,7 +281,11 @@ class ClientPriority:
         if adopt and jobs.client_paused_ids(conn):
             with self._lock:
                 self._state = replace(
-                    self._state, holding=True, since=moment, last_client_at=moment
+                    self._state,
+                    holding=True,
+                    since=moment,
+                    last_client_at=moment,
+                    restored=True,
                 )
             logger.info(
                 "Client priority: jobs paused for a client before this start "
@@ -282,10 +307,13 @@ class ClientPriority:
                     since=moment if started else state.since,
                     last_client_at=moment,
                     clients=loads,
+                    restored=False,
                 )
             elif state.holding and self._expired_state(state, moment):
                 released = True
-                state = replace(state, holding=False, since=None, clients=())
+                state = replace(
+                    state, holding=False, since=None, clients=(), restored=False
+                )
             self._state = state
             holding = state.holding
 
@@ -325,11 +353,15 @@ class ClientPriority:
         tier.touch(now)
         tier.refresh(path, now)
         windows = runner_identity.windows(conn)
-        marks = tier.runner_mark_addrs(now)
+        marks = {
+            addr
+            for addr, token, seen in tier.runner_marks(now)
+            if runner_identity.live_mark_valid(conn, token, addr, seen)
+        }
 
         def is_runner(addr: str, bucket_iso: str) -> bool:
-            # The rule of ``routers.traffic._runner_test`` plus the markers in
-            # the ring (``LiveTier.runner_mark_addrs``).
+            # The rule of ``routers.traffic._runner_test`` plus the valid
+            # markers in the ring (``LiveTier.runner_marks``).
             return addr in marks or any(
                 w.addr == addr and w.start <= bucket_iso < w.end for w in windows
             )

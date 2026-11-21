@@ -101,6 +101,11 @@ class JobSummary(BaseModel):
     #: says which devices and until when). ``null`` when the job is neither
     #: paused nor pausing. A job paused before v34 reports ``"manual"``.
     pause_reason: Literal["manual", "client"] | None = None
+    #: ``true`` = an operator resumed this job while the runner was held for
+    #: a loading device (schema v34, WP CAP-503-FIX-1a, operator Weg B): it
+    #: runs alongside that device by choice and is never paused for it.
+    #: Cleared when the job ends or is paused manually again.
+    client_override: bool = False
     #: Place in the queue for a ``queued`` job (WP D20): ``0`` = runs next.
     #: ``null`` for every other status. Set by ``GET /v1/jobs`` and
     #: ``GET /v1/jobs/{id}``; the list itself stays newest-first.
@@ -714,6 +719,7 @@ def pause_job(
 @router.post("/v1/jobs/{job_id}/resume", response_model=JobControlOut)
 def resume_job(
     job_id: int,
+    request: Request,
     open_db: DbOpener = Depends(db_opener),
 ) -> JobControlOut:
     """Resume a paused job (WP 3.12). ``404`` unknown, ``409`` if not paused.
@@ -726,9 +732,18 @@ def resume_job(
     Completes inside the request (``outcome: "resumed"``): nothing has to be
     stopped, the worker simply finds the job at the head of the queue on its
     next poll.
+
+    WP CAP-503-FIX-1a (operator Weg B 2026-11-21): while the runner is held
+    for a loading device (``GET /v1/client-priority``), this resume overrides
+    the hold for this job: it is claimed despite the hold, never paused for
+    the device, and reports ``client_override: true`` until it ends or is
+    paused manually again.
     """
+    controller: ClientPriority = request.app.state.client_priority
     with open_db() as conn:
-        result = jobs_queue.resume_job(conn, job_id)
+        result = jobs_queue.resume_job(
+            conn, job_id, client_override=controller.holding()
+        )
     return _control_response(job_id, result)
 
 
@@ -794,6 +809,13 @@ class ClientPriorityOut(BaseModel):
     clients: list[ClientLoadOut]
     #: Jobs paused with ``pause_reason: "client"`` (resumed automatically).
     paused_job_ids: list[int]
+    #: Queued or running jobs an operator resumed during a hold
+    #: (``client_override: true``): they run alongside the device by choice.
+    override_job_ids: list[int]
+    #: The hold was restored after a vault-api restart from jobs still tagged
+    #: ``client``; no device has been seen since, so ``clients`` is empty and
+    #: ``last_client_at`` is the restart, not a sighting.
+    restored: bool
     #: The last check could not tell the runner's address from a device's
     #: (no runner marker seen yet), so it did not hold the runner.
     runner_address_unknown: bool
@@ -814,6 +836,7 @@ def get_client_priority(
     state = controller.state()
     with open_db() as conn:
         paused = jobs_queue.client_paused_ids(conn)
+        overrides = jobs_queue.client_override_ids(conn)
         names = client_names.ip_names(conn) if state.clients else {}
 
     def iso(moment: datetime | None) -> str | None:
@@ -835,5 +858,7 @@ def get_client_priority(
             for c in state.clients
         ],
         paused_job_ids=paused,
+        override_job_ids=overrides,
+        restored=state.restored,
         runner_address_unknown=state.runner_address_unknown,
     )

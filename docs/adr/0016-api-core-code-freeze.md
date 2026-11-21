@@ -708,32 +708,48 @@ CAP-503-FIX-1b).
     ring's "now" window for non-runner MISS bytes (>= 512 KiB/s = a client
     loads); holds for 120 s after the last sighting (`IDLE_GAP_SECONDS`,
     constant, no env var). Fail-safe: event log off or runner address
-    unknown = no hold.
+    unknown = no hold. Operator decision 2026-11-21 (Weg B): a manual
+    Resume during a hold overrides it for that job (`client_override`).
   - `vault_api/jobs.py`: `PAUSE_REASON_MANUAL`/`PAUSE_REASON_CLIENT`,
     `effective_pause_reason`, `pause_reason` in the job reads; manual pause
     records `manual` (and turns a `client` pause into a manual one instead
     of the old `409`); resume, cancel and `finish_job` clear it; new
     controller helpers `has_client_priority_work`, `running_prefill_ids`,
-    `client_paused_ids`, `request_client_pause`, `withdraw_client_pause`,
-    `resume_client_paused` (all conditional, `BEGIN IMMEDIATE`).
-    `claim_next_job`, `recover_stale_jobs`, `park_paused` and
+    `client_paused_ids`, `client_override_ids`, `request_client_pause`,
+    `withdraw_client_pause` (clears the request, keeps the tag),
+    `resume_client_paused` (each selects once and writes by id inside
+    `BEGIN IMMEDIATE`). `resume_job` takes `client_override`; manual pause,
+    resume, cancel, `finish_job` and `recover_stale_jobs` clear the tags as
+    documented; `claim_next_job` gains `overridden_only`. `park_paused` and
     `ACTIVE_STATUSES` are unchanged.
   - `vault_api/db.py`: schema v34, `jobs.pause_reason` (nullable TEXT, NULL
-    reads as manual); the per-column job step now runs on every existing
-    database.
-  - `vault_api/live_tier.py`: `runner_mark_addrs` (addresses that sent a
-    runner marker line inside the ring), so a new runner address is known
-    before the next sweep applies its marker. Traffic figures unchanged.
-  - `vault_api/worker.py`: optional `hold` gate; while it answers `True` no
-    queued job is claimed (a failing gate opens).
+    reads as manual) and `jobs.client_override` (nullable INTEGER); the
+    per-column job step now runs on every existing database.
+  - `vault_api/live_tier.py`: `runner_marks` (marker lines inside the ring:
+    address, token, time), so a new runner address is known before the next
+    sweep applies its marker. Traffic figures unchanged.
+  - `vault_api/runner_identity.py`: `live_mark_valid`, the sweep's token
+    rules read-only (nothing consumed), so a LAN host requesting the marker
+    path changes nothing here either; the core comment at the
+    runner-mark location ("a LAN host requesting this path changes
+    nothing") therefore stays true.
+  - `vault_api/worker.py`: optional `hold` gate; while it answers `True`
+    only jobs with `client_override` are claimed (a failing gate opens).
   - `vault_api/main.py`: creates and starts/stops the controller, wires the
     gate.
-  - `vault_api/routers/jobs.py`: `pause_reason` on `JobSummary`/`JobDetail`;
-    new read-only `GET /v1/client-priority`.
+  - `vault_api/routers/jobs.py`: `pause_reason` and `client_override` on
+    `JobSummary`/`JobDetail`; resume passes the hold state; new read-only
+    `GET /v1/client-priority`.
 - Not frozen, listed for completeness: `api/tests/test_cap_503_fix_1a.py`,
   api/README.md ("Client priority over the prefill runner", endpoint
-  table). core/ and the runner process are untouched; the pause is the
-  existing WP 3.12 path (the cache is the progress store).
+  table), `docs/PROJECT_PLAN.md` §6. core/ and the runner process are
+  untouched; the pause is the existing WP 3.12 path (the cache is the
+  progress store).
+- Known limits: the unknown-runner guard is global, not per address. If
+  some runner address is known (an older window) but the running runner's
+  own marker never reached the log, its MISS counts as a device's and it
+  pauses itself about every two minutes until a marker for its address is
+  seen. A device behind the runner's address gets no priority.
 
 Every other frozen-path change still needs its own user decision and note
 here.

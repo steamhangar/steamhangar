@@ -180,6 +180,13 @@ STOP_REQUEST_PAUSE = "pause"
 PAUSE_REASON_MANUAL = "manual"
 PAUSE_REASON_CLIENT = "client"
 
+#: WP CAP-503-FIX-1a (schema v34, operator decision 2026-11-21, Weg B):
+#: ``jobs.client_override = 1`` = an operator resumed this job while the
+#: runner was held for a client, so it runs alongside the loading device by
+#: choice. The worker may claim it during a hold and the controller never
+#: client-pauses it. Cleared at every terminal transition and on a manual
+#: pause (NULL/0 = no override).
+
 #: Columns returned by the job read helpers. ``log_excerpt`` is intentionally
 #: excluded from the *list* query (see ``list_jobs``). ``updated``/
 #: ``up_to_date``/``summary_parse_ok`` (schema v4, WP 3.3) are SteamPrefill's
@@ -192,12 +199,13 @@ PAUSE_REASON_CLIENT = "client"
 #: for the same reason as ``gc_execute``: two small scalars that answer
 #: "since when has this been paused?" and "is a cancel already on its way?" —
 #: the two questions a polling UI otherwise has to guess at.
-#: ``pause_reason`` (schema v34, WP CAP-503-FIX-1a) likewise: one small
-#: scalar that tells a manual pause from a client-priority one.
+#: ``pause_reason`` and ``client_override`` (schema v34, WP CAP-503-FIX-1a)
+#: likewise: small scalars that tell a manual pause from a client-priority
+#: one and say whether the job runs alongside a loading device by choice.
 _JOB_COLUMNS = (
     "id, appid, type, status, created_at, started_at, finished_at, log_excerpt, "
     "updated, up_to_date, summary_parse_ok, gc_execute, paused_at, stop_request, "
-    "pause_reason"
+    "pause_reason, client_override"
 )
 
 #: Cap on stored log excerpts. 4 KiB is enough to show the tail of a
@@ -295,6 +303,8 @@ def _row_to_dict(row: sqlite3.Row) -> dict[str, object]:
     out: dict[str, object] = {key: row[key] for key in row.keys()}
     if "pause_reason" in out:
         out["pause_reason"] = effective_pause_reason(out)
+    if "client_override" in out:
+        out["client_override"] = bool(out["client_override"])
     return out
 
 
@@ -683,7 +693,7 @@ def list_jobs(
         f"""
         SELECT id, appid, type, status, created_at, started_at, finished_at,
                updated, up_to_date, summary_parse_ok, gc_execute,
-               paused_at, stop_request, pause_reason
+               paused_at, stop_request, pause_reason, client_override
         FROM jobs
         WHERE ? IS NULL
            OR status IN (?, ?, ?)
@@ -696,7 +706,9 @@ def list_jobs(
     return [_row_to_dict(row) for row in rows]
 
 
-def claim_next_job(conn: sqlite3.Connection) -> dict[str, object] | None:
+def claim_next_job(
+    conn: sqlite3.Connection, overridden_only: bool = False
+) -> dict[str, object] | None:
     """Atomically claim the first queued job (see ``move_queued_job``). None if empty.
 
     Order is ``COALESCE(order_key, id), id``: FIFO by id for every job nobody
@@ -712,12 +724,17 @@ def claim_next_job(conn: sqlite3.Connection) -> dict[str, object] | None:
     ``paused`` rows are invisible here (WP 3.12) — a paused job re-enters the
     queue only through ``resume_job``, and because it keeps its original id it
     is then claimed before anything queued during the pause.
+
+    ``overridden_only`` (WP CAP-503-FIX-1a): while the runner is held for a
+    client, the worker claims only jobs an operator resumed during the hold
+    (``client_override = 1``), in the same order.
     """
+    override_sql = " AND client_override = 1" if overridden_only else ""
     with immediate_transaction(conn):
         row = conn.execute(
-            """
+            f"""
             SELECT id FROM jobs
-            WHERE status = ?
+            WHERE status = ?{override_sql}
             ORDER BY COALESCE(order_key, id), id
             LIMIT 1
             """,
@@ -776,7 +793,7 @@ def finish_job(
         UPDATE jobs
         SET status = ?, finished_at = ?, log_excerpt = ?,
             updated = ?, up_to_date = ?, summary_parse_ok = ?,
-            stop_request = NULL, pause_reason = NULL
+            stop_request = NULL, pause_reason = NULL, client_override = NULL
         WHERE id = ?
         """,
         (
@@ -1018,7 +1035,8 @@ def cancel_job(conn: sqlite3.Connection, job_id: int) -> ControlResult:
                 """
                 UPDATE jobs
                 SET status = ?, finished_at = ?, log_excerpt = ?,
-                    stop_request = NULL, pause_reason = NULL
+                    stop_request = NULL, pause_reason = NULL,
+                    client_override = NULL
                 WHERE id = ? AND status = ?
                 """,
                 (
@@ -1147,7 +1165,7 @@ def request_pause(conn: sqlite3.Connection, job_id: int) -> ControlResult:
             conn.execute(
                 """
                 UPDATE jobs SET status = ?, paused_at = ?, stop_request = NULL,
-                    pause_reason = ?
+                    pause_reason = ?, client_override = NULL
                 WHERE id = ? AND status = ?
                 """,
                 (STATUS_PAUSED, utcnow_iso(), PAUSE_REASON_MANUAL, job_id, STATUS_QUEUED),
@@ -1168,7 +1186,8 @@ def request_pause(conn: sqlite3.Connection, job_id: int) -> ControlResult:
         if job_status == STATUS_PAUSED and row["pause_reason"] == PAUSE_REASON_CLIENT:
             # WP CAP-503-FIX-1a: keep a client-priority pause parked for good.
             conn.execute(
-                "UPDATE jobs SET pause_reason = ? WHERE id = ? AND status = ?",
+                "UPDATE jobs SET pause_reason = ?, client_override = NULL "
+                "WHERE id = ? AND status = ?",
                 (PAUSE_REASON_MANUAL, job_id, STATUS_PAUSED),
             )
             after = conn.execute(
@@ -1197,8 +1216,8 @@ def request_pause(conn: sqlite3.Connection, job_id: int) -> ControlResult:
             )
 
         conn.execute(
-            "UPDATE jobs SET stop_request = ?, pause_reason = ? "
-            "WHERE id = ? AND status = ?",
+            "UPDATE jobs SET stop_request = ?, pause_reason = ?, "
+            "client_override = NULL WHERE id = ? AND status = ?",
             (STOP_REQUEST_PAUSE, PAUSE_REASON_MANUAL, job_id, STATUS_RUNNING),
         )
         after = conn.execute(
@@ -1298,19 +1317,23 @@ def move_queued_job(
 
 #: The one paused -> queued transition (``resume_job`` and, since WP
 #: CAP-503-FIX-1a, ``resume_client_paused``). See ``resume_job`` for why the
-#: ``run_*`` columns are reset; ``pause_reason`` is cleared with them.
-_RESUME_SET_SQL = """
+#: ``run_*`` columns are reset; ``pause_reason`` is cleared with them, and
+#: ``client_override`` is set from the caller (1 = a manual resume during a
+#: hold, NULL otherwise).
+_RESUME_SQL = """
     UPDATE jobs SET status = ?, stop_request = NULL, pause_reason = NULL,
+        client_override = ?,
         run_use_force = NULL, run_before_json = NULL,
         run_claimed_by = NULL, run_claimed_at = NULL,
         run_heartbeat_at = NULL, run_completed_at = NULL,
         run_result_json = NULL
+    WHERE id = ? AND status = ?
 """
-_RESUME_SQL = _RESUME_SET_SQL + "WHERE id = ? AND status = ?"
-_RESUME_CLIENT_SQL = _RESUME_SET_SQL + "WHERE id = ? AND status = ? AND pause_reason = ?"
 
 
-def resume_job(conn: sqlite3.Connection, job_id: int) -> ControlResult:
+def resume_job(
+    conn: sqlite3.Connection, job_id: int, client_override: bool = False
+) -> ControlResult:
     """``POST /v1/jobs/{id}/resume``: put a paused job back in the queue.
 
     **A resumed job lands at its old place (WP 3.12; ``order_key`` since WP D20).**
@@ -1342,6 +1365,12 @@ def resume_job(conn: sqlite3.Connection, job_id: int) -> ControlResult:
     from a never-handed-off one until its own ``handoff_run`` writes a fresh
     attempt. ``resume_job`` is the only transition back to ``queued`` (there
     is no retry path), so this is the one place that needs it.
+
+    **``client_override`` (WP CAP-503-FIX-1a, operator Weg B 2026-11-21).**
+    The endpoint passes ``True`` when the runner is held for a client right
+    now: the operator's resume then overrides the hold for this job (it is
+    claimed during the hold and never client-paused) until it ends or is
+    paused manually again.
     """
     with immediate_transaction(conn):
         row = conn.execute(
@@ -1361,7 +1390,10 @@ def resume_job(conn: sqlite3.Connection, job_id: int) -> ControlResult:
                 ),
             )
 
-        conn.execute(_RESUME_SQL, (STATUS_QUEUED, job_id, STATUS_PAUSED))
+        conn.execute(
+            _RESUME_SQL,
+            (STATUS_QUEUED, 1 if client_override else None, job_id, STATUS_PAUSED),
+        )
         after = conn.execute(
             f"SELECT {_JOB_COLUMNS} FROM jobs WHERE id = ?", (job_id,)
         ).fetchone()
@@ -1382,6 +1414,7 @@ def resume_job(conn: sqlite3.Connection, job_id: int) -> ControlResult:
             detail=(
                 f"Job {job_id} is queued again and, keeping its original job "
                 "id, runs before anything enqueued while it was paused. " + tail
+                + (CLIENT_OVERRIDE_TAIL if client_override else "")
             ),
         )
 
@@ -1391,11 +1424,38 @@ def resume_job(conn: sqlite3.Connection, job_id: int) -> ControlResult:
 # --------------------------------------------------------------------------
 #
 # ``vault_api/client_priority.py`` decides WHEN; these helpers are the only
-# writes it makes, each one conditional and inside ``BEGIN IMMEDIATE`` like
-# every other control transition, so a racing operator click resolves one way
-# or the other. They reuse the manual pause/resume path unchanged (the worker
-# terminates SteamPrefill and parks the job; resume puts it back at its old
-# place), only tagged ``pause_reason = 'client'``.
+# writes it makes. Each one selects its rows with ONE query (also used as the
+# read-first check, so a tick with nothing to do takes no write lock) and
+# writes them by id inside ``BEGIN IMMEDIATE``: under that lock the selection
+# cannot change between the SELECT and the UPDATE, so the filter exists once.
+# They reuse the manual pause/resume path unchanged (the worker terminates
+# SteamPrefill and parks the job; resume puts it back at its old place), only
+# tagged ``pause_reason = 'client'``.
+
+#: Running prefill jobs the controller may pause: no operator request pending
+#: (a cancel or manual pause always wins) and no operator override.
+_CLIENT_PAUSE_CANDIDATES_SQL = """
+    SELECT id FROM jobs
+    WHERE status = 'running' AND type = 'prefill' AND stop_request IS NULL
+      AND COALESCE(client_override, 0) = 0
+    ORDER BY id
+"""
+
+#: Running jobs with a client pause the worker has not honoured yet.
+_CLIENT_PAUSE_PENDING_SQL = """
+    SELECT id FROM jobs
+    WHERE status = 'running' AND stop_request = 'pause' AND pause_reason = 'client'
+    ORDER BY id
+"""
+
+#: Jobs parked by the controller (never a manual pause).
+_CLIENT_PAUSED_SQL = """
+    SELECT id FROM jobs WHERE status = 'paused' AND pause_reason = 'client' ORDER BY id
+"""
+
+
+def _ids(conn: sqlite3.Connection, sql: str) -> list[int]:
+    return [int(r["id"]) for r in conn.execute(sql).fetchall()]
 
 
 def has_client_priority_work(conn: sqlite3.Connection) -> bool:
@@ -1424,9 +1484,15 @@ def running_prefill_ids(conn: sqlite3.Connection) -> list[int]:
 
 def client_paused_ids(conn: sqlite3.Connection) -> list[int]:
     """Ids of jobs parked by the controller, oldest first."""
+    return _ids(conn, _CLIENT_PAUSED_SQL)
+
+
+def client_override_ids(conn: sqlite3.Connection) -> list[int]:
+    """Queued or running jobs an operator resumed during a hold (they run
+    alongside a loading device by choice)."""
     rows = conn.execute(
-        "SELECT id FROM jobs WHERE status = ? AND pause_reason = ? ORDER BY id",
-        (STATUS_PAUSED, PAUSE_REASON_CLIENT),
+        "SELECT id FROM jobs WHERE status IN (?, ?) AND client_override = 1 ORDER BY id",
+        (STATUS_QUEUED, STATUS_RUNNING),
     ).fetchall()
     return [int(r["id"]) for r in rows]
 
@@ -1434,36 +1500,19 @@ def client_paused_ids(conn: sqlite3.Connection) -> list[int]:
 def request_client_pause(conn: sqlite3.Connection) -> list[int]:
     """Ask the worker to pause every running PREFILL job for a client.
 
-    Only a job with no pending request (``stop_request IS NULL``): an
-    operator's cancel or manual pause always wins. GC jobs are never touched
-    (they load nothing from the internet, and a running GC job cannot be
-    paused). Returns the ids that got the request. Reads first, so a tick
-    with nothing to do takes no write lock.
+    Only a job with no pending request (an operator's cancel or manual pause
+    always wins) and no operator override. GC jobs are never touched (they
+    load nothing from the internet, and a running GC job cannot be paused).
+    Returns the ids that got the request.
     """
-    if not conn.execute(
-        "SELECT 1 FROM jobs WHERE status = ? AND type = ? AND stop_request IS NULL LIMIT 1",
-        (STATUS_RUNNING, JOB_TYPE_PREFILL),
-    ).fetchone():
+    if not _ids(conn, _CLIENT_PAUSE_CANDIDATES_SQL):
         return []
     with immediate_transaction(conn):
-        ids = [
-            int(r["id"])
-            for r in conn.execute(
-                """
-                SELECT id FROM jobs
-                WHERE status = ? AND type = ? AND stop_request IS NULL
-                ORDER BY id
-                """,
-                (STATUS_RUNNING, JOB_TYPE_PREFILL),
-            ).fetchall()
-        ]
+        ids = _ids(conn, _CLIENT_PAUSE_CANDIDATES_SQL)
         for job_id in ids:
             conn.execute(
-                """
-                UPDATE jobs SET stop_request = ?, pause_reason = ?
-                WHERE id = ? AND status = ? AND stop_request IS NULL
-                """,
-                (STOP_REQUEST_PAUSE, PAUSE_REASON_CLIENT, job_id, STATUS_RUNNING),
+                "UPDATE jobs SET stop_request = ?, pause_reason = ? WHERE id = ?",
+                (STOP_REQUEST_PAUSE, PAUSE_REASON_CLIENT, job_id),
             )
     return ids
 
@@ -1471,62 +1520,42 @@ def request_client_pause(conn: sqlite3.Connection) -> list[int]:
 def withdraw_client_pause(conn: sqlite3.Connection) -> list[int]:
     """Take back a client pause the worker has not honoured yet (the device
     went idle first). A manual request is never touched. Returns the ids.
-    If the worker parks the job in the same instant, the next
-    ``resume_client_paused`` puts it back. Reads first (no write lock when
-    there is nothing to withdraw)."""
-    if not conn.execute(
-        "SELECT 1 FROM jobs WHERE status = ? AND stop_request = ? AND pause_reason = ? LIMIT 1",
-        (STATUS_RUNNING, STOP_REQUEST_PAUSE, PAUSE_REASON_CLIENT),
-    ).fetchone():
+
+    Clears ``stop_request`` only and KEEPS ``pause_reason = 'client'``: the
+    worker may have read the request already and park the job right after
+    (``park_paused``), and the tag is what lets the next
+    ``resume_client_paused`` put it back. On a running job with no pending
+    request the tag is inert (``effective_pause_reason`` reports ``None``) and
+    every later transition overwrites or clears it.
+    """
+    if not _ids(conn, _CLIENT_PAUSE_PENDING_SQL):
         return []
     with immediate_transaction(conn):
-        ids = [
-            int(r["id"])
-            for r in conn.execute(
-                """
-                SELECT id FROM jobs
-                WHERE status = ? AND stop_request = ? AND pause_reason = ?
-                ORDER BY id
-                """,
-                (STATUS_RUNNING, STOP_REQUEST_PAUSE, PAUSE_REASON_CLIENT),
-            ).fetchall()
-        ]
+        ids = _ids(conn, _CLIENT_PAUSE_PENDING_SQL)
         for job_id in ids:
-            conn.execute(
-                """
-                UPDATE jobs SET stop_request = NULL, pause_reason = NULL
-                WHERE id = ? AND status = ? AND stop_request = ?
-                  AND pause_reason = ?
-                """,
-                (job_id, STATUS_RUNNING, STOP_REQUEST_PAUSE, PAUSE_REASON_CLIENT),
-            )
+            conn.execute("UPDATE jobs SET stop_request = NULL WHERE id = ?", (job_id,))
     return ids
 
 
 def resume_client_paused(conn: sqlite3.Connection) -> list[int]:
     """Resume every job the controller paused, through the same transition
     as ``resume_job`` (back to ``queued`` with its original id, so it runs
-    first again). A manual pause (``pause_reason`` NULL or ``manual``) is
-    never resumed here. Returns the resumed ids. Reads first (no write lock
-    when nothing is client-paused)."""
-    resumed: list[int] = []
-    if not client_paused_ids(conn):
-        return resumed
+    first again, no override). A manual pause (``pause_reason`` NULL or
+    ``manual``) is never resumed here. Returns the resumed ids."""
+    if not _ids(conn, _CLIENT_PAUSED_SQL):
+        return []
     with immediate_transaction(conn):
-        for job_id in [
-            int(r["id"])
-            for r in conn.execute(
-                "SELECT id FROM jobs WHERE status = ? AND pause_reason = ? ORDER BY id",
-                (STATUS_PAUSED, PAUSE_REASON_CLIENT),
-            ).fetchall()
-        ]:
-            cursor = conn.execute(
-                _RESUME_CLIENT_SQL,
-                (STATUS_QUEUED, job_id, STATUS_PAUSED, PAUSE_REASON_CLIENT),
-            )
-            if cursor.rowcount:
-                resumed.append(job_id)
-    return resumed
+        ids = _ids(conn, _CLIENT_PAUSED_SQL)
+        for job_id in ids:
+            conn.execute(_RESUME_SQL, (STATUS_QUEUED, None, job_id, STATUS_PAUSED))
+    return ids
+
+
+#: Added to the resume ``detail`` when the resume overrides a client hold.
+CLIENT_OVERRIDE_TAIL = (
+    " A device is loading through the cache right now; by your resume this "
+    "job runs alongside it and is not paused for it."
+)
 
 
 #: Message stored on jobs recovered by ``recover_stale_jobs``.
@@ -1617,11 +1646,14 @@ def recover_stale_jobs(conn: sqlite3.Connection, queue_mode: bool = False) -> in
             # transition like every other, and db.py's column comment
             # promises the one-shot flag is cleared at each of them. A
             # cancel/pause that raced the dead process would otherwise
-            # survive on an 'error' row forever.
+            # survive on an 'error' row forever. pause_reason and
+            # client_override (WP CAP-503-FIX-1a) are cleared for the same
+            # reason, like in finish_job.
             conn.execute(
                 """
                 UPDATE jobs SET status = ?, finished_at = ?, log_excerpt = ?,
-                    stop_request = NULL
+                    stop_request = NULL, pause_reason = NULL,
+                    client_override = NULL
                 WHERE id = ?
                 """,
                 (STATUS_ERROR, finished_at, STALE_JOB_MESSAGE, int(row["id"])),

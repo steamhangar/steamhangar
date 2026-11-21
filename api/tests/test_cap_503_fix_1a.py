@@ -15,6 +15,7 @@ is the prefill runner.
 from __future__ import annotations
 
 import sqlite3
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -213,20 +214,49 @@ def test_two_clients_add_up_and_are_listed_highest_rate_first(settings, conn) ->
 # ---------------------------------------------------------------------------
 
 
+def client_paused_job(conn: sqlite3.Connection, settings: Settings, appid: int = 730) -> int:
+    """A second job, parked by a controller of its own, so a release has a
+    client-paused row to resume next to the manual one under test."""
+    job_id = running_job(conn, appid)
+    clock = Clock(NOW)
+    controller, _tier = make_controller(settings, clock)
+    miss(settings, clock, BIG)
+    controller.tick(conn)
+    worker_parks(conn, job_id)
+    return job_id
+
+
 def test_a_manual_pause_is_never_resumed_by_the_controller(settings, conn) -> None:
     known_runner(conn)
     job_id = running_job(conn)
     assert jobs.request_pause(conn, job_id).outcome == jobs.CONTROL_REQUESTED
     assert job(conn, job_id)["pause_reason"] == jobs.PAUSE_REASON_MANUAL
     worker_parks(conn, job_id)
-    clock = Clock(NOW)
+    other = client_paused_job(conn, settings)
+    clock = Clock(NOW + timedelta(seconds=1))
     controller, _tier = make_controller(settings, clock)
     for _ in range(3):
-        controller.tick(conn)
         clock.advance(GAP)
+        controller.tick(conn)
+    # The release path ran (the client-paused job is back in the queue)...
+    assert job(conn, other)["status"] == jobs.STATUS_QUEUED
+    # ...and left the manual pause alone.
     row = job(conn, job_id)
     assert row["status"] == jobs.STATUS_PAUSED
     assert row["pause_reason"] == jobs.PAUSE_REASON_MANUAL
+
+
+def test_an_old_paused_row_without_a_tag_is_never_resumed(settings, conn) -> None:
+    # A row paused before schema v34 (pause_reason NULL) next to a client one.
+    known_runner(conn)
+    old = running_job(conn)
+    jobs.request_pause(conn, old)
+    worker_parks(conn, old)
+    conn.execute("UPDATE jobs SET pause_reason = NULL WHERE id = ?", (old,))
+    conn.commit()
+    other = client_paused_job(conn, settings)
+    assert jobs.resume_client_paused(conn) == [other]
+    assert job(conn, old)["status"] == jobs.STATUS_PAUSED
 
 
 def test_a_manual_pause_during_a_hold_survives_the_release(settings, conn) -> None:
@@ -240,9 +270,26 @@ def test_a_manual_pause_during_a_hold_survives_the_release(settings, conn) -> No
     jobs.request_pause(conn, job_id)
     worker_parks(conn, job_id)
     assert job(conn, job_id)["pause_reason"] == jobs.PAUSE_REASON_MANUAL
+    other = client_paused_job(conn, settings)
     clock.advance(GAP)
     assert controller.tick(conn).holding is False
+    assert job(conn, other)["status"] == jobs.STATUS_QUEUED
     assert job(conn, job_id)["status"] == jobs.STATUS_PAUSED
+
+
+def test_a_pending_manual_pause_survives_a_holding_tick(settings, conn) -> None:
+    known_runner(conn)
+    job_id = running_job(conn)
+    jobs.request_pause(conn, job_id)
+    clock = Clock(NOW)
+    controller, _tier = make_controller(settings, clock)
+    miss(settings, clock, BIG)
+    assert controller.tick(conn).holding is True
+    row = job(conn, job_id)
+    assert row["stop_request"] == jobs.STOP_REQUEST_PAUSE
+    assert row["pause_reason"] == jobs.PAUSE_REASON_MANUAL
+    raw = conn.execute("SELECT pause_reason FROM jobs WHERE id = ?", (job_id,)).fetchone()
+    assert raw[0] == jobs.PAUSE_REASON_MANUAL
 
 
 def test_pause_on_a_client_paused_job_makes_it_a_manual_pause(settings, conn) -> None:
@@ -261,8 +308,10 @@ def test_pause_on_a_client_paused_job_makes_it_a_manual_pause(settings, conn) ->
     # A second press is the old 409: it is already (manually) paused.
     assert jobs.request_pause(conn, job_id).outcome == jobs.CONTROL_CONFLICT
 
+    other = client_paused_job(conn, settings)
     clock.advance(GAP)
     controller.tick(conn)
+    assert job(conn, other)["status"] == jobs.STATUS_QUEUED
     assert job(conn, job_id)["status"] == jobs.STATUS_PAUSED
 
 
@@ -279,7 +328,12 @@ def test_the_controller_never_overwrites_an_operator_request(settings, conn) -> 
     assert row["pause_reason"] is None
 
 
-def test_manual_resume_of_a_client_paused_job_clears_the_tag(settings, conn) -> None:
+# ---------------------------------------------------------------------------
+# Operator override (Weg B, 2026-11-21): a manual Resume during a hold
+# ---------------------------------------------------------------------------
+
+
+def held_and_parked(settings: Settings, conn: sqlite3.Connection) -> tuple[ClientPriority, Clock, int]:
     known_runner(conn)
     job_id = running_job(conn)
     clock = Clock(NOW)
@@ -287,14 +341,109 @@ def test_manual_resume_of_a_client_paused_job_clears_the_tag(settings, conn) -> 
     miss(settings, clock, BIG)
     controller.tick(conn)
     worker_parks(conn, job_id)
-    assert jobs.resume_job(conn, job_id).outcome == jobs.CONTROL_RESUMED
-    raw = conn.execute("SELECT pause_reason FROM jobs WHERE id = ?", (job_id,)).fetchone()
-    assert raw[0] is None
-    # Still holding: the worker's gate keeps the resumed job queued.
-    clock.advance(5)
+    return controller, clock, job_id
+
+
+def raw_override(conn: sqlite3.Connection, job_id: int) -> object:
+    return conn.execute("SELECT client_override FROM jobs WHERE id = ?", (job_id,)).fetchone()[0]
+
+
+def test_resume_during_a_hold_overrides_it_and_is_never_client_paused(settings, conn) -> None:
+    controller, clock, job_id = held_and_parked(settings, conn)
+    result = jobs.resume_job(conn, job_id, client_override=True)
+    assert result.outcome == jobs.CONTROL_RESUMED
+    assert result.detail.endswith(jobs.CLIENT_OVERRIDE_TAIL)
+    row = job(conn, job_id)
+    assert row["status"] == jobs.STATUS_QUEUED and row["client_override"] is True
+    assert row["pause_reason"] is None
+    # The gate lets it through while holding; nothing else.
+    jobs.enqueue_prefill(conn, 730)
+    claimed = jobs.claim_next_job(conn, overridden_only=True)
+    assert claimed is not None and claimed["id"] == job_id
+    assert jobs.claim_next_job(conn, overridden_only=True) is None
+    # Running alongside the device: holding ticks never pause it.
+    for _ in range(3):
+        clock.advance(5)
+        miss(settings, clock, BIG)
+        assert controller.tick(conn).holding is True
+    row = job(conn, job_id)
+    assert row["stop_request"] is None and row["client_override"] is True
+    assert jobs.client_override_ids(conn) == [job_id]
+
+
+def test_resume_outside_a_hold_sets_no_override(settings, conn) -> None:
+    _controller, _clock, job_id = held_and_parked(settings, conn)
+    jobs.resume_job(conn, job_id)
+    assert job(conn, job_id)["client_override"] is False
+    assert raw_override(conn, job_id) is None
+
+
+def test_the_override_ends_with_a_manual_pause(settings, conn) -> None:
+    controller, clock, job_id = held_and_parked(settings, conn)
+    # queued + override, then a manual pause of the queued job
+    jobs.resume_job(conn, job_id, client_override=True)
+    jobs.request_pause(conn, job_id)
+    assert raw_override(conn, job_id) is None
+    # resumed again with override, claimed, then a manual pause while running
+    jobs.resume_job(conn, job_id, client_override=True)
+    jobs.claim_next_job(conn, overridden_only=True)
+    jobs.request_pause(conn, job_id)
+    assert raw_override(conn, job_id) is None
+    worker_parks(conn, job_id)
+    # a manual pause of a client-paused job also ends a stale override
+    conn.execute(
+        "UPDATE jobs SET pause_reason = 'client', client_override = 1 WHERE id = ?", (job_id,)
+    )
+    conn.commit()
+    jobs.request_pause(conn, job_id)
+    assert raw_override(conn, job_id) is None
+
+
+@pytest.mark.parametrize("end", ["finish", "cancel_queued", "cancel_paused", "recover"])
+def test_the_override_ends_with_the_job(settings, conn, end) -> None:
+    _controller, _clock, job_id = held_and_parked(settings, conn)
+    jobs.resume_job(conn, job_id, client_override=True)
+    if end == "finish":
+        jobs.claim_next_job(conn, overridden_only=True)
+        jobs.finish_job(conn, job_id, jobs.STATUS_DONE, "ok")
+    elif end == "cancel_queued":
+        jobs.cancel_job(conn, job_id)
+    elif end == "cancel_paused":
+        conn.execute("UPDATE jobs SET status = 'paused' WHERE id = ?", (job_id,))
+        conn.commit()
+        jobs.cancel_job(conn, job_id)
+    else:
+        jobs.claim_next_job(conn, overridden_only=True)
+        assert jobs.recover_stale_jobs(conn) == 1
+        conn.commit()
+    assert raw_override(conn, job_id) is None
+    row = conn.execute("SELECT pause_reason FROM jobs WHERE id = ?", (job_id,)).fetchone()
+    assert row[0] is None
+
+
+def test_recover_clears_a_pending_client_pause_tag(settings, conn) -> None:
+    known_runner(conn)
+    job_id = running_job(conn)
+    clock = Clock(NOW)
+    controller, _tier = make_controller(settings, clock)
     miss(settings, clock, BIG)
-    assert controller.tick(conn).holding is True
+    controller.tick(conn)
+    assert jobs.recover_stale_jobs(conn) == 1
+    conn.commit()
+    raw = conn.execute(
+        "SELECT status, pause_reason, stop_request FROM jobs WHERE id = ?", (job_id,)
+    ).fetchone()
+    assert tuple(raw) == (jobs.STATUS_ERROR, None, None)
+
+
+def test_an_automatic_resume_sets_no_override(settings, conn) -> None:
+    controller, clock, job_id = held_and_parked(settings, conn)
+    conn.execute("UPDATE jobs SET client_override = 1 WHERE id = ?", (job_id,))
+    conn.commit()
+    clock.advance(GAP)
+    controller.tick(conn)
     assert job(conn, job_id)["status"] == jobs.STATUS_QUEUED
+    assert raw_override(conn, job_id) is None
 
 
 # ---------------------------------------------------------------------------
@@ -315,6 +464,28 @@ def test_a_client_pause_not_yet_honoured_is_withdrawn_at_release(settings, conn)
     row = job(conn, job_id)
     assert row["status"] == jobs.STATUS_RUNNING
     assert row["stop_request"] is None and row["pause_reason"] is None
+    # The tag stays on the row (inert while nothing is pending).
+    raw = conn.execute("SELECT pause_reason FROM jobs WHERE id = ?", (job_id,)).fetchone()
+    assert raw[0] == jobs.PAUSE_REASON_CLIENT
+
+
+def test_a_job_parked_right_after_the_withdraw_is_resumed_on_the_next_tick(settings, conn) -> None:
+    known_runner(conn)
+    job_id = running_job(conn)
+    clock = Clock(NOW)
+    controller, _tier = make_controller(settings, clock)
+    miss(settings, clock, BIG)
+    controller.tick(conn)
+    clock.advance(GAP)
+    controller.tick(conn)  # release: the pending pause is withdrawn
+    # The worker had read the request already and parks the job now.
+    jobs.park_paused(conn, job_id, "[stub] SteamPrefill terminated")
+    row = job(conn, job_id)
+    assert row["status"] == jobs.STATUS_PAUSED
+    assert row["pause_reason"] == jobs.PAUSE_REASON_CLIENT
+    clock.advance(5)
+    controller.tick(conn)
+    assert job(conn, job_id)["status"] == jobs.STATUS_QUEUED
 
 
 def test_a_restart_adopts_client_paused_jobs_and_resumes_them_after_the_gap(settings, conn) -> None:
@@ -330,9 +501,11 @@ def test_a_restart_adopts_client_paused_jobs_and_resumes_them_after_the_gap(sett
     second, _tier2 = make_controller(settings, clock)
     state = second.tick(conn)
     assert state.holding is True and state.since == clock()
+    assert state.restored is True and state.clients == ()
     assert job(conn, job_id)["status"] == jobs.STATUS_PAUSED
     clock.advance(GAP)
-    assert second.tick(conn).holding is False
+    state = second.tick(conn)
+    assert state.holding is False and state.restored is False
     assert job(conn, job_id)["status"] == jobs.STATUS_QUEUED
 
 
@@ -364,30 +537,63 @@ def test_an_unknown_runner_address_never_holds(settings, conn) -> None:
     assert job(conn, job_id)["stop_request"] is None
 
 
-def test_a_marker_in_the_ring_makes_a_new_runner_address_known(settings, conn) -> None:
-    job_id = running_job(conn)
-    clock = Clock(NOW)
-    controller, tier = make_controller(settings, clock)
+def marker(settings: Settings, clock: Clock, token: str, addr: str = RUNNER) -> None:
     append_log(
         Path(settings.event_log_path),
         event_line(
             time=iso(clock() - timedelta(seconds=10)),
-            addr=RUNNER,
+            addr=addr,
             cache_status=runner_identity.MARK_CACHE_STATUS,
             depot="-",
-            uri="/steamhangar/runner-mark/" + "a" * 32,
+            uri=runner_identity.mark_path(token),
             bytes_sent="0",
             http_status="204",
         ),
     )
+
+
+def test_a_marker_in_the_ring_makes_a_new_runner_address_known(settings, conn) -> None:
+    job_id = running_job(conn)
+    clock = Clock(NOW)
+    controller, tier = make_controller(settings, clock)
+    token = runner_identity.issue_token(conn, "vault-runner", now=clock() - timedelta(seconds=12))
+    marker(settings, clock, token)
     miss(settings, clock, BIG, addr=RUNNER)
     state = controller.tick(conn)
-    assert tier.runner_mark_addrs(clock()) == frozenset({RUNNER})
+    assert [m[:2] for m in tier.runner_marks(clock())] == [(RUNNER, token)]
     assert state.runner_address_unknown is False and state.holding is False
     clock.advance(5)
     miss(settings, clock, BIG, addr=PC)
     assert controller.tick(conn).holding is True
     assert job(conn, job_id)["pause_reason"] == jobs.PAUSE_REASON_CLIENT
+
+
+def test_a_fake_marker_from_a_lan_host_changes_nothing(settings, conn) -> None:
+    # vault-core logs any request to the marker path; a token nobody issued
+    # must neither make the runner "known" nor make the host a runner.
+    job_id = running_job(conn)
+    clock = Clock(NOW)
+    controller, tier = make_controller(settings, clock)
+    marker(settings, clock, "b" * 32, addr=PC)
+    miss(settings, clock, BIG, addr=RUNNER)
+    state = controller.tick(conn)
+    assert [m[0] for m in tier.runner_marks(clock())] == [PC]
+    assert state.runner_address_unknown is True and state.holding is False
+    assert job(conn, job_id)["stop_request"] is None
+
+
+def test_live_mark_rules_match_the_sweep(settings, conn) -> None:
+    issued = NOW - timedelta(minutes=2)
+    token = runner_identity.issue_token(conn, "vault-runner", now=issued)
+    valid = runner_identity.live_mark_valid
+    assert valid(conn, token, RUNNER, issued) is True
+    assert valid(conn, "c" * 32, RUNNER, issued) is False  # never issued
+    assert valid(conn, token, RUNNER, issued + runner_identity.MARK_VALID_AFTER + timedelta(seconds=1)) is False
+    assert valid(conn, token, RUNNER, issued - runner_identity.MARK_VALID_BEFORE - timedelta(seconds=1)) is False
+    conn.execute("UPDATE runner_marks SET consumed_addr = ? WHERE token = ?", (RUNNER, token))
+    conn.commit()
+    assert valid(conn, token, RUNNER, issued) is True  # consumed by this address
+    assert valid(conn, token, PC, issued) is False  # replayed from another host
 
 
 def test_no_work_means_the_event_log_is_never_read(settings, conn, monkeypatch) -> None:
@@ -423,45 +629,66 @@ def _worker(settings: Settings, hold) -> PrefillWorker:
     return PrefillWorker(settings, hold=hold)
 
 
-def test_the_worker_claims_nothing_while_holding(settings, conn, monkeypatch) -> None:
-    queued, _ = jobs.enqueue_prefill(conn, 440)
-    calls: list[str] = []
+def run_worker_once(settings: Settings, answer, monkeypatch) -> list[int]:
+    """One loop of the real worker with the real claim; the job body is
+    replaced, so nothing runs. Returns the claimed job ids."""
+    executed: list[int] = []
     worker: PrefillWorker
 
     def hold() -> bool:
-        calls.append("hold")
         worker._stop.set()  # one loop iteration, then _run returns
-        return True
-
-    def claim(_conn):
-        raise AssertionError("claimed while holding")
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
 
     worker = _worker(settings, hold)
-    monkeypatch.setattr(jobs, "claim_next_job", claim)
+    monkeypatch.setattr(
+        worker, "_execute", lambda _conn, claimed: executed.append(int(claimed["id"]))
+    )
     worker._run()
-    assert calls == ["hold"]
+    return executed
+
+
+def test_the_worker_claims_nothing_while_holding(settings, conn, monkeypatch) -> None:
+    queued, _ = jobs.enqueue_prefill(conn, 440)
+    assert run_worker_once(settings, True, monkeypatch) == []
     assert job(conn, int(queued["id"]))["status"] == jobs.STATUS_QUEUED  # type: ignore[arg-type]
 
 
-def test_the_worker_claims_when_not_holding_and_when_the_gate_fails(settings, monkeypatch) -> None:
-    for hold_answer in (False, RuntimeError("gate broken")):
-        claimed: list[int] = []
-        worker: PrefillWorker
+def test_the_worker_claims_only_an_overridden_job_while_holding(settings, conn, monkeypatch) -> None:
+    first, _ = jobs.enqueue_prefill(conn, 440)
+    second, _ = jobs.enqueue_prefill(conn, 730)
+    conn.execute("UPDATE jobs SET client_override = 1 WHERE id = ?", (second["id"],))
+    conn.commit()
+    assert run_worker_once(settings, True, monkeypatch) == [second["id"]]
+    assert job(conn, int(first["id"]))["status"] == jobs.STATUS_QUEUED  # type: ignore[arg-type]
 
-        def hold(answer=hold_answer) -> bool:
-            if isinstance(answer, Exception):
-                raise answer
-            return answer
 
-        def claim(_conn, box=claimed):
-            box.append(1)
-            worker._stop.set()
-            return None
+@pytest.mark.parametrize("answer", [False, RuntimeError("gate broken")])
+def test_the_worker_claims_in_order_when_not_holding_or_the_gate_fails(
+    settings, conn, monkeypatch, answer
+) -> None:
+    first, _ = jobs.enqueue_prefill(conn, 440)
+    second, _ = jobs.enqueue_prefill(conn, 730)
+    conn.execute("UPDATE jobs SET client_override = 1 WHERE id = ?", (second["id"],))
+    conn.commit()
+    assert run_worker_once(settings, answer, monkeypatch) == [first["id"]]
 
-        worker = _worker(settings, hold)
-        monkeypatch.setattr(jobs, "claim_next_job", claim)
-        worker._run()
-        assert claimed == [1]
+
+def test_the_lifespan_starts_the_controller_and_wires_the_gate(settings) -> None:
+    app = create_app(settings)
+    with TestClient(app):
+        controller: ClientPriority = app.state.client_priority
+        worker: PrefillWorker = app.state.worker
+        assert controller._thread is not None and controller._thread.is_alive()
+        assert worker._held() is False
+        with controller._lock:
+            controller._state = replace(controller._state, holding=True)
+        assert worker._held() is True
+        with controller._lock:
+            controller._state = replace(controller._state, holding=False)
+        assert worker._held() is False
+    assert not controller._thread.is_alive()
 
 
 # ---------------------------------------------------------------------------
@@ -509,6 +736,36 @@ def test_the_api_reports_the_reason_and_the_clients(settings, conn) -> None:
     assert reply.status_code == 200 and reply.json()["outcome"] == "immediate"
     assert client.get(f"/v1/jobs/{job_id}", headers=AUTH).json()["pause_reason"] == "manual"
     assert client.get("/v1/client-priority", headers=AUTH).json()["paused_job_ids"] == []
+
+
+def test_the_resume_endpoint_overrides_only_while_holding(settings, conn) -> None:
+    known_runner(conn)
+    job_id = running_job(conn)
+    clock = Clock(NOW)
+    app = create_app(settings)  # no `with`: no lifespan thread
+    app.state.live_tier = LiveTier(clock=clock)
+    client = TestClient(app)
+    miss(settings, clock, BIG)
+    app.state.client_priority.tick(conn)
+    worker_parks(conn, job_id)
+    body = client.get("/v1/client-priority", headers=AUTH).json()
+    assert body["override_job_ids"] == [] and body["restored"] is False
+
+    reply = client.post(f"/v1/jobs/{job_id}/resume", headers=AUTH)
+    assert reply.status_code == 200 and reply.json()["outcome"] == "resumed"
+    assert jobs.CLIENT_OVERRIDE_TAIL in reply.json()["detail"]
+    assert client.get(f"/v1/jobs/{job_id}", headers=AUTH).json()["client_override"] is True
+    listed = {j["id"]: j for j in client.get("/v1/jobs", headers=AUTH).json()}
+    assert listed[job_id]["client_override"] is True
+    assert client.get("/v1/client-priority", headers=AUTH).json()["override_job_ids"] == [job_id]
+
+    # Not holding: a resume is a plain resume.
+    client.post(f"/v1/jobs/{job_id}/pause", headers=AUTH)
+    clock.advance(GAP)
+    assert app.state.client_priority.tick(conn).holding is False
+    reply = client.post(f"/v1/jobs/{job_id}/resume", headers=AUTH)
+    assert jobs.CLIENT_OVERRIDE_TAIL not in reply.json()["detail"]
+    assert client.get(f"/v1/jobs/{job_id}", headers=AUTH).json()["client_override"] is False
 
 
 def test_pause_reason_is_null_unless_paused_or_pausing(settings, conn) -> None:
