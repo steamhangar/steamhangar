@@ -2204,6 +2204,16 @@ the ANDROID-INSTALLED-NITS-1 and SNACKBAR-LIVE-1 reviews, not measured). Open: C
 (candidate); the rollout Antrag for rc23 must flag the read-only services
 for the operator's own compose override.
 
+**RC23-HOLD** (operator decision 2026-11-21 evening, Weg C of A "tag now"
+/ B "tag after the next nightly" / C "hold"): the audit filled rc23, but
+none of the six packages planned for rc23 on 2026-11-01 was built. rc23
+is not tagged until all six are on `main`: APP-DL-STATS-1, APP-DL-CARD-1,
+OUTPUT-TRIM-TAP-1, CAP-503-FIX-1 (Weg A, client priority; not covered by
+the audit exception, so a change under `api/` or `core/` brings its own
+ADR-0016 addendum in the package, like CORE-FIX-2), APP-EXPERT-SWITCH-1, PROXY-VERSION-1 (promoted from candidate to
+rc23). The rc23 release notes get a section for them before the tag.
+ANDROID-TWIN-DETAIL-1 and CORE-LIVE-PARITY-1 stay rc24 candidates.
+
 ### Wave 0
 
 - **CI-CLOCK-1** (audit T-1; api; high / S; own branch `wp/ci-clock-1`,
