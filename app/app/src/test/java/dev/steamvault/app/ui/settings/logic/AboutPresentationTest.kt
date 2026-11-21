@@ -124,11 +124,18 @@ class AboutPresentationTest {
     }
 
     @Test
-    fun `MUTATION PIN -- vault-proxy keeps OK with dashes, its own note explains them`() {
-        val row = aboutRowFor(AboutComponentOut("vault-proxy", null, null, "ok"), api)
+    fun `MUTATION PIN -- vault-proxy shows its reported version, a dash (older proxy) gets the dash note`() {
+        // WP PROXY-VERSION-1 (web twin in about-view.test.js).
+        val row = aboutRowFor(AboutComponentOut("vault-proxy", "0.1.0-rc23", "0123456789abcdef0123456789abcdef01234567", "ok"), api)
         assertEquals(AboutDisplayStatus.OK, row.display)
         assertEquals(AboutNote.VAULT_PROXY, row.note)
+        assertEquals("0.1.0-rc23", row.version)
+        assertEquals("0123456", row.commit)
         assertFalse(row.showDashNote)
+        val old = aboutRowFor(AboutComponentOut("vault-proxy", null, null, "ok"), api)
+        assertEquals(AboutDisplayStatus.OK, old.display)
+        assertNull(old.version)
+        assertTrue(old.showDashNote)
         assertEquals(
             AboutDisplayStatus.CHECK,
             aboutRowFor(AboutComponentOut("vault-proxy", null, null, "unknown"), api).display,

@@ -265,14 +265,22 @@ test("MUTATION TARGET: vault-dns 'unknown' is N/A, dashes in both cells, the (i)
   assert.deepEqual(dns.info, [dns.note, DASH_NOTE, "Optional (compose profile dns)."]);
 });
 
-test("MUTATION TARGET: vault-proxy keeps OK with dashes; its (i) says the egress proxy does not report a version (no extra dash note)", () => {
-  const proxy = describeComponent({ name: "vault-proxy", version: null, commit: null, status: "ok", detail: null }, API);
+// WP PROXY-VERSION-1: the proxy reports the version and commit its refusal
+// page names; a dash only means an older proxy image, so it gets the dash note.
+test("MUTATION TARGET: vault-proxy shows the version and commit it reports; a dash (older proxy) gets the dash note", () => {
+  const proxy = describeComponent({ name: "vault-proxy", version: "0.1.0-rc23", commit: API.commit, status: "ok", detail: null }, API);
   assert.equal(proxy.statusWord, "OK");
-  assert.equal(proxy.version.text, "—");
-  assert.equal(proxy.commit.text, "—");
-  assert.match(proxy.note, /egress proxy does not report a version/i);
+  assert.equal(proxy.version.text, "0.1.0-rc23");
+  assert.equal(proxy.commit.text, API.commit.slice(0, 7));
+  assert.match(proxy.note, /^The egress proxy that limits where vault-api may connect\. OK means it answered/);
+  assert.doesNotMatch(proxy.note, /does not report a version/i);
   assert.equal(proxy.dashNote, null);
   assert.deepEqual(proxy.info, [proxy.note]);
+  const old = describeComponent({ name: "vault-proxy", version: null, commit: null, status: "ok", detail: null }, API);
+  assert.equal(old.statusWord, "OK");
+  assert.deepEqual([old.version.text, old.commit.text], ["—", "—"]);
+  assert.equal(old.dashNote, DASH_NOTE);
+  assert.deepEqual(old.info, [old.note, DASH_NOTE]);
   // vault-proxy 'unknown' = a misconfigured HTTP_PROXY or an unexpected
   // answer (egress lock possibly broken): Check.
   assert.equal(describeComponent({ name: "vault-proxy", status: "unknown" }, API).statusWord, "Check");

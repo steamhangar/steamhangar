@@ -180,7 +180,9 @@ fun aboutRowFor(component: AboutComponentOut, api: AboutComponentOut? = null): A
     }
     val version = aboutVersionText(component.version)
     val commit = aboutCommitText(component.commit)
-    val noteExplainsDash = kind == AboutComponentKind.VAULT_PROXY || kind == AboutComponentKind.STEAMPREFILL
+    // vault-proxy reports its version since WP PROXY-VERSION-1: a dash there
+    // means an older proxy image and gets the dash note (web twin).
+    val noteExplainsDash = kind == AboutComponentKind.STEAMPREFILL
     return AboutRow(
         name = component.name,
         kind = kind,

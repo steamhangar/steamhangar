@@ -807,7 +807,7 @@
     <string name="settings_about_note_core_not_reported">vault-core has not recorded a version yet. It records one in the shared cache volume each time it starts.</string>
     <string name="settings_about_note_vault_runner">OK means the runner checked in within the last 90 s.</string>
     <string name="settings_about_note_steamprefill">The SteamPrefill build that prefill jobs run with. SteamPrefill reports a version but no commit id.</string>
-    <string name="settings_about_note_vault_proxy">The egress proxy does not report a version. Its status is reachability only.</string>
+    <string name="settings_about_note_vault_proxy">The egress proxy that limits where vault-api may connect. OK means it answered and refused a host that is not on its allowlist.</string>
     <string name="settings_about_note_vault_dns">Optional component. vault-api does not check it, so there is no status to show.</string>
     <string name="settings_about_dash_note">A dash means the component did not report this value.</string>
     <string name="settings_about_trademark">SteamHangar is a community project and is not affiliated with Valve Corporation. “Steam” is a trademark of Valve Corporation.</string>

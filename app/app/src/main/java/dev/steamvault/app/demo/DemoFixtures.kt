@@ -321,7 +321,8 @@ internal fun seedClients(): List<ClientOut> = listOf(
  * (`vault_api/routers/about.py::AboutOut`): the six components in the
  * server's fixed order, each status word one the server can actually send
  * for that component (vault-core and vault-dns are ALWAYS `unknown`, never
- * probed; vault-proxy never has a version). Detail sentences modeled on
+ * probed; vault-proxy reports the version its refusal page names, WP
+ * PROXY-VERSION-1). Detail sentences modeled on
  * `vault_api/about.py`'s own.
  */
 internal fun seedAbout(): AboutOut {
@@ -338,9 +339,9 @@ internal fun seedAbout(): AboutOut {
             AboutComponentOut("vault-runner", "0.1.0", commit, "ok", checkedAt, "Last seen 12 s ago."),
             AboutComponentOut("steamprefill", "3.7.2", null, "ok", checkedAt, "Runs in vault-runner; version as the runner reported it."),
             AboutComponentOut(
-                "vault-proxy", null, null, "ok", checkedAt,
-                "Answers, and refuses a host that is not on the egress allowlist. Its version is not shown: reading it would " +
-                    "need a hole in the egress filter.",
+                "vault-proxy", "0.1.0", commit, "ok", checkedAt,
+                "Answers, and refuses a host that is not on the egress allowlist. Version and commit are the ones its " +
+                    "refusal page names.",
             ),
             AboutComponentOut(
                 "vault-dns", null, null, "unknown", checkedAt,

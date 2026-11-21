@@ -932,12 +932,12 @@ function handleGetAbout() {
       },
       {
         name: "vault-proxy",
-        version: null,
-        commit: null,
+        version: "0.1.0",
+        commit,
         status: "ok",
         checked_at: checkedAt,
         detail:
-          "Answers, and refuses a host that is not on the egress allowlist. Its version is not shown: reading it would need a hole in the egress filter.",
+          "Answers, and refuses a host that is not on the egress allowlist. Version and commit are the ones its refusal page names.",
       },
       {
         name: "vault-dns",
