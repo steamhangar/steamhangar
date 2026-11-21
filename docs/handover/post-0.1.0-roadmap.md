@@ -2559,6 +2559,14 @@ Follow-up of the rc23 wave 2 reviews (2026-11-21), rc24:
   (`GET /v1/client-priority` sends only Clients-page names), while
   "Loading now" names the same address by its agent name (demo:
   `10.10.0.21` vs `workshop-pc`). Use one name resolution for both.
+- DL-CARD-NITS-1 (app, from APP-DL-CARD-1) candidate APP-DL-CARD-SHOT-1:
+  a Roborazzi shot of a running and a held job card at 360dp / font 1.3
+  (no Android golden renders the job card); Android Pause stays a
+  Material outlined accent button while web uses plain `.btn` (app-wide
+  convention, 37 call sites); `GameDetailSheet` Delete edge uses danger at
+  alpha 0.6 instead of `vaultDangerButtonBorder`. Operator: the extra
+  remote branch `wp/app-dl-card-1-ci2` (CI rerun) can be deleted; the
+  devbox may not delete remote branches.
 - EXPERT-SWITCH-NITS-1 (app) the 48 dp row-height assert in
   `SettingsExpertSwitchTest` passes without `heightIn` at Robolectric's
   default width (the hint wraps); add a `w800dp` case or a source pin.
