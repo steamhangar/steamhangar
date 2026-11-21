@@ -389,8 +389,9 @@ private fun HeroLive(hero: HeroFigures) {
     }
 }
 
-/** Parts with their bold runs in the text colour (web `fillParts` + `.hcap b`). */
-private fun partsText(parts: List<HeroPart>): AnnotatedString = buildAnnotatedString {
+/** Parts with their bold runs in the text colour (web `fillParts` + `.hcap b`;
+ * WP APP-DL-CARD-1: also the job card's speed line, web `.job .m2 b`). */
+internal fun partsText(parts: List<HeroPart>): AnnotatedString = buildAnnotatedString {
     for (part in parts) {
         if (part.bold) {
             withStyle(SpanStyle(color = VaultColors.Text, fontWeight = FontWeight.Medium)) { append(part.text) }
@@ -404,10 +405,12 @@ private fun partsText(parts: List<HeroPart>): AnnotatedString = buildAnnotatedSt
  * WP ANDROID-DL-1: the status pill (web hero `stats-pill`, kit `.pill`):
  * Serving / Downloading / Verifying / Idle with its status icon on a
  * tinted capsule. TalkBack reads the word once; the icon's own kind label
- * ("Cached" for Serving) would contradict it.
+ * ("Cached" for Serving) would contradict it. WP APP-DL-CARD-1: the job
+ * card's pill too (web `createPill` on both), so the card and the
+ * Throughput card share one pill.
  */
 @Composable
-private fun StatusPill(status: HeroStatus) {
+internal fun StatusPill(status: HeroStatus) {
     // WP PILL-TONE-1: one tone per state, the disc's (toneFor), no local copy.
     val tone = toneFor(status.kind)
     Row(

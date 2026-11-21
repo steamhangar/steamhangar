@@ -837,6 +837,37 @@ export function jobSpeedText(entry, state, { verifying = false, nowMs = Date.now
   return (sofar ? `${speed} · ${sofar} loaded so far` : speed) + tail;
 }
 
+/**
+ * WP APP-DL-CARD-1: a figure in a job's speed line -- a speed or byte total
+ * from `formatSpeed` / `formatTrafficBytes` ("31.5 MB/s", "< 1 KB/s", "8.8
+ * GB", "~51.6 GB") or a duration from `formatEta` ("5 min", "2 h"). Written
+ * without backslashes so the Android twin pins the same string; used with
+ * the `g` flag by `jobFigureParts`.
+ */
+export const JOB_FIGURE_PATTERN = "(?:< |~)?[0-9]+(?:[.][0-9]+)? (?:(?:KB|MB|GB)(?:/s)?|min|h)(?![A-Za-z])";
+
+/**
+ * WP APP-DL-CARD-1: a job's speed line as text parts with its figures in
+ * bold (`{b}`), the anatomy of the Throughput card's caption and mini line
+ * (`.hcap b`, `.mini b`). The words stay as they are; a line without a
+ * figure ("Verifying files, no download speed") is one plain part, an empty
+ * or missing text no part.
+ * @param {string | null | undefined} text
+ * @returns {Array<string | {b: string}>}
+ */
+export function jobFigureParts(text) {
+  if (typeof text !== "string" || text === "") return [];
+  const parts = [];
+  let last = 0;
+  for (const m of text.matchAll(new RegExp(JOB_FIGURE_PATTERN, "g"))) {
+    if (m.index > last) parts.push(text.slice(last, m.index));
+    parts.push({ b: m[0] });
+    last = m.index + m[0].length;
+  }
+  if (last < text.length) parts.push(text.slice(last));
+  return parts;
+}
+
 // ---------------------------------------------------------------------
 // History filter (GET /v1/jobs?range=, WP D15b)
 // ---------------------------------------------------------------------

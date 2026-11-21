@@ -147,6 +147,7 @@ import { createRangeSegs } from "../components/range-segs.js";
 import { createDownloadsHero } from "../components/downloads-hero.js";
 import {
   createJobCard,
+  fillJobSpeed,
   createAttentionRow,
   createQueueRow,
   ROW_UPDATE_LABEL,
@@ -2085,8 +2086,8 @@ function paintJobSpeeds() {
       verifying: card.dataset.dk === KIND.VERIFY,
       etaRate: entry ? etaSmoother.rate(entry.job_id) : null,
     });
-    line.textContent = text || "";
-    line.hidden = !text;
+    // WP APP-DL-CARD-1: figures in bold, rebuilt only when the words change.
+    fillJobSpeed(line, text);
     // WP JOB-SIZE-1: an expected-depot line says where its figures come from.
     line.title = text ? jobSpeedNote(entry) : "";
   }
