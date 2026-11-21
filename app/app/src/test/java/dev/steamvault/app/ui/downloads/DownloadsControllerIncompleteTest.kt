@@ -59,14 +59,14 @@ private class CompletionStrings : DownloadsStrings {
     override fun queuedForDownload() = "queued"
 }
 
-/** WP CACHE-COMPLETE-1c: the controller half of "Complete now" / "Complete all". */
+/** WP CACHE-COMPLETE-1c: the controller half of "Complete now" / "Verify all". */
 class DownloadsControllerIncompleteTest {
 
     @Test
-    fun `MUTATION PIN -- Complete all posts exactly the listed ids to prefill verify, then re-reads the jobs`() = runTest {
+    fun `MUTATION PIN -- Verify all posts exactly the listed ids to prefill verify, then re-reads the jobs`() = runTest {
         val jobs = CompletionJobs()
         val c = DownloadsController(jobs, CompletionNoGames(), CompletionStrings())
-        c.startCompletion(this, listOf(30, 10), COMPLETE_ALL)
+        c.startCompletion(this, listOf(30, 10), VERIFY_ALL)
         advanceUntilIdle()
         assertEquals(listOf(listOf(30, 10)), jobs.verifies)
         assertTrue("never the plain, non-forced prefill", jobs.prefills.isEmpty())
@@ -89,12 +89,12 @@ class DownloadsControllerIncompleteTest {
         val gate = CompletableDeferred<Unit>()
         val jobs = CompletionJobs(gate)
         val c = DownloadsController(jobs, CompletionNoGames(), CompletionStrings())
-        c.startCompletion(this, emptyList(), COMPLETE_ALL)
+        c.startCompletion(this, emptyList(), VERIFY_ALL)
         c.startCompletion(this, listOf(10), 10)
         advanceUntilIdle()
         assertEquals(10, c.incompleteInFlight)
         c.startCompletion(this, listOf(20), 20)
-        c.startCompletion(this, listOf(10, 20), COMPLETE_ALL)
+        c.startCompletion(this, listOf(10, 20), VERIFY_ALL)
         gate.complete(Unit)
         advanceUntilIdle()
         assertEquals(listOf(listOf(10)), jobs.verifies)

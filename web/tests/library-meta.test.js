@@ -10,7 +10,6 @@ import { readFileSync } from "node:fs";
 import {
   applyMetaFilter,
   availableGenres,
-  matchesMeta,
   normalizeMetaFilter,
   unknownNote,
   DEFAULT_META_FILTER,
@@ -105,8 +104,8 @@ test("unknown metadata: excluded and counted by default, kept with include-unkno
   const on = applyMetaFilter(rows, f({ minRating: 80, includeUnknown: true }));
   assert.deepEqual(ids(on.games), [1, 3, 4, 5]);
   assert.equal(on.unknownExcluded, 0);
-  // A known failing clause still excludes with include-unknown (API rule).
-  assert.equal(matchesMeta(rows[1], f({ minRating: 80, includeUnknown: true })), false);
+  // A known failing clause still excludes with include-unknown (API rule):
+  // game 2 is missing from `on` above.
   // A game unknown for one clause but failing another is not "unknown-hidden".
   const mixed = applyMetaFilter([game(6, meta({ review_percent: null, coop: false }))], f({ minRating: 80, categories: ["coop"] }));
   assert.equal(mixed.unknownExcluded, 0);

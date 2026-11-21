@@ -3,9 +3,9 @@
  * per-client wording over `GET /v1/clients/overview` (WP D15b).
  *
  * Pins: an address client is named by its address and never called a PC;
- * the prefill runner (WP D15-RUNNER) is its own kind; "installed"
- * only for agent clients; a `null` from the server is a dash, a real zero
- * prints; the feed-disabled shape (stats/recent null) prints no stats line.
+ * the prefill runner (WP D15-RUNNER) is its own kind. The card's cells
+ * ("installed" only for agent clients, a `null` is a dash, a real zero
+ * prints, feed-disabled stats) are pinned in client-card.test.js.
  *
  * Run: node --test "web/tests/*.test.js"   (see web/tests/README.md)
  */
@@ -20,16 +20,11 @@ import {
   clientName,
   clientTitle,
   clientsSummaryText,
-  connectionChip,
-  installedText,
   isAddressClient,
   isAgentClient,
   isRunnerClient,
   lastActiveText,
-  loadingNowText,
-  recentAppsText,
-  statsText,
-  isAgentOutdated,
+  agentVersionIssue,
   outdatedAgentInfo,
   summaryTiles,
   splitValueUnit,
@@ -107,7 +102,6 @@ test("MUTATION TARGET: D15-RUNNER — the runner is titled by the server and des
   assert.equal(clientTitle(pc), clientName(pc), "every other client keeps clientName");
   assert.equal(clientKindText(runner), "This server's prefill downloads · 172.18.0.1");
   assert.equal(clientKindText({ ...runner, addresses: [] }), "This server's prefill downloads");
-  assert.equal(installedText(runner), null);
   assert.deepEqual(
     [isRunnerClient(runner), isAgentClient(runner), isAddressClient(runner)],
     [true, false, false],
@@ -121,47 +115,8 @@ test("wording: no 'yet' that promises self-healing; the agentless note never tel
   assert.match(AGENTLESS_NOTE, /A PC with vault-agent can also show up here by its address until the server can match the two\./);
 });
 
-test("connection chip: true/false/null map to three words and the .pchip classes", () => {
-  assert.deepEqual(connectionChip(agent()), { word: "Agent online", cls: "pchip pchip-on" });
-  assert.deepEqual(connectionChip(agent({ connected: false })), { word: "Agent offline", cls: "pchip pchip-off" });
-  assert.deepEqual(connectionChip(address({ connected: false })), { word: "No agent", cls: "pchip pchip-off" });
-  assert.deepEqual(connectionChip(address({ connected: true })), { word: "Loading", cls: "pchip pchip-on" });
-  assert.deepEqual(connectionChip(address({ connected: null })), { word: "No current data", cls: "pchip pchip-unknown" });
-});
-
-test("MUTATION TARGET: installed games only for agent clients; an unreadable snapshot says so", () => {
-  assert.equal(installedText(address()), null);
-  assert.equal(installedText(agent()), "2 games installed");
-  assert.equal(installedText(agent({ installed_app_count: 1 })), "1 game installed");
-  assert.equal(installedText(agent({ installed_app_count: 0 })), "0 games installed", "a real zero prints");
-  assert.equal(installedText(agent({ installed_app_count: null })), "Installed games: not reported");
-});
-
-test("MUTATION TARGET: loading now — null (feed not ok) is a dash, idle says nothing, loading names the speed and games", () => {
-  assert.equal(loadingNowText(agent({ loading_now: null })), "Loading now: —");
-  assert.equal(loadingNowText(agent({ loading_now: { loading: false, bytes_per_second: 0, apps: [], unattributed_bytes_per_second: 0 } })), "Loading now: nothing");
-  assert.equal(loadingNowText(agent()), "Loading now: 30.0 MB/s · Some Game");
-  assert.equal(
-    loadingNowText(address({ loading_now: { loading: true, bytes_per_second: 4 * MIB, apps: [], unattributed_bytes_per_second: 4 * MIB } })),
-    "Loading now: 4.0 MB/s · content not linked to one game",
-  );
+test("appLabel: a missing name is the neutral \"Unknown app\"", () => {
   assert.equal(appLabel({ appid: 7, name: null }), "Unknown app");
-});
-
-test("stats over the range; none with the feed disabled (stats null)", () => {
-  assert.equal(statsText(agent(), "7d"), "1.0 GB loaded in the last 7 days · hit rate 75%");
-  assert.equal(statsText(agent({ stats: { ...agent().stats, bytes_served: 0, hit_rate: null } }), "24h"), "0 GB loaded in the last 24 hours");
-  assert.equal(statsText(agent({ stats: null }), "7d"), null);
-});
-
-test("recently loaded: top three with sizes, '+N more', content without one game", () => {
-  const apps = [1, 2, 3, 4, 5].map((i) => ({ appid: i, name: `Game ${i}`, bytes_served: i * GIB, last_seen: "2026-10-13T20:00:00Z" }));
-  assert.equal(
-    recentAppsText(agent({ recent_apps: apps, recent_unattributed_bytes: 300 * MIB })),
-    "Loaded recently: Game 1 (1.0 GB), Game 2 (2.0 GB), Game 3 (3.0 GB), +2 more, 300 MB not linked to one game",
-  );
-  assert.equal(recentAppsText(agent({ recent_apps: [] })), null);
-  assert.equal(recentAppsText(agent({ recent_apps: null })), null);
 });
 
 test("last active and the page summary", () => {
@@ -228,15 +183,15 @@ test("splitValueUnit: number and unit for the kit's value<small>unit</small>", (
   assert.deepEqual(splitValueUnit("\u2014"), { value: "\u2014", unit: "" });
 });
 
-test("isAgentOutdated: differs only; unknown or non-release versions never warn (CLIENTS-3)", () => {
-  assert.equal(isAgentOutdated("0.1.0-rc19.3", "0.1.0-rc19.3"), false, "equal");
-  assert.equal(isAgentOutdated("0.1.0-rc18.1", "0.1.0-rc19.2"), true, "differs");
-  assert.equal(isAgentOutdated("0.1.0", "0.1.0-rc19.2"), true, "release vs rc differs");
-  assert.equal(isAgentOutdated("0.2.0", "0.1.0"), true, "newer agent differs too: the rule is 'differs'");
-  assert.equal(isAgentOutdated(" 0.1.0 ", "0.1.0"), false, "whitespace ignored");
+test("agentVersionIssue without a bundled agent: differs only; unknown or non-release versions never warn (CLIENTS-3)", () => {
+  assert.equal(agentVersionIssue("0.1.0-rc19.3", "0.1.0-rc19.3"), null, "equal");
+  assert.equal(agentVersionIssue("0.1.0-rc18.1", "0.1.0-rc19.2"), "server", "differs");
+  assert.equal(agentVersionIssue("0.1.0", "0.1.0-rc19.2"), "server", "release vs rc differs");
+  assert.equal(agentVersionIssue("0.2.0", "0.1.0"), "server", "newer agent differs too: the rule is 'differs'");
+  assert.equal(agentVersionIssue(" 0.1.0 ", "0.1.0"), null, "whitespace ignored");
   for (const unknown of [null, undefined, "", "  ", 7, "dev", "v0.1.0", "dev-1a2b3c4"]) {
-    assert.equal(isAgentOutdated(unknown, "0.1.0"), false, `agent ${String(unknown)}`);
-    assert.equal(isAgentOutdated("0.1.0", unknown), false, `server ${String(unknown)}`);
+    assert.equal(agentVersionIssue(unknown, "0.1.0"), null, `agent ${String(unknown)}`);
+    assert.equal(agentVersionIssue("0.1.0", unknown), null, `server ${String(unknown)}`);
   }
 });
 

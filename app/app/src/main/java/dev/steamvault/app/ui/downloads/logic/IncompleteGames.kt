@@ -6,14 +6,13 @@ import dev.steamvault.app.net.model.JobSummary
 import dev.steamvault.app.net.model.PrefillJobRef
 import dev.steamvault.app.net.model.ScheduleOut
 import dev.steamvault.app.polling.PollingIntervals.ACTIVE_JOB_STATUSES
-import dev.steamvault.app.ui.library.logic.isCompletable
 import dev.steamvault.app.ui.library.logic.isToolApp
 import dev.steamvault.app.ui.library.logic.knownPct
 import dev.steamvault.app.ui.library.logic.partitionCachedPrefillOutcome
 
 /**
  * "Incomplete (N)" in the Downloads screen and the toasts of "Verify" /
- * "Complete now" / "Complete all" (WP CACHE-COMPLETE-1c, Android twin of
+ * "Complete now" / "Verify all" (WP CACHE-COMPLETE-1c, Android twin of
  * the Downloads half of `web/js/lib/cache-completeness.js`). Pure decision
  * and wording logic -- `DownloadsController`/`DetailController` are the
  * glue, `IncompleteGamesTest` the pins, `CacheCompletenessWebTwinTest` the
@@ -26,8 +25,8 @@ import dev.steamvault.app.ui.library.logic.partitionCachedPrefillOutcome
  * `update_available` (it is listed under "Updates available", and "Update
  * now" completes it as well).
  *
- * **Actions.** "Complete now" (one row) and "Complete all" send `POST
- * /v1/prefill/verify` with exactly the ids they list -- "Complete all" only
+ * **Actions.** "Complete now" (one row) and "Verify all" send `POST
+ * /v1/prefill/verify` with exactly the ids they list -- "Verify all" only
  * the rows "Complete now" is offered for, never the server's own selection
  * (`POST /v1/prefill/incomplete` ignores jobs and update flags, so it could
  * force games this list does not show). A row short only of wrong-size
@@ -42,7 +41,8 @@ import dev.steamvault.app.ui.library.logic.partitionCachedPrefillOutcome
 object IncompleteWording {
     const val HEADING = "Incomplete"
     const val COMPLETE_NOW = "Verify"
-    const val COMPLETE_ALL = "Complete all"
+    /** VERIFY-ALL-LABEL-1: the web's `VERIFY_ALL_LABEL` (components/job-row.js). */
+    const val VERIFY_ALL = "Verify all"
     const val NOTE_PREFIX = "These complete automatically in the schedule window "
     const val NOTHING_TO_COMPLETE = "Nothing to complete."
     const val NOTHING_TO_VERIFY = "Nothing to verify."
@@ -87,17 +87,14 @@ fun pendingIncomplete(
         .map { it.first }
 }
 
-/** The ids "Complete all" sends: exactly the listed rows "Complete now" is
- * offered for, in list order. Empty = no "Complete all" button. */
-fun completableAppids(rows: List<GameSummary>): List<Int> = rows.filter { isCompletable(it) }.map { it.appid }
-
 /** "Incomplete (N)". */
 fun incompleteHeadingText(count: Int): String = "${IncompleteWording.HEADING} ($count)"
 
-/** "Complete all 2 games" -- the button's spoken label; [count] is the
- * number of rows "Complete now" is offered for. */
-fun completeAllSpokenLabel(count: Int): String =
-    "${IncompleteWording.COMPLETE_ALL} $count ${if (count == 1) UpdatesWording.GAME else UpdatesWording.GAMES}"
+/** "Verify all 2 games" -- the button's spoken label (web
+ * `verifyAllAriaLabel`); [count] is the number of rows "Complete now" is
+ * offered for. */
+fun verifyAllSpokenLabel(count: Int): String =
+    "${IncompleteWording.VERIFY_ALL} $count ${if (count == 1) UpdatesWording.GAME else UpdatesWording.GAMES}"
 
 /** "Complete now — Emberreach". */
 fun completeNowSpokenLabel(title: String): String = "${IncompleteWording.COMPLETE_NOW} — $title"

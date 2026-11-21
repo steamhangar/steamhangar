@@ -379,7 +379,7 @@ class DemoState private constructor(
 
     /**
      * WP CACHE-COMPLETE-1c: `POST /v1/prefill/verify` ("Verify", "Complete
-     * now", "Complete all"; api/README.md "Verify and complete"): flag
+     * now", "Verify all"; api/README.md "Verify and complete"): flag
      * `needs_force` first, then the one enqueue with `POST /v1/prefill`'s
      * dedupe. The demo job re-measures on success ([finishPrefillJob]).
      */

@@ -294,7 +294,7 @@ export const api = {
   prefill: (appids) => request("POST", "/v1/prefill", { body: { appids } }),
   prefillCached: () => untimed.request("POST", "/v1/prefill/cached"),
   // WP CACHE-COMPLETE-1c (api/README.md "Verify and complete"): "Verify",
-  // "Complete now" and "Complete all" queue a forced prefill per app id.
+  // "Complete now" and "Verify all" queue a forced prefill per app id.
   prefillVerify: (appids) => request("POST", "/v1/prefill/verify", { body: { appids } }),
   cancelJob: (id) => request("DELETE", `/v1/jobs/${id}`),
   pauseJob: (id) => request("POST", `/v1/jobs/${id}/pause`),

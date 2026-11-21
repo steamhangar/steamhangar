@@ -57,10 +57,6 @@ export function hasUpdateField(games) {
   return Array.isArray(games) && games.some((g) => g && typeof g.update_available === "boolean");
 }
 
-export function countUpdates(games) {
-  return Array.isArray(games) ? games.filter((g) => g && g.update_available === true).length : 0;
-}
-
 /** True when a `GET /v1/games` tick flipped any row's `update_available`.
  * The flag is not part of the card's structural key (`dispKind`), so the
  * patch path would neither move the card in/out of the "Updates" filter nor

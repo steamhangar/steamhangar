@@ -29,7 +29,6 @@ import {
   FAILURE_HINT,
   HINTS,
   LOGIN_COMMAND,
-  LOGIN_HINT,
   PUBLIC_IP_README_SECTION,
 } from "../js/lib/job-failure.js";
 import { appTitle, fillMissingNames, mergeOwnedLibrary, ownedNamesByAppid } from "../js/lib/owned-library.js";
@@ -95,6 +94,7 @@ test("prefill_failed (WP API-FIX-3) is read from the reason line and gets no hin
 });
 
 test("the login hint names the queue-mode command from deploy/README.md and says what to do next", () => {
+  const LOGIN_HINT = HINTS[FAILURE_HINT.NOT_LOGGED_IN];
   assert.equal(LOGIN_COMMAND, "docker compose exec -it vault-runner /opt/steamprefill/SteamPrefill select-apps");
   assert.match(LOGIN_HINT.body, /one-time interactive login on the server/);
   assert.match(LOGIN_HINT.body, /never sees or stores your Steam credentials/);

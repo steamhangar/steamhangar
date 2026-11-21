@@ -153,12 +153,6 @@ function stateFor(status) {
   return has(ABOUT_STATUS, status) ? ABOUT_STATUS[status] : "check";
 }
 
-/** The presentation of a server status word, without component rules.
- * @param {unknown} status */
-export function statusPresentation(status) {
-  return ABOUT_DISPLAY[stateFor(status)];
-}
-
 /**
  * The version cell. `null` -> {@link DASH}, anything else verbatim
  * (including `"invalid"`). Long values wrap in CSS; the full value is also

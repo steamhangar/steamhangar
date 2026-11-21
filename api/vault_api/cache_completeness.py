@@ -853,8 +853,9 @@ def is_incomplete(figure: Completeness) -> bool:
 
 
 def is_completable(figure: Completeness) -> bool:
-    """Incomplete AND short of at least one chunk file -- what "Complete all"
-    and the scheduler's automatic completion act on. A game short only of
+    """Incomplete AND short of at least one chunk file -- what
+    ``POST /v1/prefill/incomplete``, the UIs' "Verify all" and the
+    scheduler's automatic completion act on. A game short only of
     chunk files with the wrong size is incomplete but not completable: a
     forced prefill serves those files from disk and cannot replace them
     (repair: POST /v1/cache/{appid}/repair, CACHE-REPAIR-1)."""

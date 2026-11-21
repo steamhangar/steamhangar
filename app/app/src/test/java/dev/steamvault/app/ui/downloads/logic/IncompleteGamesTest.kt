@@ -16,7 +16,8 @@ import org.junit.Test
  * verify toasts (`IncompleteGames.kt`), the same guarantees the web twin
  * pins by name:
  *  C7 the list: known and < 100, no tool app, no active job, no update flag;
- *  C8 "Complete all" sends only the rows "Complete now" is offered for;
+ *  C8 "Verify all" sends only the rows "Complete now" is offered for
+ *     (pinned at the call site in CacheComplete1cWiringTest);
  *  C9 a verify that dedupes onto a RUNNING job says "verifies on the next
  *     run", never that it was queued;
  *  C10 the schedule note: window -> automatic, no window -> manual only,
@@ -79,17 +80,10 @@ class IncompleteGamesTest {
     }
 
     @Test
-    fun `MUTATION TARGET C8 -- Complete all sends exactly the completable listed rows`() {
-        val rows = pendingIncomplete(listOf(game(1, "A", 40), game(2, "B", 99, missing = 0), game(3, "C", 70)), emptyList())
-        assertEquals(listOf(1, 3), completableAppids(rows))
-        assertEquals(emptyList<Int>(), completableAppids(listOf(game(2, "B", 99, missing = 0))))
-    }
-
-    @Test
     fun `Incomplete texts -- heading, spoken labels, the row's figure`() {
         assertEquals("Incomplete (3)", incompleteHeadingText(3))
-        assertEquals("Complete all 1 game", completeAllSpokenLabel(1))
-        assertEquals("Complete all 2 games", completeAllSpokenLabel(2))
+        assertEquals("Verify all 1 game", verifyAllSpokenLabel(1))
+        assertEquals("Verify all 2 games", verifyAllSpokenLabel(2))
         assertEquals("Verify — Aurora", completeNowSpokenLabel("Aurora"))
         assertEquals("42%", incompletePctText(game(1, "A", 42)))
         assertEquals("—", incompletePctText(game(1, "A", null)))

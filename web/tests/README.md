@@ -3798,7 +3798,7 @@ for the game and its packages with bytes, damaged-only members left out).
 Downloads: "Incomplete (N)" after "Updates available", only with an
 entry: own figure known and below 100, no tool app, no active job, no
 update flag. "Complete now" (`POST /v1/prefill/verify`) only when a chunk
-file is missing, else the damaged note; "Complete all" (`POST
+file is missing, else the damaged note; "Verify all" (`POST
 /v1/prefill/verify` with exactly the listed completable rows, like "Update
 all") only when a row can be completed. Note:
 window -> "These complete automatically in the schedule window …",
@@ -3823,7 +3823,7 @@ cached display; update precedence removed; group figure ignored; Incomplete
 list without the update or the active-job filter; completable always true;
 running-dedupe wording; the Library key without `data-ck` (both the
 painted and the computed half — removing only one makes every tick a
-rebuild, so the test stays green); "Complete all" sending every row (incl. damaged-only); "Complete all" via /v1/prefill/incomplete; never-played
+rebuild, so the test stays green); "Verify all" sending every row (incl. damaged-only); "Verify all" via /v1/prefill/incomplete; never-played
 pill on partial; list compact CSS; demo selects damaged-only; demo without
 re-measure; sheet Verify without the packages; damaged row with a button;
 section always shown; Verify including damaged-only members; schedule note

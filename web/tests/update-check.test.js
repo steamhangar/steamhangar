@@ -21,7 +21,6 @@ import {
   UPDATE_PHASE,
   UPDATE_POLL_INTERVAL_MS,
   UPDATE_POLL_MAX_TICKS,
-  countUpdates,
   createUpdateCheckRunner,
   describeUpdateOutcome,
   hasUpdateField,
@@ -126,10 +125,6 @@ test("hasUpdateField: true only when a row carries a BOOLEAN update_available", 
   assert.equal(hasUpdateField([{ appid: 1, update_available: null }]), false);
   assert.equal(hasUpdateField([{ appid: 1 }, { appid: 2, update_available: false }]), true);
   assert.equal(hasUpdateField(null), false);
-});
-
-test("countUpdates counts update_available === true only", () => {
-  assert.equal(countUpdates([{ update_available: true }, { update_available: false }, { update_available: 1 }, {}]), 1);
 });
 
 test("updateFlagsChanged: a flip either way is a change; any other field drift is not", () => {

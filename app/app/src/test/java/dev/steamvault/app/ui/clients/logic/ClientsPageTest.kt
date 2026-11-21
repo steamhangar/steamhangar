@@ -9,7 +9,6 @@ import dev.steamvault.app.net.model.LoadingNowOut
 import dev.steamvault.app.net.model.RecentAppOut
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.time.Instant
@@ -109,7 +108,6 @@ class ClientsPageTest {
         assertEquals(clientName(agent), clientTitle(agent))
         assertEquals("This server's prefill downloads · 172.18.0.1", clientKindText(runner))
         assertEquals("This server's prefill downloads", clientKindText(runner.copy(addresses = emptyList())))
-        assertNull(installedText(runner))
         assertEquals(listOf(true, false, false), listOf(isRunnerClient(runner), isAgentClient(runner), isAddressClient(runner)))
         assertEquals(listOf(true, false), listOf(isAddressClient(address), isAddressClient(agent)))
         // The runner is not an agentless machine: no agentless note for it.
@@ -122,46 +120,6 @@ class ClientsPageTest {
         assertEquals("This server's prefill downloads · 172.18.0.1", card.meta)
         assertEquals(ClientKind.RUNNER, card.kind)
         assertEquals(listOf("loaded", "hitrate", "unlinked"), card.stats.map { it.key })
-    }
-
-    @Test
-    fun `connection chip has three honest states`() {
-        assertEquals(ConnectionChip("Agent online", ConnectionLook.ON), connectionChip(agent))
-        assertEquals(ConnectionChip("Agent offline", ConnectionLook.OFF), connectionChip(agent.copy(connected = false)))
-        assertEquals(ConnectionChip("No agent", ConnectionLook.OFF), connectionChip(address.copy(connected = false)))
-        assertEquals(ConnectionChip("Loading", ConnectionLook.ON), connectionChip(address.copy(connected = true)))
-        assertEquals(ConnectionChip("No current data", ConnectionLook.UNKNOWN), connectionChip(address))
-    }
-
-    @Test
-    fun `loading now line`() {
-        assertEquals("Loading now: 40.0 MB/s · Graveyard Keeper 2", loadingNowText(agent))
-        assertEquals("Loading now: —", loadingNowText(address))
-        assertEquals("Loading now: nothing", loadingNowText(agent.copy(loading_now = LoadingNowOut(loading = false))))
-        assertEquals(
-            "Loading now: 4.5 MB/s · content not linked to one game",
-            loadingNowText(agent.copy(loading_now = LoadingNowOut(loading = true, bytes_per_second = 4.5 * mib))),
-        )
-    }
-
-    @Test
-    fun `installed only for agents`() {
-        assertEquals("12 games installed", installedText(agent))
-        assertEquals("1 game installed", installedText(agent.copy(installed_app_count = 1)))
-        assertEquals("Installed games: not reported", installedText(agent.copy(installed_app_count = null)))
-        assertNull(installedText(address))
-    }
-
-    @Test
-    fun `stats and recent apps lines`() {
-        assertEquals("3.0 GB loaded in the last 7 days · hit rate 90%", statsText(agent, "7d"))
-        assertNull(statsText(address, "7d"))
-        assertEquals(
-            "Loaded recently: Graveyard Keeper 2 (2.0 GB), Unknown app (300 MB), Third (0 GB), +1 more, 1.0 GB not linked to one game",
-            recentAppsText(agent),
-        )
-        assertNull(recentAppsText(address))
-        assertNull(recentAppsText(agent.copy(recent_apps = emptyList(), recent_unattributed_bytes = 0)))
     }
 
     @Test
@@ -195,8 +153,11 @@ class ClientsPageTest {
     @Test
     fun `loading now prefers live_now over the swept loading_now`() {
         val live = LoadingNowOut(loading = true, bytes_per_second = 4.5 * mib)
-        assertEquals("Loading now: 4.5 MB/s · content not linked to one game", loadingNowText(agent.copy(live_now = live)))
-        assertEquals("Loading now: nothing", loadingNowText(agent.copy(live_now = LoadingNowOut(loading = false))))
+        assertEquals(
+            NowBox.Loading("Content not linked to one game", "Loading into the cache", "4.5 MB/s"),
+            nowBox(agent.copy(live_now = live)),
+        )
+        assertEquals(NowBox.Idle("Loading nothing right now"), nowBox(agent.copy(live_now = LoadingNowOut(loading = false))))
     }
 
     @Test

@@ -808,7 +808,7 @@ def maybe_sweep(
     # (which is already claimed).
     # WP AUTO-VERIFY-1: the operator's switch ("Complete cached games
     # automatically", default on). Off, nothing is forced here; manual Verify
-    # and "Complete all" are separate routes and stay available.
+    # and "Verify all" are separate routes and stay available.
     completing: tuple[int, ...] = ()
     try:
         if settings.auto_complete_cached:

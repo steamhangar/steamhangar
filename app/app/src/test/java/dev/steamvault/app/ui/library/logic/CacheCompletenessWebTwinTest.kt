@@ -12,7 +12,9 @@ import java.io.File
  * (same pattern as `UpdatesAvailableWebTwinTest`). WP ANDROID-DL-2 retired
  * the `DAMAGED_NOTE` pin: the app shows `repairNoteFor` (CacheRepairWebTwinTest). VALUE drift -> update
  * CacheCompleteness.kt / IncompleteGames.kt; GRAMMAR drift (the web changed
- * the string form) -> adjust this test.
+ * the string form) -> adjust this test. VERIFY-ALL-LABEL-1: the section-head
+ * "Verify all" ([IncompleteWording.VERIFY_ALL]) is pinned against
+ * `web/js/components/job-row.js`, the label the web renders.
  */
 class CacheCompletenessWebTwinTest {
     private val file = File("../../web/js/lib/cache-completeness.js")
@@ -31,7 +33,6 @@ class CacheCompletenessWebTwinTest {
         CompletenessWording.ZERO_GB,
         IncompleteWording.HEADING,
         IncompleteWording.COMPLETE_NOW,
-        IncompleteWording.COMPLETE_ALL,
         IncompleteWording.NOTHING_TO_COMPLETE,
         IncompleteWording.NOTHING_TO_VERIFY,
         IncompleteWording.QUEUED_TO_COMPLETE,
@@ -62,7 +63,6 @@ class CacheCompletenessWebTwinTest {
         "if (!Number.isInteger(n) || n <= 0) return \"\";",
         "`\${VERIFY_LABEL}${CompletenessWording.DASH}\${title}`",
         "`\${COMPLETE_NOW_LABEL} — \${title}`",
-        "`\${COMPLETE_ALL_LABEL} \${count} \${count === 1 ? \"game\" : \"games\"}`",
         "`\${INCOMPLETE_HEADING} (\${count})`",
         "`${IncompleteWording.NOTE_PREFIX}\${formatWindow(schedule.window)}.`",
         "} ${IncompleteWording.QUEUED_TO} \${",
@@ -90,6 +90,21 @@ class CacheCompletenessWebTwinTest {
                 )
             }
         }
+    }
+
+    @Test
+    fun `VERIFY-ALL-LABEL-1 -- Verify all and its spoken label are job-row's, and Incomplete renders them`() {
+        val rowFile = File("../../web/js/components/job-row.js")
+        check(rowFile.exists()) { "No file at ${rowFile.absolutePath}: MOVED -> update this path; DELETED -> retire the pin deliberately." }
+        val row = rowFile.readText(Charsets.UTF_8)
+        val decl = "export const VERIFY_ALL_LABEL = \"${IncompleteWording.VERIFY_ALL}\";"
+        assertTrue("VALUE DRIFT: job-row.js no longer contains '$decl' -- update IncompleteWording.VERIFY_ALL.", row.contains(decl))
+        val spoken = "`\${VERIFY_ALL_LABEL} \${count} \${count === 1 ? \"game\" : \"games\"}`"
+        assertTrue("VALUE DRIFT: job-row.js no longer contains '$spoken' -- update verifyAllSpokenLabel.", row.contains(spoken))
+        val viewFile = File("../../web/js/views/downloads.js")
+        check(viewFile.exists()) { "No file at ${viewFile.absolutePath}: MOVED -> update this path; DELETED -> retire the pin deliberately." }
+        val call = "completionButton(VERIFY_ALL_LABEL, \"\", verifyAllAriaLabel(completable.length)"
+        assertTrue("WIRING DRIFT: views/downloads.js no longer builds the Incomplete button from '$call' -- re-check the label source.", viewFile.readText(Charsets.UTF_8).contains(call))
     }
 
     @Test

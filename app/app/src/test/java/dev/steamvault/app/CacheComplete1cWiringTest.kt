@@ -65,11 +65,11 @@ class CacheComplete1cWiringTest {
     }
 
     @Test
-    fun `MUTATION PIN -- Complete now sends its own id, Complete all exactly the completable listed rows`() {
+    fun `MUTATION PIN -- Complete now sends its own id, Verify all exactly the completable listed rows`() {
         assertCalledFrom(downloads, "controller.startCompletion(scope, listOf(row.appid), row.appid)", "DownloadsBody")
-        assertCalledFrom(downloads, "controller.startCompletion(scope, ids, COMPLETE_ALL)", "DownloadsBody")
+        assertCalledFrom(downloads, "controller.startCompletion(scope, ids, VERIFY_ALL)", "DownloadsBody")
         assertCalledFrom(incomplete, "val completable = rows.filter { it.completable }.map { it.appid }", "IncompleteHeader")
-        assertCalledFrom(incomplete, "onClick = { onCompleteAll(completable) }", "IncompleteHeader")
+        assertCalledFrom(incomplete, "onClick = { onVerifyAll(completable) }", "IncompleteHeader")
         assertCalledFrom(incomplete, "if (model.completable)", "IncompleteRow")
         // WP ANDROID-DL-2: the damaged-only note is the repair note now.
         assertCalledFrom(incomplete, "text = model.note,", "IncompleteRow")

@@ -4183,7 +4183,7 @@ Twin of the web's LIB-LIST-1 (`web/css/app.css` list grid,
   `ui/downloads/logic/IncompleteGames.kt`): measured below 100 %, no active
   job, no update flag, no tool app. "Complete now" only with missing chunk
   files, otherwise "Damaged chunks — SteamHangar can't repair these yet.";
-  "Complete all" sends exactly the listed completable ids to the verify
+  "Verify all" sends exactly the listed completable ids to the verify
   route; a schedule note says whether they complete in the window. Toasts
   say when a verify lands on a running job ("verifies on the next run").
 - **Demo mode** seeds Halcyon Ledger partially cached (86 %, completable),

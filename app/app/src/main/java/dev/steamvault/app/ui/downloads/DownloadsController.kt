@@ -316,16 +316,16 @@ class DownloadsController(
 
     // ---- Incomplete (WP CACHE-COMPLETE-1c, web downloads.js startCompletion) --
 
-    /** What a completion request in flight is for: [COMPLETE_ALL], an
+    /** What a completion request in flight is for: [VERIFY_ALL], an
      * appid, or `null`. One request at a time; every button of the section
      * is disabled meanwhile, the pressed one reads "Starting…". */
     var incompleteInFlight by mutableStateOf<Int?>(null)
         private set
 
     /**
-     * "Complete now" ([which] = the appid) or "Complete all" ([which] =
-     * [COMPLETE_ALL]): `POST /v1/prefill/verify` with exactly [appids] (for
-     * "Complete all": the listed rows "Complete now" is offered for, never
+     * "Complete now" ([which] = the appid) or "Verify all" ([which] =
+     * [VERIFY_ALL]): `POST /v1/prefill/verify` with exactly [appids] (for
+     * "Verify all": the listed rows "Complete now" is offered for, never
      * the server's own selection), a forced run per game. Then an
      * out-of-cadence jobs refresh, which moves the games into the queue.
      */
@@ -483,6 +483,6 @@ class DownloadsController(
  * (never a real appid). */
 const val UPDATES_ALL = -1
 
-/** [DownloadsController.incompleteInFlight] while "Complete all" is in
+/** [DownloadsController.incompleteInFlight] while "Verify all" is in
  * flight (never a real appid). */
-const val COMPLETE_ALL = -1
+const val VERIFY_ALL = -1

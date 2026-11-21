@@ -161,7 +161,7 @@ test("MUTATION TARGET -- wiring: the request is POST /v1/prefill/verify, worded 
   assert.match(s, /store\.refreshNow\(\)/);
   const apiSrc = readFileSync(new URL("../js/api.js", import.meta.url), "utf8");
   assert.match(apiSrc, /prefillVerify: \(appids\) => request\("POST", "\/v1\/prefill\/verify", \{ body: \{ appids \} \}\)/);
-  assert.doesNotMatch(apiSrc, /prefill\/incomplete/, "Complete all sends the listed ids, never the server's selection");
+  assert.doesNotMatch(apiSrc, /prefill\/incomplete/, "Verify all sends the listed ids, never the server's selection");
 });
 
 test("MUTATION TARGET -- wiring: the structural key carries the completeness part; the patch path refreshes the lines", () => {

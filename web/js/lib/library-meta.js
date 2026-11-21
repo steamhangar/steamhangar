@@ -155,12 +155,6 @@ function clauses(game, f) {
   return out;
 }
 
-/** Whether `game` passes the filter (unknown values per `includeUnknown`). */
-export function matchesMeta(game, f) {
-  if (!metaFilterActive(f)) return true;
-  return clauses(game, f).every((c) => (c === null ? f.includeUnknown : c));
-}
-
 /**
  * Apply the filter. `unknownExcluded` is the number of games the filter left
  * out ONLY because some value is unknown (0 while `includeUnknown` is on or

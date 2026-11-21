@@ -20,7 +20,6 @@ import { createFakeDom } from "./fake-dom.js";
 import {
   connectionPill,
   currentLoading,
-  loadingNowText,
   nowBox,
   summaryTiles,
 } from "../js/lib/clients-page.js";
@@ -57,7 +56,6 @@ test("MUTATION PIN: live_now wins over the swept loading_now (box, speed, pill, 
   assert.equal(box.loading, true);
   assert.equal(box.title, "Satisfactory");
   assert.equal(box.speed, "12.0 MB/s");
-  assert.match(loadingNowText(c), /Satisfactory/);
   assert.equal(connectionPill(c).text, "Downloading");
   assert.equal(loadingTile([c]), "1 loading now");
 });
@@ -65,7 +63,7 @@ test("MUTATION PIN: live_now wins over the swept loading_now (box, speed, pill, 
 test("MUTATION PIN: a live idle beats a stale swept 'loading' (the client stopped since the sweep)", () => {
   const c = pc({ loading_now: loadingOf("Satisfactory", 12), live_now: IDLE });
   assert.equal(nowBox(c).loading, false);
-  assert.equal(loadingNowText(c), "Loading now: nothing");
+  assert.equal(nowBox(c).text, "Loading nothing right now");
   assert.notEqual(connectionPill(c).text, "Downloading");
   assert.equal(loadingTile([c]), "Nothing loading now");
 });
@@ -80,8 +78,8 @@ test("feed ok but live_now null or missing (server before rc21): the swept loadi
   // Neither sent (feed not ok): the dash, not "nothing".
   const none = pc({ loading_now: null, live_now: null });
   assert.equal(currentLoading(none), null);
-  assert.equal(loadingNowText(none), "Loading now: —");
   assert.equal(nowBox(none).loading, false);
+  assert.equal(nowBox(none).text, "Loading now: —");
 });
 
 // ---------------------------------------------------------------------------

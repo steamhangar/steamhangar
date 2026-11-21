@@ -7,7 +7,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { CONTENT_PACKAGE_NAME, UNKNOWN_APP_NAME } from "../js/lib/app-names.js";
-import { appLabel, recentAppsText, loadingNowText } from "../js/lib/clients-page.js";
+import { appLabel, nowBox, recentChips } from "../js/lib/clients-page.js";
 import { gameDisplayName } from "../js/lib/game-status.js";
 import { appTitle } from "../js/lib/owned-library.js";
 import { buildDepotPresentation } from "../js/lib/depot-presentation.js";
@@ -34,12 +34,13 @@ test("a name from the server still wins over the fallback", () => {
   assert.equal(appTitle(1, null, "Owned Name"), "Owned Name");
 });
 
-test("Clients page lines never print a bare id for an unnamed app", () => {
-  const recent = recentAppsText({ recent_apps: [{ appid: 1465470, name: null, bytes_served: 0 }, { appid: 3419430, name: null, bytes_served: 0 }] });
-  assert.match(recent, /^Loaded recently: Unknown app/);
-  assert.doesNotMatch(recent, /1465470|3419430/);
-  const loading = loadingNowText({ loading_now: { loading: true, bytes_per_second: 0, apps: [{ appid: 3419430, name: null }] } });
-  assert.doesNotMatch(loading, /3419430/);
+test("Clients card chips and now box never print a bare id for an unnamed app", () => {
+  const recent = recentChips({ recent_apps: [{ appid: 1465470, name: null, bytes_served: 0 }, { appid: 3419430, name: null, bytes_served: 0 }] });
+  assert.deepEqual(recent.chips.map((c) => c.name), [UNKNOWN_APP_NAME, UNKNOWN_APP_NAME]);
+  assert.doesNotMatch(JSON.stringify(recent), /1465470|3419430/);
+  const loading = nowBox({ loading_now: { loading: true, bytes_per_second: 0, apps: [{ appid: 3419430, name: null }] } });
+  assert.equal(loading.title, UNKNOWN_APP_NAME);
+  assert.doesNotMatch(JSON.stringify(loading), /3419430/);
 });
 
 test("call sites: no `App ${id}` title fallback is left in the web sources", () => {

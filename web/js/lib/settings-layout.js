@@ -200,7 +200,7 @@ export const FIELD_META = Object.freeze({
       ["false", "Off"],
       ["true", "On"],
     ],
-    help: "Inside the download window, fetch the missing chunks of cached games the disk check found incomplete. Off: use Verify or Complete all.",
+    help: "Inside the download window, fetch the missing chunks of cached games the disk check found incomplete. Off: use Verify or Verify all.",
   },
   auto_gc: {
     label: "Auto-GC after a prefill",

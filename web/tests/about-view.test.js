@@ -35,7 +35,6 @@ import {
   coreComparison,
   describeComponent,
   describeComponents,
-  statusPresentation,
   versionCell,
 } from "../js/lib/about-view.js";
 import { STATUS_LABEL } from "../js/components/status-icon.js";
@@ -108,7 +107,7 @@ test("every display state: own word, own icon kind, the icon kind exists in the 
     assert.ok(icon in STATUS_LABEL, `${icon} must be a real createStatusIcon kind, not the "none" fallback`);
   }
   assert.deepEqual(
-    Object.fromEntries(["ok", "unreachable", "not_in_use", "unknown"].map((s) => [s, statusPresentation(s).word])),
+    Object.fromEntries(["ok", "unreachable", "not_in_use", "unknown"].map((s) => [s, describeComponent({ name: "vault-runner", status: s }).statusWord])),
     { ok: "OK", unreachable: "Unreachable", not_in_use: "Not in use", unknown: "Check" },
   );
 });
@@ -124,10 +123,9 @@ test("MUTATION TARGET: only 'unreachable' is a fault — Check / Not reported / 
 });
 
 test("an unexpected status word reads as Check, never as OK", () => {
-  assert.equal(statusPresentation("exploded").word, "Check");
-  assert.equal(statusPresentation(undefined).word, "Check");
-  assert.equal(statusPresentation("__proto__").word, "Check");
-  assert.equal(describeComponent({ name: "vault-runner", status: "exploded" }).statusWord, "Check");
+  for (const status of ["exploded", undefined, "__proto__"]) {
+    assert.equal(describeComponent({ name: "vault-runner", status }).statusWord, "Check", String(status));
+  }
 });
 
 // Review fix: a server `unknown` means vault-api looked and got a bad or
