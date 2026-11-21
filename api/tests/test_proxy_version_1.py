@@ -301,7 +301,10 @@ def test_old_proxy_without_a_marker_shows_dashes(settings: Settings) -> None:
     assert answer == ProxyAnswer(403, None)
     row = _proxy_row(settings, answer)
     assert (row.status, row.version, row.commit) == ("ok", None, None)
-    assert "names no version" in row.detail
+    assert row.detail == (
+        "Answers, and refuses a host that is not on the egress allowlist. Its refusal page names no "
+        "version: a vault-proxy image from before rc23, or the page could not be written (see the proxy's log)."
+    )
     assert "1.11.3" not in (row.version or "")
 
 

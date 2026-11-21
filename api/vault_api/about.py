@@ -486,8 +486,8 @@ def proxy_component(
         detail = "Answers, and refuses a host that is not on the egress allowlist."
         if answer.build is None:
             detail += (
-                " Its refusal page names no version: this vault-proxy image "
-                "predates version reporting."
+                " Its refusal page names no version: a vault-proxy image from "
+                "before rc23, or the page could not be written (see the proxy's log)."
             )
         elif version == INVALID_VALUE:
             detail += " Its refusal page names a version that is not valid."

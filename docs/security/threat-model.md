@@ -1320,6 +1320,14 @@ has no key by definition; user decision APP-DIST-1 / AGENT-DIST-1
 (option B, 2026-10-14). On the Public-domain profile the reverse proxy's
 forward-auth covers `/dist` if configured, like the web UI; an unpaired
 phone behind forward-auth then cannot download (LAN-only purpose).
+Since WP PROXY-VERSION-1 vault-proxy's 403 refusal page names the build
+version and commit, so `GET /v1/about` can show them. Only containers of
+the stack that reach the proxy's port 8888 (vault-api, or one the `Allow`
+lines refuse) and the Docker host see that page; the port is not
+published. It adds no new information: the same release version is in
+the image's OCI labels and in the authenticated `/v1/about`, and the
+page echoes nothing from the request (api/README.md "Component
+versions").
 There is no CORS middleware configured anywhere in `vault_api`
 (verified by search across the package) — a browser will not send the
 custom `X-Api-Key` header to `vault-api` cross-origin without a CORS

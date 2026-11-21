@@ -6722,9 +6722,11 @@ from the image's `VAULT_BUILD_VERSION`/`VAULT_BUILD_COMMIT`, checked
 against the VER-1 grammar there (a bad value is written as `invalid`, the
 Dockerfile default commit stays `unknown`). The probe reads at most 4 KiB,
 stops at that line, and checks the values again: `unknown` is `null`, a
-value outside the grammar is `"invalid"`. No marker (a proxy image from
-before rc23, or a page that could not be written): `version` and `commit`
-are `null` and `detail` says so; a proxy that does not answer stays
+value outside the grammar is `"invalid"`. No marker: `version` and
+`commit` are `null` and `detail` says "Its refusal page names no version: a
+vault-proxy image from before rc23, or the page could not be written (see
+the proxy's log)." (the entrypoint logs a WARNING when the write fails, and
+a refusal cut off before the marker reads the same); a proxy that does not answer stays
 `unreachable` with `null` values. A version page of its own was rejected
 in WP VER-2: tinyproxy 1.11.3 can serve one only for its `StatHost`, it
 runs its destination filter BEFORE that check (`process_request` in
