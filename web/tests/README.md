@@ -4184,3 +4184,21 @@ neutral 5.06:1; `--none` 5.63:1 on `--surface`, 6.25:1 on `--bg`, still
 `css-layout-foundation` (the verbatim `:root` colour list). The
 `png-diff` blind-spot test keeps the old `--dim`/`--dim-2` pair as its
 synthetic sample (it does not read the tokens).
+
+### WP WEIGHTS-1 (rc23, operator decision 2026-11-21): font weights 400/500/700 only
+
+`css-font-weights.test.js` (new, 4 tests): every weight declared in
+theme.css, kit.css and app.css (`font-weight` or the weight of a `font:`
+shorthand) is 400, 500 or 700 (or a CSS-wide keyword; `bold`/`bolder`/
+`lighter` rejected), with a non-vacuity check that all three occur; the
+legacy `.btn.primary` is 700 and `.btn` 500, like the kit's `.btn.pri` and
+`.btn`; a parser self-test. The 21 rules at 600 (19 in app.css, 2 in
+kit.css) moved to 500, and so did the three legacy `--fs-1` group labels
+at 700 (`.cflabel`, `h4.sec`, `.olabel`); the rc21 mockup's three 600
+rules follow (500); `.depot .tag` takes `.tag`'s 700 like the other
+uppercase tags. Property names and keywords are matched case-insensitively
+(own test with upper-case declarations). Android twin: the one
+`FontWeight.SemiBold` (Downloads "Loading now" row name) is `Medium`, and
+`FontWeightPinTest` scans `src/main/java` for any weight but Normal /
+Medium / Bold. Goldens change (slightly lighter labels, buttons and
+row titles; bolder legacy primary buttons) and are re-recorded separately.

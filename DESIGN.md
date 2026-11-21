@@ -169,10 +169,14 @@ with the pinned `tools/web-shot-fonts.conf`. Android uses
   (FONT-FLOOR-1, audit D-3).
 - `kit.css` uses only the tokens. `app.css` still has legacy px sizes; their
   count is pinned and may only go down.
-- **Weights:** 400 body, 500 labels, buttons, values and section heads, 700
-  the primary button and page or sheet titles. 600 survives in legacy
-  `app.css` rules and two kit rules; new rules do not add it (audit target,
-  not migrated).
+- **Weights:** only 400, 500 and 700, on the web and in the app
+  (WEIGHTS-1, pinned in `web/tests/css-font-weights.test.js` and the
+  Android `FontWeightPinTest`: `FontWeight.Normal` / `Medium` / `Bold`
+  only). 400 body, 500 labels, buttons, values, section heads and
+  emphasis, 700 the primary button and page or sheet titles. 700 also
+  marks the brand, wordmark and rail vault name, cover art titles, and
+  small badges (counter pips, uppercase tags, step numbers); a label is
+  500 at every size.
 - **Case:** labels are sentence case with no tracking (DESIGN-NITS-1,
   D-12/D-13), banner actions too. Status tags (`.tag`, `.mk`, `.os`, `.nw`)
   are badges and keep their uppercase.
@@ -250,7 +254,7 @@ Where the code differs from the audit proposal, the code is the rule:
 | D-1 status tones | the audit's proposal; "Update available" in orange everywhere (UPDATE-TONE-1, UPDATE-WORD-1) |
 | D-10 shadows `0 4px 14px` / `0 14px 30px`, toast and save bar on `--sh-2` | other values (see `tokens.json` "shadow"); `--sh-2` only above a scrim |
 | Radii: `--r-l` for sheets and popovers | `--r-l` dialogs, the legacy popover, large page cards; kit popovers `--r-m`; sheets `--r-xl` |
-| Weights 400/500/700 | target for new rules; 600 not yet migrated |
+| Weights 400/500/700 | migrated on web and Android: every 600 became 500, the legacy primary button 700 (WEIGHTS-1) |
 
 The findings and decisions are recorded in
 `docs/handover/post-0.1.0-roadmap.md`, section "Audit 2026-11-20:

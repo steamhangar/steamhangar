@@ -444,7 +444,7 @@ private fun LoadingNowBlock(model: LoadingNowModel) {
                     .semantics(mergeDescendants = true) {},
             ) {
                 Column(modifier = Modifier.weight(1f)) {
-                    Text(row.name, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+                    Text(row.name, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
                     Text(row.detail, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 Text(row.speed, style = MaterialTheme.typography.labelMedium, fontFamily = FontFamily.Monospace,
