@@ -52,7 +52,7 @@ private class PlainJobs : JobsRepository {
     override suspend fun moveJob(id: Int, position: Int): JobMoveOut = error("unused")
 }
 
-private class NoGames : GamesRepository {
+private class CpNoGames : GamesRepository {
     override suspend fun list(): List<GameSummary> = emptyList()
     override suspend fun detail(appid: Int): GameDetail = error("unused")
 }
@@ -71,7 +71,7 @@ class DownloadsControllerClientPriorityTest {
     @Test
     fun `MUTATION PIN -- the hold is asked while a job is active and kept`() = runTest {
         val repo = HoldJobs(listOf(cpJob(1, "paused"), cpJob(2, "queued"))) { HOLD }
-        val c = DownloadsController(repo, NoGames(), CpStrings())
+        val c = DownloadsController(repo, CpNoGames(), CpStrings())
         c.refreshJobsOnce()
         c.refreshClientPriorityOnce()
         assertEquals(1, repo.asked)
@@ -81,7 +81,7 @@ class DownloadsControllerClientPriorityTest {
     @Test
     fun `MUTATION PIN -- nothing is asked while no job is queued, running or paused, and a stale hold is dropped`() = runTest {
         val repo = HoldJobs(listOf(cpJob(1, "running"))) { HOLD }
-        val c = DownloadsController(repo, NoGames(), CpStrings())
+        val c = DownloadsController(repo, CpNoGames(), CpStrings())
         c.refreshJobsOnce()
         c.refreshClientPriorityOnce()
         assertEquals(HOLD, c.clientPriority)
@@ -96,7 +96,7 @@ class DownloadsControllerClientPriorityTest {
     fun `a failed read (an older server's 404) shows no hold rather than a stale one`() = runTest {
         var fail = false
         val repo = HoldJobs(listOf(cpJob(1, "paused"))) { if (fail) throw VaultApiError.NotFound("Not Found", 404) else HOLD }
-        val c = DownloadsController(repo, NoGames(), CpStrings())
+        val c = DownloadsController(repo, CpNoGames(), CpStrings())
         c.refreshJobsOnce()
         c.refreshClientPriorityOnce()
         assertEquals(HOLD, c.clientPriority)
@@ -108,7 +108,7 @@ class DownloadsControllerClientPriorityTest {
 
     @Test
     fun `a repository without the route (demo, fakes) reads as not known`() = runTest {
-        val c = DownloadsController(PlainJobs(), NoGames(), CpStrings())
+        val c = DownloadsController(PlainJobs(), CpNoGames(), CpStrings())
         c.refreshJobsOnce()
         c.refreshClientPriorityOnce()
         assertNull(c.clientPriority)
