@@ -118,6 +118,32 @@ class CacheComplete1cWiringTest {
     }
 
     @Test
+    fun `MUTATION PIN -- the grid card speaks its installed badge like the list row`() {
+        // ANDROID-INSTALLED-NITS-1, twin of web installedAriaFragment.
+        assertCalledFrom(card, "installedBadgeSpokenText(model.installedBadge, model.kind, model.installedNames)", "GameCard")
+        assertCalledFrom(card, ".semantics { if (installedSpoken != null) contentDescription = installedSpoken }", "GameCard")
+
+        // The description belongs to the badge Text itself: after the badge's
+        // `?.let`, on its Text, before any later Text or composable.
+        val code = stripComments(read(card))
+        val letCall = "installedBadgeText(model.installedBadge)?.let"
+        val letIdx = code.indexOf(letCall)
+        val semIdx = code.indexOf(".semantics { if (installedSpoken != null) contentDescription = installedSpoken }")
+        val textIdx = code.indexOf("Text(", letIdx + letCall.length)
+        val nextTextIdx = code.indexOf("Text(", textIdx + 1).let { if (it < 0) code.length else it }
+        val nextComposableIdx = COMPOSABLE_FUN.find(code, letIdx)?.range?.first ?: code.length
+        val twoEdits = "if the description moved off the installed badge Text (an a11y regression), put it back " +
+            "on the Text inside installedBadgeText(model.installedBadge)?.let; if only the code's shape changed " +
+            "(renamed variable, reformatted call), update this pin's strings"
+        assertTrue("GameCard.kt: no installedBadgeText(model.installedBadge)?.let -- $twoEdits", letIdx >= 0)
+        assertTrue(
+            "GameCard.kt: the installed-badge semantics is not on the badge Text (let=$letIdx, Text=$textIdx, " +
+                "semantics=$semIdx, next Text=$nextTextIdx, next composable=$nextComposableIdx) -- $twoEdits",
+            letIdx < textIdx && textIdx < semIdx && semIdx < nextTextIdx && semIdx < nextComposableIdx,
+        )
+    }
+
+    @Test
     fun `MUTATION PIN -- the real vault and demo mode both answer Verify`() {
         assertTrue(stripComments(read("$base/repo/JobsRepository.kt")).contains("client.prefillVerify(appids)"))
         assertTrue(stripComments(read("$base/demo/DemoRepositories.kt")).contains("state.enqueueVerify(appids)"))

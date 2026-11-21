@@ -167,6 +167,7 @@ class DetailSheetScreenshotTest {
 
         ScreenshotGoldens.capture(composeRule.onRoot(), name)
         // After the capture, so a failing check still leaves the image.
+        assertSelectedTab(tab)
         if (appid == DEMO_GROUP_PARENT_APPID) assertSheet(tab, parent.name.orEmpty()) else assertInstalledNotCached()
     }
 
@@ -200,9 +201,10 @@ class DetailSheetScreenshotTest {
         fail("the detail sheet never finished loading within $STABLE_POLL_LIMIT idles")
     }
 
-    private fun assertSheet(tab: DetailTab, title: String) {
+    /** The tab row is there and the requested tab is the selected one (every
+     * shot, ANDROID-INSTALLED-NITS-1). */
+    private fun assertSelectedTab(tab: DetailTab) {
         val res = composeRule.activity.resources
-        // The tab row is there and the requested tab is the selected one.
         val selectedLabel = when (tab) {
             DetailTab.OVERVIEW -> res.getString(R.string.detail_tab_overview)
             DetailTab.DEPOTS -> res.getString(R.string.detail_tab_depots)
@@ -213,6 +215,11 @@ class DetailSheetScreenshotTest {
             .fetchSemanticsNodes()
             .map { node -> node.config.getOrNull(SemanticsProperties.Text).orEmpty().joinToString("") { it.text } }
         assertEquals("selected tab", listOf(selectedLabel), selected)
+    }
+
+    /** The content-package group shots: Repair, and each tab's own content. */
+    private fun assertSheet(tab: DetailTab, title: String) {
+        val res = composeRule.activity.resources
         // Repair in the header on every tab (REDESIGN-1b).
         composeRule.onAllNodes(hasContentDescription(repairSpokenLabel(title))).fetchSemanticsNodes().let {
             assertTrue("no Repair button for '$title'", it.isNotEmpty())
