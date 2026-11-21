@@ -87,9 +87,6 @@ test("a depot still cached by another game is SKIPPED, not deleted (ADR-0003)", 
 });
 
 test("deleting BOTH co-owners frees the shared depot on the second call (last cached remnant)", async () => {
-  // WP CAP-503-FIX-1b: the demo hold's queued Frostline job (900003) would
-  // make the Frostline delete a 409; cancel it first.
-  await demoRequest("DELETE", "/v1/jobs/900003");
   const first = await demoRequest("DELETE", `/v1/cache/${EMBERREACH}`);
   assert.deepEqual(
     first.skipped_shared.map((s) => s.depotid),

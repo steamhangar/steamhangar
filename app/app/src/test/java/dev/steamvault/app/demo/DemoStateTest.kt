@@ -358,9 +358,6 @@ class DemoMoveJobTest {
     @Test
     fun `only a queued job carries queue_position`() {
         val state = DemoState.fresh()
-        val jobs = state.listJobSummaries(50)
-        assertTrue(jobs.filter { it.status != "queued" }.all { it.queue_position == null })
-        // WP CAP-503-FIX-1b: the demo hold seeds one queued job; it runs next.
-        assertEquals(listOf(0), jobs.filter { it.status == "queued" }.map { it.queue_position })
+        assertTrue(state.listJobSummaries(50).all { it.queue_position == null })
     }
 }

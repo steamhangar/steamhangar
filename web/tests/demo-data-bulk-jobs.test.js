@@ -35,17 +35,15 @@ test("demo: Pause all pauses every running prefill job, Resume all brings them b
   const before = await jobs();
   const targets = bulkPauseTargets(before);
   assert.ok(targets.count >= 3, `seeded running job + two new ones, got ${targets.count}`);
-  // WP CAP-503-FIX-1b: the demo hold's job is already paused (for a device).
-  const pausedBefore = bulkResumeTargets(before).length;
 
   const paused = await runBulkPause(targets, pause);
   assert.equal(bulkSummary("pause", paused).text, `Paused ${targets.count} downloads`);
   const after = await jobs();
   assert.equal(bulkBarState(after).pauseVisible, false);
-  assert.equal(bulkResumeTargets(after).length, targets.count + pausedBefore);
+  assert.equal(bulkResumeTargets(after).length, targets.count);
 
   const resumed = await runBulkResume(bulkResumeTargets(after), resume);
-  assert.equal(bulkSummary("resume", resumed).text, `Resumed ${targets.count + pausedBefore} downloads`);
+  assert.equal(bulkSummary("resume", resumed).text, `Resumed ${targets.count} downloads`);
   assert.equal(bulkResumeTargets(await jobs()).length, 0);
 });
 

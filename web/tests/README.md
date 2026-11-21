@@ -4224,7 +4224,12 @@ Review follow-up: the "pending" texts (no current hold) are neutral ("Paused
 for device priority. ...", "Queued downloads wait for device priority.");
 the wiring test also pins that a failed read after a good one drops the hold
 and that leaving the view stops the hold poll (it waits 5.6 s, the last test
-of the file); the clock is pinned under TZ=Europe/Berlin and UTC. The demo
-holds for the online agent's address (demo job 900002 paused for it, 900003
-queued, 900001 resumed by choice), so the Downloads goldens show the texts;
-the cache-delete and bulk demo tests cancel or count those jobs.
+of the file); the clock is pinned under TZ=Europe/Berlin and UTC.
+`demo-data-client-hold.test.js` (new): the demo's hold scenario
+(`resetDemoData({ clientHold: true })`; on by default in a browser demo, off
+in bare Node like the relay playtime gate): Copper Horizon's first download
+(900002) paused for the online agent's address, a GC dry run on Driftwood
+Signal (900003) queued, the running 900001 resumed by choice. While it holds
+a new prefill, cached check or GC job stays queued; after 6 job polls the
+hold ends by itself, the paused job resumes and the queue drains; Pause on
+the client-paused job makes it manual, Resume overrides the hold.
