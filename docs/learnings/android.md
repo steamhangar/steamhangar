@@ -214,3 +214,21 @@ at the end, under a dated heading, one entry each with the WP that proved it.
   An AlertDialog's modifier, in contrast, sizes the dialog surface exactly
   (BasicAlertDialog's Box propagates its min constraints).
 
+
+## 2026-11-21 — rc23 wave 2
+
+- Private top-level declarations in test files share one JVM namespace per
+  package: a private `NoIdentity` / `NoGames` fake in a new test clashed
+  with one of the same name in another test file of the package, and test
+  function names may not contain `:`. Both only fail in CI (no Gradle in
+  the devbox); grep the test package for a name before adding a fake
+  (APP-EXPERT-SWITCH-1, CAP-503-FIX-1b).
+- Robolectric tests that measure text layout need
+  `@GraphicsMode(GraphicsMode.Mode.NATIVE)`: the default LEGACY mode
+  measures about one pixel per character, so an overflow test passes even
+  against the broken layout. Add a precondition that the free-standing
+  parts really exceed the row width (APP-DL-STATS-1 re-check).
+- A `toggleable` row with an inner `Switch(onCheckedChange = null)` is one
+  semantics node; pin it with an unmerged-tree count of `Role.Switch`
+  nodes, and pin a `heightIn` minimum at a width where the text does not
+  wrap, or the assert passes without it (APP-EXPERT-SWITCH-1).
