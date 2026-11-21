@@ -2078,6 +2078,11 @@ and VERIFY-COLD-1 is prose in the Sunday-test box of the rc19.3 block.
   device(s) and the resume time; an overridden job reads "runs alongside
   <device> by your choice"; `restored` (after a restart, no device seen
   yet) must not claim a sighting; twin pins web <-> Android.
+  **Demo hold decided by orchestrator (RC23-AUTONOMOUS, operator may
+  revise), 2026-11-21:** Weg A, the demo's client-priority hold ends by
+  itself after a few job polls; while it holds, new demo downloads and GC
+  jobs stay queued (Resume overrides), then the queue drains (Weg B would
+  have ended the hold at the first enqueue).
 - **APP-EXPERT-SWITCH-1 (android, operator 2026-11-01, screenshot; rc23):**
   the "Show expert settings" switch at the bottom of Settings > About
   needs a rework: in the off state the dark track and thumb read as
