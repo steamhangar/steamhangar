@@ -64,6 +64,11 @@ const STARFALL_VOICE = 2010082;
 const STARFALL_OST = 2010084;
 const ALL_CACHED_SORTED = [AURORA, DRIFTWOOD, EMBERREACH, GLASS_MERIDIAN, STARFALL, STARFALL_VOICE, STARFALL_OST];
 const DRIFTWOOD_RUNNING_JOB_ID = 900001;
+// WP CAP-503-FIX-1b: the demo's client-priority hold seeds a paused job
+// (Glass Meridian) and a queued one (Frostline Convoy); a cache delete 409s
+// while either is active, so the deletion scenarios cancel them first.
+const HOLD_PAUSED_JOB_ID = 900002;
+const HOLD_QUEUED_JOB_ID = 900003;
 
 test("selects every cached app, sorted ascending by appid, excludes the uncached one", async () => {
   const result = await demoRequest("POST", "/v1/prefill/cached");
@@ -103,6 +108,7 @@ test("MUTATION PIN (S1, the WP 4f carry-over scenario): after deleting a game wh
 });
 
 test("S1: once BOTH co-owners are deleted the shared remnant is freed and neither game is selected any more", async () => {
+  await demoRequest("DELETE", `/v1/jobs/${HOLD_QUEUED_JOB_ID}`);
   // Delete Frostline first: Emberreach still holds content, so the shared
   // depot is skipped and Frostline is left idle/null with that one mapping.
   await demoRequest("DELETE", `/v1/cache/${FROSTLINE}`);
@@ -206,6 +212,8 @@ test("empty selection: no cached apps left ⇒ [] (never an error)", async () =>
   // Unblock Driftwood's active job first (DELETE /v1/cache/{appid} 409s
   // while a job is queued/running/paused for that app).
   await demoRequest("DELETE", `/v1/jobs/${DRIFTWOOD_RUNNING_JOB_ID}`);
+  await demoRequest("DELETE", `/v1/jobs/${HOLD_PAUSED_JOB_ID}`);
+  await demoRequest("DELETE", `/v1/jobs/${HOLD_QUEUED_JOB_ID}`);
 
   for (const appid of [AURORA, DRIFTWOOD, EMBERREACH, GLASS_MERIDIAN, STARFALL, STARFALL_VOICE, STARFALL_OST]) {
     await demoRequest("DELETE", `/v1/cache/${appid}`);

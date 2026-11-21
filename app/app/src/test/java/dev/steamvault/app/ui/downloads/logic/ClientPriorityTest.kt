@@ -132,7 +132,7 @@ class ClientPriorityTest {
 
     @Test
     fun `client-paused without a current hold -- no device, no time`() {
-        val pending = "Paused so a device loading through the cache gets the full speed. Resumes by itself once no device is loading."
+        val pending = "Paused for device priority. Resumes by itself once no device is loading."
         assertEquals(pending, clientHoldNote(job(1, "paused", "client"), null, utc))
         assertEquals(pending, clientHoldNote(job(1, "paused", "client"), idle, utc))
         assertEquals(pending, clientHoldNote(job(1, "paused", "client"), holding(clients = emptyList()), utc))
@@ -161,6 +161,8 @@ class ClientPriorityTest {
         assertEquals("Runs alongside Desk PC by your choice.", clientOverrideNote(over, holding()))
         assertEquals("Runs alongside Desk PC by your choice.", clientOverrideNote(job(2, "queued", overridden = true), holding()))
         assertEquals("Runs alongside any loading device by your choice.", clientOverrideNote(over, holding(clients = emptyList(), restored = true)))
+        // The restored guard: a stale client in a restored answer is never named.
+        assertEquals("Runs alongside any loading device by your choice.", clientOverrideNote(over, holding(restored = true)))
         assertNull(clientOverrideNote(over, idle))
         assertNull(clientOverrideNote(over, null))
         assertNull(clientOverrideNote(job(2, "running"), holding()))
@@ -178,7 +180,7 @@ class ClientPriorityTest {
             queueHoldNote(queued, holding(clients = emptyList(), restored = true), utc),
         )
         assertEquals(
-            "Queued downloads wait so a device loading through the cache gets the full speed.",
+            "Queued downloads wait for device priority.",
             queueHoldNote(queued, holding(resumeAt = null), utc),
         )
         assertNull(queueHoldNote(queued, idle, utc))

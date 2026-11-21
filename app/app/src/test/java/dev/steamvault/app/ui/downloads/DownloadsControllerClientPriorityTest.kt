@@ -11,6 +11,8 @@ import dev.steamvault.app.net.model.JobSummary
 import dev.steamvault.app.net.model.PrefillJobRef
 import dev.steamvault.app.repo.GamesRepository
 import dev.steamvault.app.repo.JobsRepository
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -111,6 +113,19 @@ class DownloadsControllerClientPriorityTest {
         val c = DownloadsController(PlainJobs(), CpNoGames(), CpStrings())
         c.refreshJobsOnce()
         c.refreshClientPriorityOnce()
+        assertNull(c.clientPriority)
+    }
+
+    @Test
+    fun `MUTATION PIN -- a stopped hold poll leaves no stale hold behind`() = runTest {
+        val repo = HoldJobs(listOf(cpJob(1, "paused"))) { HOLD }
+        val c = DownloadsController(repo, CpNoGames(), CpStrings())
+        c.refreshJobsOnce()
+        val poll = launch { c.pollClientPriorityForever() }
+        runCurrent()
+        assertEquals(HOLD, c.clientPriority)
+        poll.cancel()
+        runCurrent()
         assertNull(c.clientPriority)
     }
 }

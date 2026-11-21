@@ -4220,3 +4220,11 @@ repainted from the jobs poll). `downloads-render-plan.test.js`: a
 `pause_reason` or `client_override` change is a text patch, not a rebuild.
 `throughput-fixture.js` answers `/v1/client-priority` (nothing held). The
 Android twin pins the same literals (`ClientPriorityWebTwinTest`).
+Review follow-up: the "pending" texts (no current hold) are neutral ("Paused
+for device priority. ...", "Queued downloads wait for device priority.");
+the wiring test also pins that a failed read after a good one drops the hold
+and that leaving the view stops the hold poll (it waits 5.6 s, the last test
+of the file); the clock is pinned under TZ=Europe/Berlin and UTC. The demo
+holds for the online agent's address (demo job 900002 paused for it, 900003
+queued, 900001 resumed by choice), so the Downloads goldens show the texts;
+the cache-delete and bulk demo tests cancel or count those jobs.

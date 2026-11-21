@@ -67,6 +67,19 @@ test("holdDevices: the Clients page name, else the address; none while restored 
   assert.equal(holdDevices(null), null);
 });
 
+test("holdResumeClock is local time: 10:02Z reads 11:02 in Europe/Berlin (CET) and 10:02 in UTC", () => {
+  const saved = process.env.TZ;
+  try {
+    process.env.TZ = "Europe/Berlin";
+    assert.equal(holdResumeClock(holding()), "11:02");
+    process.env.TZ = "UTC";
+    assert.equal(holdResumeClock(holding()), "10:02");
+  } finally {
+    if (saved === undefined) delete process.env.TZ;
+    else process.env.TZ = saved;
+  }
+});
+
 test("holdResumeClock: local HH:MM of resume_at, null without a hold or a time", () => {
   assert.equal(holdResumeClock(holding()), CLOCK);
   assert.match(holdResumeClock(holding()), /^\d\d:\d\d$/);
@@ -98,7 +111,7 @@ test("MUTATION PIN: restored names no device and claims no sighting", () => {
 });
 
 test("client-paused without a current hold (answer not in yet, hold just ended): no device, no time", () => {
-  const pending = "Paused so a device loading through the cache gets the full speed. Resumes by itself once no device is loading.";
+  const pending = "Paused for device priority. Resumes by itself once no device is loading.";
   assert.equal(clientHoldNote(job(1, "paused", { pause_reason: "client" }), null), pending);
   assert.equal(clientHoldNote(job(1, "paused", { pause_reason: "client" }), idle()), pending);
   assert.equal(clientHoldNote(job(1, "paused", { pause_reason: "client" }), holding({ clients: [] })), pending);
@@ -125,6 +138,8 @@ test("MUTATION PIN: override reads 'Runs alongside <device> by your choice.' onl
   assert.equal(clientOverrideNote(over, holding()), "Runs alongside Desk PC by your choice.");
   assert.equal(clientOverrideNote(job(2, "queued", { client_override: true }), holding()), "Runs alongside Desk PC by your choice.");
   assert.equal(clientOverrideNote(over, restored()), "Runs alongside any loading device by your choice.");
+  // The restored guard: a stale client in a restored answer is never named.
+  assert.equal(clientOverrideNote(over, holding({ restored: true })), "Runs alongside any loading device by your choice.");
   assert.equal(clientOverrideNote(over, idle()), null, "no hold: nothing runs alongside anything");
   assert.equal(clientOverrideNote(over, null), null);
   assert.equal(clientOverrideNote(job(2, "running"), holding()), null, "no override");
@@ -140,7 +155,7 @@ test("MUTATION PIN: queued while holding names the device and the time; override
     queueHoldNote(queued, restored()),
     `Queued downloads wait: device priority was on before vault-api restarted, and no device has been seen loading since. They carry on at about ${CLOCK} unless one starts.`,
   );
-  assert.equal(queueHoldNote(queued, holding({ resume_at: null })), "Queued downloads wait so a device loading through the cache gets the full speed.");
+  assert.equal(queueHoldNote(queued, holding({ resume_at: null })), "Queued downloads wait for device priority.");
   assert.equal(queueHoldNote(queued, idle()), null);
   assert.equal(queueHoldNote([], holding()), null);
   assert.equal(queueHoldNote([job(5, "queued", { client_override: true })], holding()), null);

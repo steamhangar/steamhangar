@@ -39,7 +39,7 @@ export const WORDING = Object.freeze({
     "Paused to give {devices} the full speed through the cache. Resumes by itself at about {time} unless a device keeps loading. Resume runs it now, alongside {devices}.",
   heldRestored:
     "Paused for device priority before vault-api restarted. No device has been seen loading since; resumes by itself at about {time} unless one starts.",
-  heldPending: "Paused so a device loading through the cache gets the full speed. Resumes by itself once no device is loading.",
+  heldPending: "Paused for device priority. Resumes by itself once no device is loading.",
   pausingClient:
     "Pausing so a device loading through the cache gets the full speed. It resumes by itself, from the cache, not from zero.",
   overrideSeen: "Runs alongside {devices} by your choice.",
@@ -48,7 +48,7 @@ export const WORDING = Object.freeze({
     "Queued downloads wait to give {devices} the full speed through the cache. They carry on at about {time} unless a device keeps loading.",
   queueRestored:
     "Queued downloads wait: device priority was on before vault-api restarted, and no device has been seen loading since. They carry on at about {time} unless one starts.",
-  queuePending: "Queued downloads wait so a device loading through the cache gets the full speed.",
+  queuePending: "Queued downloads wait for device priority.",
 });
 
 /** Replace each `{key}` in `template` with `values[key]`. */

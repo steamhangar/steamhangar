@@ -12,7 +12,9 @@ import dev.steamvault.app.net.model.CacheSummaryOut
 import dev.steamvault.app.net.model.StorageBalanceOut
 import dev.steamvault.app.net.model.TopConsumerOut
 import dev.steamvault.app.net.model.UnmappedDepotsOut
+import dev.steamvault.app.net.model.ClientLoadOut
 import dev.steamvault.app.net.model.ClientOut
+import dev.steamvault.app.net.model.ClientPriorityOut
 import dev.steamvault.app.net.model.DeleteMemberOut
 import dev.steamvault.app.net.model.DeletePlanOut
 import dev.steamvault.app.net.model.DeletedDepotOut
@@ -42,6 +44,7 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonPrimitive
 import java.time.Instant
+import java.time.temporal.ChronoUnit
 
 /**
  * Demo mode's in-memory fixture data (WP APP-DEMO brief). The whole point of
@@ -447,11 +450,19 @@ class DemoState private constructor(
             ?: throw VaultApiError.NotFound("no such job in the demo library", 404, "job $id not found")
         return when (action) {
             JobControlAction.PAUSE -> {
+                // WP CAP-503-FIX-1a: Pause on a job paused for a device turns
+                // it into a manual pause (immediate), never a 409.
+                if (job.status == STATUS_PAUSED && job.pauseReason == "client") {
+                    job.pauseReason = "manual"
+                    return JobControlOut(job_id = id, status = job.status, outcome = "immediate", detail = "now paused manually")
+                }
                 if (job.status != STATUS_RUNNING) {
                     throw VaultApiError.Validation("job is not running", 409, "job $id is '${job.status}', cannot pause")
                 }
                 job.status = STATUS_PAUSED
                 job.pausedAt = nowIso()
+                job.pauseReason = "manual" // WP CAP-503-FIX-1b: an operator's pause
+                job.clientOverride = false // ends the override (CAP-503-FIX-1a)
                 JobControlOut(job_id = id, status = job.status, outcome = "paused", detail = "paused on request")
             }
             JobControlAction.RESUME -> {
@@ -460,6 +471,10 @@ class DemoState private constructor(
                 }
                 job.status = STATUS_RUNNING
                 job.pausedAt = null
+                // WP CAP-503-FIX-1b: a Resume during the hold (the demo always
+                // holds) overrides it for this job (operator Weg B).
+                job.pauseReason = null
+                job.clientOverride = true
                 JobControlOut(job_id = id, status = job.status, outcome = "resumed", detail = "resumed on request")
             }
             JobControlAction.CANCEL -> {
@@ -472,6 +487,29 @@ class DemoState private constructor(
                 JobControlOut(job_id = id, status = job.status, outcome = "cancelled", detail = "cancelled on request")
             }
         }
+    }
+
+    /**
+     * WP CAP-503-FIX-1b: `GET /v1/client-priority` in demo mode (web demo
+     * twin): a device -- the online demo agent's address -- loads through the
+     * cache for the whole demo session, so the runner is held, seen just now,
+     * resuming one idle gap (120 s) later. Named like the real route: the
+     * Clients page name for that address, `null` when none is set.
+     */
+    @Synchronized
+    fun clientPriority(): ClientPriorityOut {
+        val now = Instant.now().truncatedTo(ChronoUnit.SECONDS)
+        return ClientPriorityOut(
+            enabled = true,
+            holding = true,
+            since = now.minusSeconds(90L).toString(),
+            last_client_at = now.toString(),
+            resume_at = now.plusSeconds(120L).toString(),
+            idle_gap_seconds = 120,
+            clients = listOf(ClientLoadOut(addr = DEMO_HOLD_ADDR, name = clientNames[DEMO_HOLD_ADDR], miss_bytes_per_second = 9_400_000.0)),
+            paused_job_ids = jobs.filter { it.status == STATUS_PAUSED && it.pauseReason == "client" }.map { it.id }.sorted(),
+            override_job_ids = jobs.filter { it.clientOverride && (it.status == STATUS_QUEUED || it.status == STATUS_RUNNING) }.map { it.id }.sorted(),
+        )
     }
 
     /** Advances every still-active job by one tick — see class kdoc. */
@@ -1056,6 +1094,9 @@ class DemoState private constructor(
         internal const val STATUS_ERROR = "error"
         internal const val STATUS_PAUSED = "paused"
         internal const val STATUS_CANCELLED = "cancelled"
+
+        /** WP CAP-503-FIX-1b: the demo's loading device (demo-livingroom-pc). */
+        private const val DEMO_HOLD_ADDR = "10.0.0.42"
         private val ACTIVE_JOB_STATUSES = setOf(STATUS_RUNNING, STATUS_PAUSED, STATUS_QUEUED)
 
         /** What "Delete history" removes (api/vault_api/history.py). */

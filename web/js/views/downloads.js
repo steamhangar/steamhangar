@@ -2407,6 +2407,7 @@ onViewChange((view) => {
   sectionEl = null;
   trafficPoll.stop();
   holdPoll.stop(); // WP CAP-503-FIX-1b
+  state.clientPriority = null; // no stale hold text on the next visit
 });
 
 // Paint the pip immediately from whatever snapshot already exists (e.g.

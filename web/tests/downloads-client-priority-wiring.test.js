@@ -71,7 +71,7 @@ const holding = (over = {}) => ({
 });
 const notHolding = () => holding({ holding: false, since: null, resume_at: null, clients: [] });
 
-const server = { games: [], jobs: [], cp: notHolding(), cpCalls: 0 };
+const server = { games: [], jobs: [], cp: notHolding(), cpCalls: 0, cpFail: false };
 function respond(status, data) {
   const text = JSON.stringify(data);
   return { ok: status >= 200 && status < 300, status, json: async () => data, text: async () => text };
@@ -87,6 +87,7 @@ globalThis.fetch = async (url, init = {}) => {
   if (method === "GET" && p === "/v1/schedule") return respond(200, { enabled: false, window: null, sweep_include_cached: true });
   if (method === "GET" && p === "/v1/client-priority") {
     server.cpCalls += 1;
+    if (server.cpFail) return respond(500, { detail: "boom" });
     return respond(200, server.cp);
   }
   const stats = throughputFixture(u);
@@ -124,12 +125,14 @@ function reset() {
   server.games = [game(10, "Aurora"), game(11, "Borealis"), game(12, "Cirrus")];
   server.jobs = [];
   server.cp = notHolding();
+  server.cpFail = false;
 }
 const card = (s, id) => s.querySelector(`.job[data-jid="${id}"]`);
 const holdNote = (s, id) => card(s, id).querySelector('[data-role="hold-note"]');
 const clientNote = (s, id) => card(s, id).querySelector('[data-role="client-note"]');
 const queueNote = (s) => s.querySelector('[data-role="queue-hold-note"]');
 
+const PENDING = "Paused for device priority. Resumes by itself once no device is loading.";
 const HELD_SEEN = `Paused to give Desk PC the full speed through the cache. Resumes by itself at about ${CLOCK} unless a device keeps loading. Resume runs it now, alongside Desk PC.`;
 
 test("MUTATION PIN: held — a job paused for a device names it and the resume time on its card", async () => {
@@ -273,6 +276,25 @@ test("pausing for a device: the stop note says why, not 'Pause requested'", asyn
   }
 });
 
+test("MUTATION PIN: a failed read after a good one drops the hold: neutral card text, no queue note", async () => {
+  reset();
+  server.jobs = [job(1, 10, "paused", { pause_reason: "client" }), job(2, 11, "queued")];
+  server.cp = holding({ paused_job_ids: [1] });
+  try {
+    let s = await open();
+    await until(() => holdNote(s, 1).textContent === HELD_SEEN && queueNote(s).hidden === false, "held + queue note");
+    server.cpFail = true;
+    const calls = server.cpCalls;
+    s = renderDownloads(); // a mount asks the hold again at once
+    await until(() => server.cpCalls > calls, "hold asked again");
+    await until(() => holdNote(s, 1) && holdNote(s, 1).textContent === PENDING, "pending text after the failed read");
+    assert.equal(queueNote(s).hidden, true);
+    assert.equal(queueNote(s).textContent, "");
+  } finally {
+    store.stop();
+  }
+});
+
 test("MUTATION PIN: the hold is not asked while no job is queued, running or paused", async () => {
   reset();
   server.jobs = [job(8, 10, "done")];
@@ -284,6 +306,25 @@ test("MUTATION PIN: the hold is not asked while no job is queued, running or pau
     renderDownloads(); // a mount asks the hold at once, if anything is active
     await tick(60);
     assert.equal(server.cpCalls, before, "no GET /v1/client-priority with nothing active");
+  } finally {
+    store.stop();
+  }
+});
+
+// Last: it leaves the view.
+test("MUTATION PIN: leaving the view stops the hold poll", async () => {
+  reset();
+  server.jobs = [job(1, 10, "paused", { pause_reason: "client" })];
+  server.cp = holding({ paused_job_ids: [1] });
+  try {
+    const before = server.cpCalls;
+    await open();
+    await until(() => server.cpCalls > before, "hold asked while mounted");
+    (await import("../js/router.js")).navigateTo("library");
+    await tick(20);
+    const left = server.cpCalls;
+    await tick(5600); // longer than the 5 s hold poll
+    assert.equal(server.cpCalls, left, "no GET /v1/client-priority after leaving Downloads");
   } finally {
     store.stop();
   }

@@ -33,8 +33,7 @@ object ClientPriorityWording {
         "Paused to give {devices} the full speed through the cache. Resumes by itself at about {time} unless a device keeps loading. Resume runs it now, alongside {devices}."
     const val HELD_RESTORED =
         "Paused for device priority before vault-api restarted. No device has been seen loading since; resumes by itself at about {time} unless one starts."
-    const val HELD_PENDING =
-        "Paused so a device loading through the cache gets the full speed. Resumes by itself once no device is loading."
+    const val HELD_PENDING = "Paused for device priority. Resumes by itself once no device is loading."
     const val PAUSING_CLIENT =
         "Pausing so a device loading through the cache gets the full speed. It resumes by itself, from the cache, not from zero."
     const val OVERRIDE_SEEN = "Runs alongside {devices} by your choice."
@@ -43,7 +42,7 @@ object ClientPriorityWording {
         "Queued downloads wait to give {devices} the full speed through the cache. They carry on at about {time} unless a device keeps loading."
     const val QUEUE_RESTORED =
         "Queued downloads wait: device priority was on before vault-api restarted, and no device has been seen loading since. They carry on at about {time} unless one starts."
-    const val QUEUE_PENDING = "Queued downloads wait so a device loading through the cache gets the full speed."
+    const val QUEUE_PENDING = "Queued downloads wait for device priority."
 }
 
 /** The hold poll's cadence (web `CLIENT_PRIORITY_POLL_MS`): the controller

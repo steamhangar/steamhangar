@@ -194,9 +194,15 @@ class DownloadsController(
      * that appears (the first jobs poll of a visit included) gets its hold
      * text at once, like the web's nudge when a job becomes active. */
     suspend fun pollClientPriorityForever() {
-        while (true) {
-            refreshClientPriorityOnce()
-            delay(if (PollingIntervals.hasActiveJob(jobs)) CLIENT_PRIORITY_POLL_MS else IDLE_HOLD_CHECK_MS)
+        try {
+            while (true) {
+                refreshClientPriorityOnce()
+                delay(if (PollingIntervals.hasActiveJob(jobs)) CLIENT_PRIORITY_POLL_MS else IDLE_HOLD_CHECK_MS)
+            }
+        } finally {
+            // The screen stopped (left or backgrounded): no stale hold text
+            // when it starts again before the next read.
+            clientPriority = null
         }
     }
 
