@@ -163,7 +163,7 @@ class WebSurfaceTwinTest {
         // Switch: vaultSwitchColors.
         val sw = ".kit.view-settings .sw"
         assertDecl(kitCss, "kit.css", sw, "background", "var(--raised-2)", "vaultSwitchColors (uncheckedTrackColor)")
-        assertDecl(kitCss, "kit.css", sw, "border", "1px solid var(--line)", "vaultSwitchColors (uncheckedBorderColor)")
+        assertDecl(kitCss, "kit.css", sw, "border", "1px solid var(--line-strong)", "vaultSwitchColors (uncheckedBorderColor)")
         assertDecl(kitCss, "kit.css", "$sw::after", "background", "var(--dim)", "vaultSwitchColors (uncheckedThumbColor)")
         assertDecl(kitCss, "kit.css", "$sw[aria-checked=\"true\"]", "background", "var(--accent-glow)", "vaultSwitchColors (checkedTrackColor)")
         assertDecl(kitCss, "kit.css", "$sw[aria-checked=\"true\"]", "border-color", "var(--accent)", "vaultSwitchColors (checkedBorderColor)")

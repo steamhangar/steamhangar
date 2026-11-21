@@ -4202,3 +4202,23 @@ uppercase tags. Property names and keywords are matched case-insensitively
 `FontWeightPinTest` scans `src/main/java` for any weight but Normal /
 Medium / Bold. Goldens change (slightly lighter labels, buttons and
 row titles; bolder legacy primary buttons) and are re-recorded separately.
+
+### WP APP-EXPERT-SWITCH-1 (rc23, operator report 2026-11-01): the expert switch
+
+`settings-sections-wiring.test.js`: the compact-layout test (now a MUTATION
+TARGET) pins that the "Show expert settings" row, at 500px, sits in the
+About panel after the About card and directly before the trademark footer
+(`p.hint.about-legal`, now a panel child instead of the card's last line),
+and that the footer closes the panel while wide. `css-contrast.test.js` +1:
+the off `.sw` takes its edge from `--line-strong` (3.83:1 on `--bg`, 3.45:1
+on `--surface`; its `--raised-2` track is 1.40:1 and the old `--line` edge
+1.52:1), the `--dim` knob is 5.06:1 on the track. Android twins:
+`vaultSwitchColors` (`uncheckedBorderColor = VaultColors.LineStrong`,
+Robolectric `SettingsExpertSwitchTest`) and the About order in
+`SettingsScreen`. The `settings-1400` golden changes (the switch edge under
+the nav).
+
+Review follow-up: `settings-sections-wiring.test.js` +1 (MUTATION TARGET):
+a click on the row's label text (`.tx`, `data-role="expert-switch-text"`)
+toggles the switch, its storage key and the Expert nav item, the twin of
+the Android row that toggles as a whole.

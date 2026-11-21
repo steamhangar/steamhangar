@@ -99,15 +99,25 @@ class SettingsD16WiringTest {
     }
 
     @Test
-    fun `MUTATION PIN -- the expert switch is the last item of the About panel`() {
+    fun `MUTATION PIN -- About panel order is the component list, the expert switch row, then the trademark line`() {
+        // WP APP-EXPERT-SWITCH-1 (web compact: the row before the About
+        // footer): the switch never sits below the disclaimer.
         val text = code(screen)
         val start = text.indexOf("\"about\" -> {")
         check(start >= 0) { "expected an About branch in SettingsScreen" }
         val about = text.indexOf("AboutSection(controller, scope)", start)
         val switch = text.indexOf("ExpertSwitchRow(controller.expertOn,", start)
+        val legal = text.indexOf("AboutTrademarkLine()", start)
         val next = text.indexOf("else -> {", start)
-        assertTrue("About first, then the switch, both inside the About branch", about in (start + 1) until switch && switch < next)
+        assertTrue("About first, then the switch, then the trademark line, all inside the About branch", about in (start + 1) until switch && switch < legal && legal < next)
         assertEquals("one switch only", 1, Regex("ExpertSwitchRow\\(controller").findAll(text).count())
+        assertEquals("one trademark line only", 1, Regex("(?<!fun )AboutTrademarkLine\\(\\)").findAll(text).count())
+        val section = text.indexOf("private fun AboutSection(")
+        val sectionEnd = text.indexOf("\nprivate fun ", section + 1)
+        assertTrue(
+            "the trademark string left AboutSection (it closes the panel instead)",
+            !text.substring(section, sectionEnd).contains("R.string.settings_about_trademark"),
+        )
     }
 
     @Test
