@@ -1311,7 +1311,7 @@ function buildInstalledNote() {
   const note = document.createElement("p");
   note.className = "hint tx-stale";
   note.dataset.role = "installed-note";
-  note.textContent = "Installed but not cached — no cached bytes for this game right now.";
+  note.textContent = "Installed, not cached — no cached bytes for this game right now.";
   return note;
 }
 
@@ -1321,7 +1321,7 @@ function buildInstalledNote() {
  * pre-filtered to fresh reports, so a NON-empty list here is the only
  * honest signal; this sheet never renders anything for the empty case, no
  * "not installed" claim — see lib/game-status.js's module header). The
- * `installed but not cached` note is the whole reason this feature exists:
+ * `installed, not cached` note is the whole reason this feature exists:
  * an app a client claims to have installed, with no cached bytes for it on
  * this vault's disk (bytes-only wording, matching `buildInstalledNote`'s
  * own — see that function's header for why "protecting" is the one word

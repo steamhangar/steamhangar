@@ -3708,7 +3708,7 @@ items (css/app.css "list rows: fixed columns"). Grid layouts are untouched.
   installed on (132 px, compact wording, ellipsis). A group row's package
   line sits under the name, inside the cover's height.
 - BP-L (>= 1024 px): installed-on column 210 px with the full wording
-  ("Installed on Demon", "Installed but not cached · Demon").
+  ("Installed on Demon", "Installed, not cached · Demon").
 - The installed badge's `title` and the card's aria-label name every client
   (`lib/game-status.js` `installedOnNames`), since the column truncates.
 
@@ -3748,7 +3748,7 @@ installed on a PC (`installed_on` non-empty) with no bytes in the cache.
 `lib/library-filters.js` gains the chip `installed` ("Installed, not
 cached", right after "Not cached"). Its predicate is the card's own
 warning-badge state (`installedBadgeState` NOT_CACHED), so the chip lists
-exactly the cards with the orange "Installed but not cached · <PC>" badge
+exactly the cards with the orange "Installed, not cached · <PC>" badge
 and never a tool app. Like All/Cached/Not cached/Downloading/Failed it is
 always shown, with 0 when nothing matches (`installed_on` is on every
 GameSummary since AG-1; only the optional "Updates" chip depends on a
@@ -4095,3 +4095,35 @@ Operator decision 2026-11-21 (Weg A): the "Not cached" card word takes
 so word, pill and dot agree for both grey states; the card word rule is
 recorded in `docs/design/rc20/README.md`. Pins: `game-card-completeness`,
 `css-contrast` (`--none` word 4.5:1 or more on `--surface` and `--bg`).
+
+### WP DESIGN-NITS-1 (rc23, audit 2026-11-20 D-5..D-16): design nits
+
+`design-nits.test.js` (new, 14 tests, one or two per finding, static scans
+of the comment-stripped stylesheets plus the two wording sources): D-5 no
+`rgba()`/hex in app.css but the sic-ink counter-pip ink, `.toggle` and
+`.jobcard.active` gone; D-8 no px border-radius (tokens, `calc()` of a
+token, `999px`, `50%`); D-9 no padding/margin/gap literal equal to a
+`--sp-*` value, and a ratchet on the remaining px spacing literals (kit
+157, app 186, only goes down); D-10 every elevation shadow is
+`var(--sh-1)`/`var(--sh-2)` (rings excepted); D-11 the one press rule
+(scale .97, 100 ms, off under reduced motion); D-12 sentence-case labels
+and no boxes for the hero tiles, the Settings connection row and the
+Clients agent line; D-13 sentence-case banner actions, card badge and
+detail note start with the chip label "Installed, not cached"; D-15
+the toolbar DOM (= tab) order search, tools, chips, no `.lib-filters`
+wrapper and no `order`, the chips' own row (operator decision Weg A: the
+phone shows the tools above the chips too); D-16 the
+onboarding fill scales (`transform:scaleX`), never animates `width`. Every
+pin was mutation-checked in a scratch copy (13 mutations, 13 killed).
+`design-tokens-contract.test.js` +1 (tokens.json `shadow` equals theme.css
+`--sh-*`, both directions, inked from `--bg`; web-only, no Kotlin twin).
+
+Updated value pins (same pixels, now written as tokens): `css-bulk-bar-room`,
+`css-downloads-settings-layout`, `css-layout-foundation` (the `--nav-h`
+box sum resolves `--sp-*` to px), `css-mobile-overflow`, `detail-tabs`;
+`css-overlay-geometry` (one offset-free `--sh-2` on the base `.sheet`, no
+per-variant shadow), `library-toolbar` and `library-update-check-wiring`
+(D-15 DOM order), `css-mobile-overflow` (`.field label.srow` needs no
+uppercase reset any more), `css-kit-scale` (raw app.css font sizes 74 ->
+72: banner actions on the scale, a duplicate `.errline` rule removed), the "Installed, not cached" card wording in
+`game-card-installed`, `game-card-list-columns`, `game-status`, `tool-app`.

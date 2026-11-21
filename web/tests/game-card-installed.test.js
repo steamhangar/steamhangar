@@ -94,7 +94,7 @@ test("MUTATION TARGET -- buildCard: NOT_CACHED (installed, no visible bytes) bui
     const badge = card.querySelector(".instbadge");
     assert.ok(badge, "buildCard must build a .instbadge for a NOT_CACHED, installed game");
     assert.equal(badge.classList.contains("warn"), true, "NOT_CACHED must carry the .warn class (the payoff of this whole feature)");
-    assert.equal(badge.querySelector(".ibfull").textContent, "Installed but not cached · client-0");
+    assert.equal(badge.querySelector(".ibfull").textContent, "Installed, not cached · client-0");
     assert.equal(badge.querySelector(".ibcompact").textContent, "not cached · client-0");
   }));
 
@@ -109,14 +109,14 @@ test("MUTATION TARGET -- buildCard: aria-label states BOTH facts for a running d
     // dispKind is "running" here (a live job overrides cache state
     // entirely — game-status.js's dispKind), so STATUS_LABEL's word is
     // "Downloading", not "Not cached" — no collision risk, so the full
-    // "Installed but not cached" phrasing must appear verbatim.
+    // "Installed, not cached" phrasing must appear verbatim.
     const liveJob = { id: 1, appid: 2010010, type: "prefill", status: "running" };
     // last_prefill_at null: a first fill. With a completed copy the same
     // job reads "Updating" (WP WEB-FEAT-6, update-verify.test.js).
     const card = buildCard(game({ installed_on: installedOn(1), size_bytes: null, status: "idle", last_prefill_at: null }), baseCtx({ liveJob }));
     const label = card.getAttribute("aria-label");
     assert.match(label, /Downloading/);
-    assert.match(label, /Installed but not cached · client-0/);
+    assert.match(label, /Installed, not cached · client-0/);
   }));
 
 test("MUTATION TARGET -- buildCard: aria-label does NOT repeat 'not cached' when dispKind is already 'none' (STATUS_LABEL says it once already)", () =>
@@ -168,7 +168,7 @@ test("MUTATION TARGET -- patchCardVolatile: cached -> not_cached flips the .warn
     const after = card.querySelector(".instbadge");
     assert.equal(after, before, "the SAME badge node must be updated in place, not replaced");
     assert.equal(after.classList.contains("warn"), true);
-    assert.equal(after.querySelector(".ibfull").textContent, "Installed but not cached · client-0");
+    assert.equal(after.querySelector(".ibfull").textContent, "Installed, not cached · client-0");
   }));
 
 test("MUTATION TARGET -- patchCardVolatile: not_cached -> none REMOVES the badge", () =>
@@ -200,7 +200,7 @@ test("patchCardVolatile: not_cached -> not_cached (unrelated field drift) preser
     patchCardVolatile(card, game({ installed_on: installedOn(3), size_bytes: null, status: "idle" }), "none");
     const after = card.querySelector(".instbadge");
     assert.equal(after, before);
-    assert.equal(after.querySelector(".ibfull").textContent, "Installed but not cached · client-0 +2");
+    assert.equal(after.querySelector(".ibfull").textContent, "Installed, not cached · client-0 +2");
   }));
 
 test("MUTATION TARGET -- patchCardVolatile touches NO new SVG node (the protected status-icon subtree is genuinely untouched, instrumented)", () =>

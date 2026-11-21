@@ -46,7 +46,7 @@
  *
  * **WP LIB-FILTER-INST-1: "Installed, not cached".** Games an agent reports
  * as installed on a PC (`installed_on` non-empty) with no bytes in the
- * cache — exactly the cards that show the orange "Installed but not cached
+ * cache — exactly the cards that show the orange "Installed, not cached
  * · <PC>" badge (lib/game-status.js `installedBadgeState` NOT_CACHED, so a
  * tool app never counts, like its badge). A group row counts once and
  * reads the parent's own row, like every chip but "Failed". Not optional:

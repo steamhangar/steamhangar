@@ -179,7 +179,7 @@ function pillNumberText(game, kind) {
 }
 
 /** Installed-badge class for the `.instbadge` span (WP AG-2, css/app.css) —
- * `.warn` is the "installed but not cached" case this whole feature exists
+ * `.warn` is the "installed, not cached" case this whole feature exists
  * for; the plain class is purely informational. */
 function installedTagClass(state) {
   return state === INSTALLED_BADGE.NOT_CACHED ? "instbadge warn" : "instbadge";

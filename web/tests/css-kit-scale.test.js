@@ -50,11 +50,12 @@ const RAW_FONT_SHORTHAND = /(^|[^-\w])font\s*:\s*(?:[a-z0-9-]+\s+)*(\d*\.?\d+)px
  * comment-stripped on 2026-10-17 (WP UI-KIT-1: 172; CLIENTS-4: 167;
  * DOWNLOADS-2: 146 after the Downloads rules moved to kit.css; SETTINGS-2:
  * 134; 95 by rc22; FONT-FLOOR-1 2026-11-21: 74 after the 21 sizes below
- * 11px became var(--fs-1)). THIS NUMBER ONLY GOES DOWN: lower it in the
+ * 11px became var(--fs-1); DESIGN-NITS-1: 72, the banner actions are
+ * var(--fs-2) and a duplicate `.errline` rule is gone). THIS NUMBER ONLY GOES DOWN: lower it in the
  * same package that migrates a page onto the kit's scale tokens; never
  * raise it.
  */
-const APP_CSS_RAW_FONT_SIZE_PIN = 74;
+const APP_CSS_RAW_FONT_SIZE_PIN = 72;
 
 /** The type floor: --fs-1 (theme.css "never below this"). */
 const FONT_FLOOR_PX = 11;

@@ -39,8 +39,9 @@ mockups remain the reference for everything the kit does not show
 
 ## Token and status contract (TOKENS-SYNC-1)
 
-`docs/design/tokens.json` (colours, type scale `fs`, spacing `sp`, radii `r`)
-and `docs/design/status-vocabulary.json` (kind, word, glyph, pill tone,
+`docs/design/tokens.json` (colours `color`, `color_alpha`, `color_literal`,
+type scale `fs`, spacing `sp`, radii `r`, and the web-only groups `size`
+(touch targets) and `shadow` (elevation)) and `docs/design/status-vocabulary.json` (kind, word, glyph, pill tone,
 animated) are the one source both frontends are checked against. There is no
 generator: `web/tests/design-tokens-contract.test.js` checks `theme.css`,
 `status-icon.js` and `pill.js`, and the Android `DesignTokensContractTest` and
@@ -63,6 +64,32 @@ dot agree for those states. Current and the active states (Downloading,
 Updating, Verifying, Paused) keep the `--dim` word; their dot carries the
 tone. Every coloured card word is 4.5:1 or more on the list row's
 `--surface` and on `--bg` (`web/tests/css-contrast.test.js`).
+
+DESIGN-NITS-1 rules (audit 2026-11-20, D-5..D-16; pinned in
+`web/tests/design-nits.test.js`):
+- Labels are sentence case: section labels (`.sec`, card titles, "Loading
+  now") at `--fs-2`, key labels over a value at `--fs-1`, no uppercase
+  transform and no tracking. Status tags (`.tag`, `.mk`, `.pkgstate`, `.os`,
+  `.nw`) are badges, not labels, and keep their uppercase.
+- One separator per level: a card's border is the only frame; a block
+  inside a card is a row of it, set off by spacing or one hairline, never a
+  filled or bordered box (Downloads hero tiles, the Settings connection
+  row, the Clients agent line).
+- Elevation: `--sh-1` for what floats over the page (menus, popovers, the
+  bulk and save bars, the toast, a dragged queue row), `--sh-2` for overlays
+  above a scrim (dialogs and sheets; no offset, so it serves every sheet
+  variant). Both are inked from `--bg`; rings drawn with box-shadow are
+  borders, not elevation.
+- Press: `.btn`, `.fchip`, `.seg button` and `.card` shrink to
+  `scale(.97)` over 100 ms while pressed (not when disabled or
+  `aria-disabled`, a card not while its own status action is pressed), and
+  stay still under reduced motion.
+- Radii come from `--r-*` (controls `--r-s`, containers `--r-m`); spacing
+  from `--sp-*`; colours from the tokens (sic-ink is the counter pips' ink).
+- The rc20 page mockups are superseded where they differ on D-12 (cards in
+  cards, uppercase labels) and D-15 (the Library toolbar: search and tools
+  on the first row, the chips in their own row; DOM and tab order search,
+  tools, chips, on a phone too).
 
 ## Status (2026-10-17)
 

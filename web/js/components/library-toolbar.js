@@ -102,10 +102,12 @@ function buildHead(labels) {
 }
 
 /**
- * The toolbar row `.lib-bar`: `.lib-filters` (search + chips) and
- * `.lib-tools` (sort group, layout switch, Filters, Select). It wraps onto a
- * second row when the chips need the room; css/kit.css lets the chips wrap
- * (never clipped) and, in a narrow container, scroll inside their own row.
+ * The toolbar `.lib-bar`, in DOM (= tab) order: the search field, then
+ * `.lib-tools` (sort group, layout switch, Filters, Select), then the chips
+ * (DESIGN-NITS-1, audit D-15, operator decision Weg A: the tab order follows
+ * the visual order). Search and tools share the first row; the chips take
+ * their own full-width row under both (css/kit.css), wrap there (never
+ * clipped) and, in a narrow container, scroll inside that row.
  * @param {{query: string, layout: string, layoutLabels: Record<string,string>}} opts
  */
 function buildBar({ query, layout, layoutLabels }) {
@@ -134,9 +136,6 @@ function buildBar({ query, layout, layoutLabels }) {
   // WP MOBILE-1b: on a phone the chips scroll in one row (kit.css); the
   // overflow cue fades the edge with more chips behind it.
   watchScrollCue(chips);
-
-  const filters = el("div", "lib-filters");
-  filters.append(searchWrap, chips);
 
   // One fused box: the option select and an icon-only direction button.
   const sortWrap = el("div", "sortg");
@@ -181,7 +180,7 @@ function buildBar({ query, layout, layoutLabels }) {
 
   const tools = el("div", "lib-tools");
   tools.append(sortWrap, layoutSegs, filtersWrap, selectBtn);
-  bar.append(filters, tools);
+  bar.append(searchWrap, tools, chips);
 
   return {
     bar,

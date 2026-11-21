@@ -180,7 +180,10 @@ test("base .sheet keeps every pre-WP property value (the slide-up-from-bottom ca
   assert.match(body, /border-top-left-radius:\s*var\(--r-xl\)/);
   assert.match(body, /border-top-right-radius:\s*var\(--r-xl\)/);
   assert.match(body, /border:\s*1px solid var\(--line\);\s*border-bottom:\s*none/);
-  assert.match(body, /box-shadow:\s*0 -18px 40px -12px rgba\(0,0,0,\.7\)/, "base .sheet must keep the upward-slide shadow direction");
+  // DESIGN-NITS-1 (audit D-10): one overlay shadow token with no offset, so
+  // the same value falls on every side of the bottom sheet, the drawer and
+  // the centred card (it used to be three directional literals).
+  assert.match(body, /box-shadow:\s*var\(--sh-2\)/, "base .sheet takes the overlay shadow token");
   for (const marker of ["border-bottom-left-radius", "border-bottom-right-radius", "border-right:none", "max-height:100vh"]) {
     assert.equal(body.includes(marker), false, `base .sheet unexpectedly contains "${marker}" — a desktop-only rule leaked into the shared base`);
   }
@@ -218,7 +221,9 @@ test("BP-L's .sheet--center rounds all four corners, restores a real bottom bord
   assert.match(body, /border-bottom-left-radius:\s*var\(--r-xl\)/);
   assert.match(body, /border-bottom-right-radius:\s*var\(--r-xl\)/);
   assert.match(body, /border-bottom:\s*1px solid var\(--line\)/, "a centred card needs a real bottom edge — the base rule's border-bottom:none assumed it always sits flush against the viewport bottom");
-  assert.match(body, /box-shadow:\s*0 24px 50px/, "must use an all-around card shadow, not the base rule's upward-slide-only shadow");
+  assert.doesNotMatch(body, /box-shadow/, "the base .sheet's --sh-2 already falls on all four sides (DESIGN-NITS-1); no override");
+  assert.doesNotMatch(ruleBody(railBlock.body, ".sheet--drawer") ?? "", /box-shadow/, "the drawer keeps the base --sh-2 too");
+  assert.match(themeCss, /--sh-2:0 0 /, "--sh-2 has no offset (else the variants need their own direction again)");
   const grabBody = ruleBody(railBlock.body, ".sheet--center .grab");
   assert.ok(grabBody, ".sheet--center .grab override not found");
   assert.match(grabBody, /display\s*:\s*none/);
