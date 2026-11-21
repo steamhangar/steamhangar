@@ -13,12 +13,13 @@
  * group (lib/settings-layout.js `CARD_TITLES`, the Expert groups'
  * `EXPERT_GROUPS` titles). When the Settings container is 760px or
  * narrower (kit.css `@container settings`), the nav is a scrolling strip
- * and the switch row moves to the end of the About panel — one DOM node,
- * moved, never duplicated. Every panel stays in the DOM (inactive ones
- * `hidden`), so a draft is never lost by switching; a nav item shows a dot
- * while its section holds an unsaved draft. A section with nothing to show
- * is not built. The selected section is per mount, not remembered; the
- * expert switch is (guarded storage).
+ * and the switch row moves into the About panel, between the component card
+ * and the trademark footer — one DOM node, moved, never duplicated. Every
+ * panel stays in the DOM (inactive ones `hidden`), so a draft is never
+ * lost by switching; a nav item shows a dot while its section holds an
+ * unsaved draft. A section with nothing to show is not built. The selected
+ * section is per mount, not remembered; the expert switch is (guarded
+ * storage).
  *
  * - Normal page: only rows the API marks `expert: false`. Every
  *   `expert: true` row sits in the Expert section, reachable only while
@@ -698,14 +699,16 @@ function observeWidth(section) {
   resizeObserver.observe(section);
 }
 
-/** Wide: the switch row sits under the nav. Compact: it is the LAST item of
- * the About panel instead (never persistently visible). One DOM node, so
- * state, ids and listeners stay single. */
+/** Wide: the switch row sits under the nav. Compact: it sits in the About
+ * panel instead (never persistently visible), after the component card and
+ * before the trademark footer (WP APP-EXPERT-SWITCH-1: never below the
+ * disclaimer; Android `SettingsScreen` "about" is the twin). One DOM node,
+ * so state, ids and listeners stay single. */
 function placeExpertSwitch() {
   const row = els.expertRow;
   if (!row) return;
   const aboutPanel = aboutEls && aboutEls.panel;
-  if (compact && aboutPanel) aboutPanel.append(row);
+  if (compact && aboutPanel) aboutPanel.insertBefore(row, aboutEls.legal);
   else if (els.navEl) els.navEl.append(row);
 }
 
@@ -1504,19 +1507,19 @@ function buildAboutSection() {
   head.append(left, refreshBtn);
 
   const content = el("div", "about-content");
-  const card = fcard(
-    null,
-    head,
-    content,
-    el(
-      "p",
-      "hint",
-      "SteamHangar is a community project and is not affiliated with Valve Corporation. “Steam” is a trademark of Valve Corporation.",
-    ),
-  );
+  const card = fcard(null, head, content);
   card.dataset.group = "about";
-  panel.append(card);
-  aboutEls = { heading, panel, refreshBtn, status, content, checked };
+  // WP APP-EXPERT-SWITCH-1: the trademark line is the panel's footer, after
+  // the card, so the compact layout can put the expert switch row between
+  // the two (placeExpertSwitch) instead of below the disclaimer.
+  const legal = el(
+    "p",
+    "hint about-legal",
+    "SteamHangar is a community project and is not affiliated with Valve Corporation. “Steam” is a trademark of Valve Corporation.",
+  );
+  legal.dataset.role = "about-legal";
+  panel.append(card, legal);
+  aboutEls = { heading, panel, refreshBtn, status, content, checked, legal };
   setRefreshBusy(about.phase === "loading");
   paintAbout();
   return panel;

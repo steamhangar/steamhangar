@@ -280,15 +280,21 @@ fun vaultMenuBorder(): BorderStroke = BorderStroke(1.dp, VaultColors.Line)
 
 /**
  * Switch colours, web `.kit.view-settings .sw`: off = --raised-2 track,
- * --line edge, --dim knob (`.sw::after`); on = --accent-glow track, --accent
- * edge and knob (`.sw[aria-checked="true"]`).
+ * --line-strong edge, --dim knob (`.sw::after`); on = --accent-glow track,
+ * --accent edge and knob (`.sw[aria-checked="true"]`).
+ *
+ * WP APP-EXPERT-SWITCH-1: the off track is only 1.40:1 on --bg, so the edge
+ * is what tells the control apart; it is a control identified by its border
+ * (DESIGN.md "Contrast floors") and takes [VaultColors.LineStrong], 3.83:1
+ * on Bg and 3.45:1 on Surface (the old --line edge was 1.52:1 and the off
+ * switch read as disabled). The --dim knob is 5.06:1 on the --raised-2 track.
  */
 @Composable
 fun vaultSwitchColors(): SwitchColors =
     SwitchDefaults.colors(
         uncheckedThumbColor = VaultColors.Dim,
         uncheckedTrackColor = VaultColors.Raised2,
-        uncheckedBorderColor = VaultColors.Line,
+        uncheckedBorderColor = VaultColors.LineStrong,
         checkedThumbColor = VaultColors.Accent,
         checkedTrackColor = VaultColors.AccentGlow,
         checkedBorderColor = VaultColors.Accent,

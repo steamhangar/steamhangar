@@ -689,7 +689,9 @@
 .kit.view-settings .snav-item[aria-current="true"] .snav-state{ color:var(--accent); opacity:.8; }
 .kit.view-settings .dot{ width:7px; height:7px; border-radius:50%; background:var(--run); flex:none; display:inline-block; }
 
-/* "Show expert settings" row with the small switch. */
+/* "Show expert settings" row with the small switch. The off switch's edge
+   is --line-strong: its --raised-2 track is only 1.40:1 on --bg, so it is a
+   control identified by its border (DESIGN.md, WP APP-EXPERT-SWITCH-1). */
 .kit.view-settings .exp{
   margin-top:14px; padding:14px var(--sp-3) 0; border-top:1px solid var(--line-soft);
   display:flex; align-items:center; gap:10px; color:var(--dim); font-size:var(--fs-3);
@@ -699,7 +701,7 @@
 .kit.view-settings .exp small{ display:block; color:var(--dim-2); font-size:var(--fs-1); margin-top:2px; }
 .kit.view-settings .settings-panel > .exp{ margin-top:0; padding-inline:0; }
 .kit.view-settings .sw{
-  width:36px; height:20px; border-radius:999px; background:var(--raised-2); border:1px solid var(--line);
+  width:36px; height:20px; border-radius:999px; background:var(--raised-2); border:1px solid var(--line-strong);
   position:relative; padding:0; flex:none; cursor:pointer;
 }
 .kit.view-settings .sw::after{

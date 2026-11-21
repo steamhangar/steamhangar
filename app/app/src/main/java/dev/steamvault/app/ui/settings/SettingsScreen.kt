@@ -35,6 +35,8 @@ import dev.steamvault.app.ui.settings.logic.PlacedSettings
 import dev.steamvault.app.ui.settings.logic.StorageBalanceText
 import dev.steamvault.app.ui.settings.logic.StorageBalanceView
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.ui.semantics.Role
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.IconButton
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -122,8 +124,9 @@ import kotlinx.coroutines.launch
  * Connection actions), Download window, Disk & cleanup, Notifications (the
  * webhook form, then this device's notification permission), Other settings
  * (only with such rows), Steam (identity, library SteamID64), About (the
- * component table, then the expert switch at its end, as the web's compact
- * layout puts it) and Expert settings (only while the switch is on). Each
+ * component table, then the expert switch row, then the trademark line, as
+ * the web's compact layout puts it; WP APP-EXPERT-SWITCH-1) and Expert
+ * settings (only while the switch is on). Each
  * panel is its title + blurb ([SettingsLayout.BLURBS]) and its content;
  * drafts live in the controller, so switching panels never loses one. The
  * old "PCs and devices / Open Clients" pointer is gone (rc20 visual check).
@@ -194,11 +197,14 @@ fun SettingsScreen(
                     }
                     "about" -> {
                         AboutSection(controller, scope)
-                        // Web compact layout: the switch row is the LAST item of About.
+                        // WP APP-EXPERT-SWITCH-1 (web compact layout, the
+                        // row inserted before the About footer): the switch
+                        // row follows the component list as its own row, and
+                        // the trademark line closes the panel.
                         if (placed != null && placed.expert.values.any { it.isNotEmpty() }) {
-                            HorizontalDivider()
                             ExpertSwitchRow(controller.expertOn, dirty = dirty.expertSwitch) { on -> controller.setExpert(on) }
                         }
+                        AboutTrademarkLine()
                     }
                     else -> {
                         when {
@@ -571,21 +577,50 @@ private fun StorageBalanceCard(view: StorageBalanceView) {
     }
 }
 
-/** The "Show expert settings" row; [dirty] adds the unsaved dot while expert drafts exist (web `.exp .dot`). */
+/**
+ * The "Show expert settings" row, twin of web `.exp` (WP
+ * APP-EXPERT-SWITCH-1): a --line-soft rule above, then the label and its
+ * hint, the unsaved dot while expert drafts exist ([dirty], web `.exp .dot`)
+ * and the switch at the row's end. The whole row is one switch for TalkBack
+ * and touch (web: the switch is `aria-labelledby` the label).
+ */
 @Composable
 private fun ExpertSwitchRow(on: Boolean, dirty: Boolean, onChange: (Boolean) -> Unit) {
-    Column {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Switch(checked = on, onCheckedChange = onChange, colors = vaultSwitchColors())
-            Text(stringResource(R.string.settings_expert_switch))
+    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        HorizontalDivider(color = VaultColors.LineSoft)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag(EXPERT_SWITCH_ROW_TAG)
+                .toggleable(value = on, role = Role.Switch, onValueChange = onChange),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(stringResource(R.string.settings_expert_switch))
+                Text(
+                    stringResource(R.string.settings_expert_hint),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
             if (dirty) UnsavedDot(stringResource(R.string.settings_expert_unsaved))
+            Switch(checked = on, onCheckedChange = null, colors = vaultSwitchColors())
         }
-        Text(
-            stringResource(R.string.settings_expert_hint),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
     }
+}
+
+/** Test tag of the expert switch row (placement test). */
+internal const val EXPERT_SWITCH_ROW_TAG = "settings-expert-switch-row"
+
+/** The About panel's closing line (web `.about-legal`, after the switch row in the compact layout). */
+@Composable
+private fun AboutTrademarkLine() {
+    Text(
+        stringResource(R.string.settings_about_trademark),
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
 }
 
 /**
@@ -1109,11 +1144,6 @@ private fun AboutSection(controller: SettingsController, scope: kotlinx.coroutin
         onClick = { scope.launch { controller.loadAbout() } },
         enabled = !controller.aboutLoading,
     ) { Text(stringResource(R.string.settings_about_refresh)) }
-    Text(
-        stringResource(R.string.settings_about_trademark),
-        style = MaterialTheme.typography.bodySmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-    )
 }
 
 /**

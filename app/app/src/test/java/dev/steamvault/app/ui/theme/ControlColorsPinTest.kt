@@ -339,7 +339,7 @@ class ControlColorsPinTest {
             "BottomSheetDefaults.DragHandle(width = 38.dp, height = 4.dp, color = VaultColors.Line)",
             "val VaultDialogShape: Shape = RoundedCornerShape(18.dp)",
             "fun Modifier.vaultDialogBorder(): Modifier = this.border(1.dp, VaultColors.Line, VaultDialogShape)",
-            "uncheckedThumbColor = VaultColors.Dim,", "uncheckedTrackColor = VaultColors.Raised2,", "uncheckedBorderColor = VaultColors.Line,",
+            "uncheckedThumbColor = VaultColors.Dim,", "uncheckedTrackColor = VaultColors.Raised2,", "uncheckedBorderColor = VaultColors.LineStrong,",
             "checkedThumbColor = VaultColors.Accent,", "checkedTrackColor = VaultColors.AccentGlow,", "checkedBorderColor = VaultColors.Accent,",
             "this.background(VaultColors.Bg, RoundedCornerShape(8.dp))",
             ".border(1.dp, VaultColors.Line, RoundedCornerShape(8.dp))",
