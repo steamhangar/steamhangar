@@ -296,6 +296,53 @@ ADR that describes it:
   needs the key, which the UI stores in the browser's own `localStorage`
   (see §7).
 
+### What a foreign web page or mail can do through a LAN browser
+
+The unauthenticated relay above does not need an attacker device on the
+LAN (audit 2026-11-20, S-1). Any browser on a LAN machine whose DNS points
+the Steam CDN names at vault-core (a LAN-wide DNS rewrite, or a machine in
+the agent's hosts-file mode) can be made to send the request for it. A
+foreign page served over plain HTTP, or an HTML mail whose client loads
+remote images itself, only has to embed
+`<img src="http://lancache.steamcontent.com/depot/<id>/chunk/<hash>">` or
+call `fetch(url, {mode: "no-cors"})`. The request reaches `location
+/depot/` like a Steam client's: the guards there check only the
+`X-SteamHangar-Hop` header, the method (`GET` passes) and a trailing slash,
+and the Host fully matches the `$vault_upstream_host` allowlist, so a miss
+is fetched from Valve and stored. Appending `?nocache=1` (the
+`$vault_try_target` map under "nocache=1 bypass") sends `try_files` past an
+existing copy, so the same page can also make vault-core fetch chunks it
+already holds again, as often as the page reloads. What the page does not
+get: it cannot read the chunk (vault-core sends no CORS headers, so the
+response stays opaque to it), and it cannot choose the bytes (they come
+from Valve's edge). Addressing vault-core by its IP instead of a Steam name
+gets a HIT at most: on a miss that Host fails the allowlist and
+`location @miss` answers `403`. A page served over HTTPS does not get this
+path in current browsers: they upgrade or block plain-HTTP subresources
+(mixed content), and an `https://` request to a Steam name lands on the
+port-443 passthrough above, or is refused when `VAULT_TLS_BIND` is unset
+and 443 is not published on the LAN; either way nothing is stored.
+
+The damage class is the one accepted for the relay bullet above: in-LAN
+denial of service through disk fill and upstream bandwidth (§9, "Denial of
+service from inside the LAN"), here started from outside by a page or mail
+instead of by a device on the LAN. It is not mitigated, by operator
+decision (2026-11-21, CROSS-SITE-FILL-1 Weg A: document only). The usual
+way to recognise a cross-site request, the `Sec-Fetch-*` headers, does not
+work here: browsers send them only to potentially trustworthy targets
+(HTTPS, or `http://localhost`), never to a plain-`http://` Steam name, so
+nginx has nothing to reject on.
+Browser-side checks on public pages that reach private addresses differ by
+browser and version and are not relied on. What would change the decision
+is a header filter on `location /depot/` that is proven not to refuse a
+real client. The candidates are a `Referer`/`Origin` check, which is weak
+alone (an `<img>` or no-cors `GET` sends no `Origin`, and a page can drop
+its `Referer` with `referrerpolicy="no-referrer"`), and a `User-Agent`
+allowlist (neither an `<img>` nor a no-cors `fetch` can set that header).
+Neither is taken before the headers that the real Steam client and
+SteamPrefill send have been measured on a live install: a filter that
+guesses wrong breaks the cache for every client.
+
 ### What happens if someone exposes this to the internet — and what stops it
 
 Nothing in the code stops it. `vault-core`'s default bind is `0.0.0.0`
@@ -373,9 +420,13 @@ resolves inside `location /depot/` via `try_files`; a MISS falls through to
 `location @miss`, which round-trips to the real Steam CDN before answering
 — the `location /depot/` and `location @miss` blocks), and there is no
 cache-status response header that would make the difference explicit: the
-only `add_header` directive anywhere in this config is
-`X-LanCache-Processed-By` on the heartbeat endpoint
-(`location = /lancache-heartbeat`), not on `/depot/`. So a device that
+config's `add_header` directives sit in three other locations, none of
+them on `/depot/` or `@miss` — `X-LanCache-Processed-By` on the heartbeat
+endpoint (`location = /lancache-heartbeat`), `X-SteamHangar-Runner-Mark`
+on the prefill runner's marker request (`location ^~
+/steamhangar/runner-mark/`), and `X-Vault-Settings-Generation` /
+`X-Vault-Settings-Apply`, which `location = /health` includes from
+`vault-settings-generation.conf`. So a device that
 already knows a valid depot/chunk path can plausibly *infer* whether it is
 cached by observing response latency — a HIT skipping the upstream
 round-trip should be measurably faster than a MISS. This is stated as a
@@ -1434,7 +1485,11 @@ Named plainly, as out of scope, rather than implied to be covered:
   of ADR-0015 is not a request limit and does not mitigate it) and §7 (no
   rate limiting on the API key check) — both are real, unmitigated vectors
   available to any LAN device, named here rather than left to be
-  discovered. What IS bounded since WP SEC-FIX-4 (S-3) is pre-auth body
+  discovered. The relay path can also be started from outside the LAN, by
+  a plain-HTTP page or HTML mail opened in a LAN browser, refetches with
+  `?nocache=1` included (§1, "What a foreign web page or mail can do
+  through a LAN browser"); it stays unmitigated by operator decision
+  (2026-11-21). What IS bounded since WP SEC-FIX-4 (S-3) is pre-auth body
   handling: no body is read for a keyless `/v1` request, and every body is
   capped at 1 MiB (§1).
 - **Vulnerabilities in Valve's Steam infrastructure, or in SteamPrefill**,
@@ -1564,10 +1619,16 @@ In the interest of the review discipline this package was asked to follow:
   footprint.
 - **The HIT/MISS timing side channel described in §2** is asserted there as
   a structural near-certainty (different code paths, no cache-status
-  response header that would make the difference explicit — the only
-  `add_header` directive in the whole config is `X-LanCache-Processed-By`
-  on the heartbeat endpoint, `location = /lancache-heartbeat`, not on
-  `/depot/`), not as something this document measured. No timing
+  response header that would make the difference explicit — the config's
+  `add_header` directives sit in three other locations, none of them on
+  `/depot/` or `@miss`: `X-LanCache-Processed-By` on the heartbeat
+  (`location = /lancache-heartbeat`), `X-SteamHangar-Runner-Mark` on the
+  prefill runner's marker request (`location ^~
+  /steamhangar/runner-mark/`, answered locally with `204`), and the two
+  settings-generation headers `X-Vault-Settings-Generation` and
+  `X-Vault-Settings-Apply` that `location = /health` includes from
+  `vault-settings-generation.conf`), not as something this document
+  measured. No timing
   measurement was run against a real deployment; §2's claim could be wrong
   if, for example, connection setup or TLS-adjacent overhead outweighs the
   upstream round-trip in practice.
@@ -1587,3 +1648,10 @@ In the interest of the review discipline this package was asked to follow:
   chunk: vault-core stores whatever 200 body Valve's edge, or someone on the
   path to it, returned. That the client checks each chunk against its depot
   manifest and refuses a mismatch was not measured here.
+- **§1's browser behaviour for the cross-site cache fill** (audit S-1:
+  mixed-content upgrade or block, no `Sec-Fetch-*` to a plain-`http://`
+  Steam name, no `Origin` on an `<img>` or no-cors `GET`) is taken from the web
+  platform's specifications, not measured against a deployment with a real
+  browser. The nginx side (which guards `location /depot/` runs, the Host
+  allowlist, the `?nocache=1` map, no CORS headers) is read from
+  `core/docker/nginx.conf.template`.
