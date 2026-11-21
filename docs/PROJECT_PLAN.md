@@ -471,7 +471,19 @@ their open boxes (items 2, 7 and 11) are in section 12. Item 13 stays here.
       card), OUTPUT-TRIM-TAP-1 (dev tooling), CAP-503-FIX-1 Weg A
       (operator decision 2026-11-01: client priority, the runner pauses
       while a PC downloads), APP-EXPERT-SWITCH-1 (operator 2026-11-01),
-      candidate PROXY-VERSION-1; details in the roadmap
+      candidate PROXY-VERSION-1; details in the roadmap; audit packages
+      (audit 2026-11-20, Weg A, operator 2026-11-21): wave 0 CI-CLOCK-1
+      (red CI, own branch); wave 1 GO-LINE-1, LINE-CONTRAST-1,
+      GLYPH-CONTRAST-1, PERSONA-LOAD-1, ROLLOUT-DOC-1, BACKOFF-DEAD-1,
+      README-KEYS-1; wave 2 PILL-TONE-1, FONT-FLOOR-1, ACTIVE-STATUS-1;
+      wave 3 bundled decisions NGINX-DUP-1, FREEZE-EXIT-1, the design
+      decisions (UPDATE-TONE-1, UPDATE-WORD-1, NEUTRAL-RAMP-1,
+      DESKTOP-FONT-1, ACCENT-ROLES-1), DESIGN-MEASURE-1, CROSS-SITE-FILL-1
+      and four smaller ones (INCOMPLETE-ENDPOINT-1, VERIFY-ALL-LABEL-1,
+      OLD-SERVER-FALLBACK-1, AGENT-RC8-COMPAT-1) (open decisions in the
+      roadmap); the audit's low findings and
+      U-items are the rc23 nits, listed in the roadmap section "Audit
+      2026-11-20: findings"
     - v0.2.0 rename: D18 incl. logo, LAUNCHER-PREP-1
     - v0.3.0 privacy: D22 then LIBRARY-META-1d
     - v0.4.0 agents and devices: Weg B for agents with the installer (D6
