@@ -1,5 +1,7 @@
 package dev.steamvault.app.ui.status
 
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import dev.steamvault.app.ui.theme.VaultColors
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -88,10 +90,123 @@ class StatusIconLogicTest {
     }
 
     @Test
-    fun `unverified maps to question, muted disc, dark ink (web k-unverified, CONTRAST-1)`() {
+    fun `unverified maps to question, the none-grey disc, dark ink (web k-unverified, PILL-TONE-1)`() {
         assertEquals(GlyphShape.QUESTION, glyphFor(StatusKind.UNVERIFIED))
-        assertEquals(VaultColors.Dim2, backgroundFor(StatusKind.UNVERIFIED))
+        assertEquals(VaultColors.StatusNone, backgroundFor(StatusKind.UNVERIFIED))
         assertEquals(VaultColors.StatusIconInk, inkFor(StatusKind.UNVERIFIED))
+    }
+
+    // ---------- one tone per state (WP PILL-TONE-1, audit D-1) ----------
+    // Literal expectations, not derived from toneFor: the web twin pins the
+    // same table in web/tests/design-tokens-contract.test.js.
+
+    @Test
+    fun `the PILL-TONE-1 decisions -- verify and paused run, update and partial orange`() {
+        assertEquals(StatusTone.RUN, toneFor(StatusKind.VERIFY))
+        assertEquals(VaultColors.StatusRun, backgroundFor(StatusKind.VERIFY))
+        assertEquals(StatusTone.RUN, toneFor(StatusKind.PAUSED))
+        assertEquals(VaultColors.StatusRun, backgroundFor(StatusKind.PAUSED))
+        assertEquals(StatusTone.STALE, toneFor(StatusKind.STALE))
+        assertEquals(VaultColors.StatusStale, backgroundFor(StatusKind.STALE))
+        assertEquals(StatusTone.STALE, toneFor(StatusKind.PARTIAL))
+        assertEquals(StatusTone.NONE, toneFor(StatusKind.UNVERIFIED))
+    }
+
+    @Test
+    fun `no disc and no pill uses the accent (status colours never double as accent)`() {
+        for (kind in StatusKind.entries) {
+            assertTrue("disc of $kind", backgroundFor(kind) != VaultColors.Accent)
+            assertTrue("pill word of $kind", pillTextColor(toneFor(kind)) != VaultColors.Accent)
+        }
+    }
+
+    @Test
+    fun `the pill word takes the disc colour for every coloured tone, Dim for the neutral one`() {
+        for (tone in StatusTone.entries) {
+            val expected = if (tone == StatusTone.NEUTRAL) VaultColors.Dim else discColorFor(tone)
+            assertEquals("pill word of $tone", expected, pillTextColor(tone))
+        }
+        assertEquals(VaultColors.Dim2, discColorFor(StatusTone.NEUTRAL))
+        assertEquals(VaultColors.StatusNone, discColorFor(StatusTone.NONE))
+    }
+
+    @Test
+    fun `the pill ground is the tone at 14 percent over Surface, opaque, Raised2 only for the neutral tone (web kit css)`() {
+        assertEquals(VaultColors.Raised2, pillGroundColor(StatusTone.NEUTRAL))
+        // Web `color-mix(in srgb, var(--T) 14%, var(--surface))`, rounded to #RRGGBB.
+        val web = mapOf(
+            StatusTone.OK to 0x1B3732,
+            StatusTone.RUN to 0x31352C,
+            StatusTone.STALE to 0x302925,
+            StatusTone.DANGER to 0x32282F,
+            StatusTone.NONE to 0x212D36,
+        )
+        for ((tone, rgb) in web) {
+            val ground = pillGroundColor(tone)
+            assertEquals("ground of $tone is opaque (independent of the parent)", 1f, ground.alpha, 0.001f)
+            val argb = ground.toArgb()
+            for (shift in listOf(16, 8, 0)) {
+                val diff = kotlin.math.abs(((argb shr shift) and 0xFF) - ((rgb shr shift) and 0xFF))
+                assertTrue("ground of $tone channel $shift vs web #${"%06X".format(rgb)}", diff <= 1)
+            }
+        }
+    }
+
+    /** WCAG 2.x relative luminance of an opaque colour. */
+    private fun luminance(c: Color): Double {
+        val argb = c.toArgb()
+        fun lin(v: Int): Double {
+            val s = v / 255.0
+            return if (s <= 0.04045) s / 12.92 else Math.pow((s + 0.055) / 1.055, 2.4)
+        }
+        return 0.2126 * lin((argb shr 16) and 0xFF) + 0.7152 * lin((argb shr 8) and 0xFF) + 0.0722 * lin(argb and 0xFF)
+    }
+
+    private fun contrast(a: Color, b: Color): Double {
+        val (hi, lo) = listOf(luminance(a), luminance(b)).sortedDescending()
+        return (hi + 0.05) / (lo + 0.05)
+    }
+
+    @Test
+    fun `every pill word is 4 point 5 to 1 or more on its own ground, whatever the parent (PILL-TONE-1)`() {
+        // Web twin: css-contrast.test.js (ok 7.39, run 8.21, stale 5.16,
+        // danger 5.24, none 4.60, neutral 5.05).
+        val expected = mapOf(
+            StatusTone.OK to 7.39,
+            StatusTone.RUN to 8.21,
+            StatusTone.STALE to 5.16,
+            StatusTone.DANGER to 5.24,
+            StatusTone.NONE to 4.60,
+            StatusTone.NEUTRAL to 5.05,
+        )
+        assertEquals(StatusTone.entries.toSet(), expected.keys)
+        for (tone in StatusTone.entries) {
+            val r = contrast(pillTextColor(tone), pillGroundColor(tone))
+            assertTrue("pill word of $tone is ${"%.2f".format(r)}:1", r >= 4.5)
+            assertEquals("pill word of $tone", expected.getValue(tone), r, 0.03)
+        }
+    }
+
+    @Test
+    fun `every coloured card word is 4 point 5 to 1 or more on the card grounds (card word rule 2026-11-21)`() {
+        // GameCard.kt cardStatusWordColor: StatusStale, StatusDanger, StatusNone
+        // on the grid's Bg and the list row's Surface (web css-contrast twin).
+        for (word in listOf(VaultColors.StatusStale, VaultColors.StatusDanger, VaultColors.StatusNone)) {
+            for (ground in listOf(VaultColors.Bg, VaultColors.Surface)) {
+                val r = contrast(word, ground)
+                assertTrue("card word $word on $ground is ${"%.2f".format(r)}:1", r >= 4.5)
+            }
+        }
+        assertEquals(5.65, contrast(VaultColors.StatusNone, VaultColors.Surface), 0.01)
+        assertEquals(6.25, contrast(VaultColors.StatusNone, VaultColors.Bg), 0.01)
+    }
+
+    @Test
+    fun `the glyph ink is 4 point 5 to 1 or more on every disc`() {
+        for (kind in StatusKind.entries) {
+            val r = contrast(inkFor(kind), backgroundFor(kind))
+            assertTrue("ink on the $kind disc is ${"%.2f".format(r)}:1", r >= 4.5)
+        }
     }
 
     @Test

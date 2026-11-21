@@ -58,7 +58,8 @@
 export const NOTIFICATION_META = Object.freeze({
   job_finished: Object.freeze({ icon: "cached", tx: "tx-cached", word: "Cached" }),
   job_failed: Object.freeze({ icon: "error", tx: "tx-error", word: "Failed" }),
-  update_ready: Object.freeze({ icon: "stale", tx: "tx-stale", word: "Update ready" }),
+  // WP PILL-TONE-1 (UPDATE-WORD-1): the state's one word, "Update ready" is gone.
+  update_ready: Object.freeze({ icon: "stale", tx: "tx-stale", word: "Update available" }),
   bypass_suspected: Object.freeze({ icon: "warn", tx: "tx-warn", word: "Warning" }),
   bypass_resolved: Object.freeze({ icon: "cached", tx: "tx-cached", word: "Resolved" }),
   // WP WEB-FEAT-SUGGEST-2: the standing "update check due" entry (see

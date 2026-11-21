@@ -1634,7 +1634,7 @@ const gb = v => v==null ? "—" : (v>=100 ? v.toFixed(0) : v.toFixed(1)) + " GB"
 /* "Downloading" vs "Updating" is the item-5 split: a first-time fetch is a download, only a
    refresh of existing cache content is an update. Same word set everywhere (card, badge,
    legend, Downloads subtitle, filter chip). */
-const LABEL = {cached:"Current", running:"Downloading", updating:"Updating", stale:"Update ready",
+const LABEL = {cached:"Current", running:"Downloading", updating:"Updating", stale:"Update available",
                none:"Not cached", paused:"Paused", verify:"Verifying", error:"Failed", warn:"Warning"};
 
 /* the job that currently occupies the worker slot for this app, whatever it is doing */
@@ -1764,14 +1764,14 @@ function toast(msg, warn){
    honest chips instead of inventing a vaguer word like "Active":
      Downloading  — a job is in flight for this app (fresh OR update; both really are
                     downloads, and the card/pill still distinguishes the two)
-     Update ready — cached content exists and a newer manifest is upstream, nothing running
+     Update available — cached content exists and a newer manifest is upstream, nothing running
    The two are mutually exclusive, because a running job replaces g.st with "running". */
 const FILTERS = [
   {k:"all",    l:"All",          f:()=>true},
   {k:"cached", l:"Cached",       f:g=>g.st==="cached"},
   {k:"none",   l:"Not cached",   f:g=>g.st==="none"},
   {k:"dl",     l:"Downloading",  f:g=>!!jobFor(g.id)},
-  {k:"upd",    l:"Update ready", f:g=>g.st==="stale"}
+  {k:"upd",    l:"Update available", f:g=>g.st==="stale"}
 ];
 
 /* search and chips are ANDed: the counts always describe what the grid can show */
@@ -2058,7 +2058,7 @@ function renderDetail(){
     <div class="legend">
       <div>${sic("cached","sic-lg")}<span>Current — cached, manifest matches</span></div>
       <div>${sic("none","sic-lg")}<span>Not cached — nothing on the server</span></div>
-      <div>${sic("stale","sic-lg")}<span>Update ready — newer manifest upstream</span></div>
+      <div>${sic("stale","sic-lg")}<span>Update available — newer manifest upstream</span></div>
       <div>${sic("running","sic-lg")}<span>Downloading — fresh download in flight</span></div>
       <div>${sic("updating","sic-lg")}<span>Updating — refreshing a cached copy</span></div>
       <div>${sic("paused","sic-lg")}<span>Paused — stopped, bytes kept on cache</span></div>
@@ -2483,14 +2483,14 @@ function eta(j){
    No push in v1: the real app derives these by POLLING GET /v1/jobs, /v1/games and
    /v1/clients and diffing against the previous poll. This mockup seeds an initial set
    from the current state and pushes live items as mock events fire (a finished download,
-   a job error). kind → icon+word: done=Cached, update=Update ready, warn=Warning,
+   a job error). kind → icon+word: done=Cached, update=Update available, warn=Warning,
    error=Failed. Every item carries a WORD, not just a colour (icon audit, finding 8).
    ========================================================= */
 let NOTES = [];
 let nextNid = 1;
 const NOTE_KIND = {
   done:  {ic:"cached", tx:"tx-cached", w:"Cached"},
-  update:{ic:"stale",  tx:"tx-stale",  w:"Update ready"},
+  update:{ic:"stale",  tx:"tx-stale",  w:"Update available"},
   warn:  {ic:"warn",   tx:"tx-warn",   w:"Warning"},
   error: {ic:"error",  tx:"tx-error",  w:"Failed"}
 };

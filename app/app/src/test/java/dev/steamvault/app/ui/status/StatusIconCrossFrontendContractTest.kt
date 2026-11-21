@@ -55,7 +55,8 @@ class StatusIconCrossFrontendContractTest {
         "cached" to "Current",
         "running" to "Downloading",
         "updating" to "Updating",
-        "stale" to "Update ready",
+        // WP PILL-TONE-1 (UPDATE-WORD-1): was "Update ready".
+        "stale" to "Update available",
         "none" to "Not cached",
         "paused" to "Paused",
         "verify" to "Verifying",

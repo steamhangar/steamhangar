@@ -46,7 +46,6 @@ code{font:var(--fs-2) var(--mono);background:var(--raised);padding:1px 6px;borde
 .pill.ok{color:var(--ok);background:color-mix(in srgb,var(--ok) 14%,var(--surface))}
 .pill.run{color:var(--run);background:color-mix(in srgb,var(--run) 14%,var(--surface))}
 .pill.run i{animation:pulse 1.4s ease-in-out infinite}
-.pill.acc{color:var(--accent);background:color-mix(in srgb,var(--accent) 14%,var(--surface))}
 .pill.stale{color:var(--stale);background:color-mix(in srgb,var(--stale) 14%,var(--surface))}
 .pill.danger{color:var(--danger);background:color-mix(in srgb,var(--danger) 14%,var(--surface))}
 @keyframes pulse{50%{opacity:.35}}
@@ -59,7 +58,7 @@ code{font:var(--fs-2) var(--mono);background:var(--raised);padding:1px 6px;borde
 .sic.k-updating .rot,.sic.k-verify .rot{transform-box:fill-box;transform-origin:center;animation:turn 2.2s linear infinite}
 @keyframes turn{to{transform:rotate(360deg)}}
 @media (prefers-reduced-motion:reduce){.sic .dla,.sic .rot{animation:none}}
-.pill.none{color:var(--none)}
+.pill.none{color:var(--none);background:color-mix(in srgb,var(--none) 14%,var(--surface))}
 
 @media (prefers-reduced-motion:reduce){.pill.run i{animation:none}}
 .seg{display:inline-flex;gap:2px;padding:3px;background:var(--surface);border:1px solid var(--line-soft);border-radius:10px}
@@ -255,12 +254,12 @@ code{font:var(--fs-2) var(--mono);background:var(--raised);padding:1px 6px;borde
     <span class="pill run"><span class="sic k-running"><svg viewBox="0 0 24 24"><g class="dla"><path d="M12 3.5V13"/><path d="M7.4 8.7 12 13.3 16.6 8.7"/><path d="M12 -28.5V-19"/><path d="M7.4 -23.3 12 -18.7 16.6 -23.3"/></g></svg></span>Downloading</span>
     <span class="pill run"><span class="sic k-updating"><svg viewBox="0 0 24 24"><g class="rot"><path d="M4.5 12a7.5 7.5 0 0 1 12.8-5.3"/><path d="M17.3 2.7v4h-4"/><path d="M19.5 12a7.5 7.5 0 0 1-12.8 5.3"/><path d="M6.7 21.3v-4h4"/></g></svg></span>Updating</span>
     <span class="pill run"><span class="sic k-verify"><svg viewBox="0 0 24 24"><g class="rot"><path d="M4.5 12a7.5 7.5 0 0 1 12.8-5.3"/><path d="M17.3 2.7v4h-4"/><path d="M19.5 12a7.5 7.5 0 0 1-12.8 5.3"/><path d="M6.7 21.3v-4h4"/></g></svg></span>Verifying</span>
-    <span class="pill acc"><span class="sic "><svg viewBox="0 0 24 24"><g class="rot"><path d="M4.5 12a7.5 7.5 0 0 1 12.8-5.3"/><path d="M17.3 2.7v4h-4"/><path d="M19.5 12a7.5 7.5 0 0 1-12.8 5.3"/><path d="M6.7 21.3v-4h4"/></g></svg></span>Update ready</span>
+    <span class="pill stale"><span class="sic "><svg viewBox="0 0 24 24"><g class="rot"><path d="M4.5 12a7.5 7.5 0 0 1 12.8-5.3"/><path d="M17.3 2.7v4h-4"/><path d="M19.5 12a7.5 7.5 0 0 1-12.8 5.3"/><path d="M6.7 21.3v-4h4"/></g></svg></span>Update available</span>
     <span class="pill stale"><span class="sic "><svg viewBox="0 0 24 24"><path d="M12 5.5V13.2"/><path d="M12 17.7v.02"/></svg></span>Agent outdated</span>
     <span class="pill none"><span class="sic "><svg viewBox="0 0 24 24"><path d="M12 3.5V13"/><path d="M7.4 8.7 12 13.3 16.6 8.7"/><path d="M5 19.6h14"/></svg></span>Not cached</span>
-    <span class="pill none"><span class="sic "><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="6.6"/><path d="M12 5.4a6.6 6.6 0 0 0 0 13.2Z" fill="currentColor" stroke="none"/></svg></span>Partially cached</span>
+    <span class="pill stale"><span class="sic "><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="6.6"/><path d="M12 5.4a6.6 6.6 0 0 0 0 13.2Z" fill="currentColor" stroke="none"/></svg></span>Partially cached</span>
     <span class="pill none"><span class="sic "><svg viewBox="0 0 24 24"><path d="M9.1 9.2a2.9 2.9 0 1 1 4.3 2.6c-.9.5-1.4 1.1-1.4 2v.4"/><path d="M12 17.7v.02"/></svg></span>Not verified</span>
-    <span class="pill"><span class="sic "><svg viewBox="0 0 24 24"><path d="M9 7v10M15 7v10"/></svg></span>Paused</span>
+    <span class="pill run"><span class="sic "><svg viewBox="0 0 24 24"><path d="M9 7v10M15 7v10"/></svg></span>Paused</span>
     <span class="pill"><span class="sic "><svg viewBox="0 0 24 24"><rect x="7.5" y="7.5" width="9" height="9" rx="1.5" fill="currentColor" stroke="none"/></svg></span>Cancelled</span>
     <span class="pill danger"><span class="sic "><svg viewBox="0 0 24 24"><path d="M12 5.5V13.2"/><path d="M12 17.7v.02"/></svg></span>Failed</span>
     <span class="pill"><span class="sic "><svg viewBox="0 0 24 24"><path d="M7 12h10"/></svg></span>Idle</span>

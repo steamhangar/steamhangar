@@ -194,8 +194,14 @@ test("MUTATION TARGET -- css: the compact word in the Compact layout, the full o
 
 test("MUTATION TARGET -- css: partial is --stale and unverified neutral, neither is --ok", () => {
   assert.match(rule(themeCss, ".sic.k-partial") ?? "", /background:\s*var\(--stale\)/);
-  assert.match(rule(themeCss, ".sic.k-unverified") ?? "", /background:\s*var\(--dim-2\)/);
+  // WP PILL-TONE-1: the grey of its pill and card dot (--none), no longer --dim-2.
+  assert.match(rule(themeCss, ".sic.k-unverified") ?? "", /background:\s*var\(--none\)/);
   assert.match(rule(appCss, ".tx-partial") ?? "", /color:\s*var\(--stale\)/);
   assert.match(kitCss, /\.kit \.stt \.state\.tx-stale, \.kit \.stt \.state\.tx-partial\{ color:var\(--stale\); \}/);
   assert.doesNotMatch(themeCss, /k-(partial|unverified)[^{]*\{[^}]*--ok/);
+  // WP PILL-TONE-1: the unverified word is the --none of its pill and dot.
+  assert.match(rule(appCss, ".tx-unverified") ?? "", /color:\s*var\(--none\)/);
+  assert.match(rule(kitCss, ".kit .stt .state.tx-unverified, .kit .stt .state.tx-none") ?? "", /color:\s*var\(--none\)/);
+  // Operator 2026-11-21 (Weg A): "Not cached" too, the same rule as its dot.
+  assert.match(rule(appCss, ".tx-none") ?? "", /color:\s*var\(--none\)/);
 });

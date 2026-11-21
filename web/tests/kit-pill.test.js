@@ -42,9 +42,16 @@ test("createPill: an icon-only pill keeps the status icon's screen-reader word",
 
 test("createPill: tone defaults per kind, null means the neutral pill, unknown tones are dropped", () => {
   assert.equal(createPill({ kind: "cached", text: "Online" }).className, "pill ok");
-  assert.equal(createPill({ kind: "stale", text: "Update ready" }).className, "pill acc");
-  assert.equal(createPill({ kind: "paused", text: "Paused" }).className, "pill");
+  // WP PILL-TONE-1: the update state is orange and reads "Update available";
+  // paused is the run tone of its disc; partial the orange of its disc.
+  assert.equal(createPill({ kind: "stale", text: "Update available" }).className, "pill stale");
+  assert.equal(createPill({ kind: "paused", text: "Paused" }).className, "pill run");
+  assert.equal(createPill({ kind: "partial", text: "Partially cached" }).className, "pill stale");
+  assert.equal(createPill({ kind: "verify", text: "Verifying" }).className, "pill run");
+  assert.equal(createPill({ kind: "cancelled", text: "Cancelled" }).className, "pill");
   assert.equal(createPill({ kind: "paused", text: "Paused", tone: null }).className, "pill");
+  // No accent tone any more: status colours never double as the accent.
+  assert.equal(createPill({ kind: "stale", text: "x", tone: "acc" }).className, "pill");
   assert.equal(createPill({ kind: "cached", text: "x", tone: "purple" }).className, "pill");
   // Every status kind has a default tone entry, and every entry is a kit tone.
   assert.deepEqual(Object.keys(DEFAULT_PILL_TONE).sort(), Object.keys(STATUS_LABEL).sort());
@@ -68,6 +75,20 @@ test("renderKit: a .kit root with the demo strings, every primitive twice (full 
   assert.equal(root.querySelectorAll(".fcard").length, 2);
   assert.equal(root.querySelectorAll(".pill").length, 2 * 16, "15 vocabulary pills + the Agents tile pill, twice");
   assert.equal(root.querySelectorAll(".seg button[aria-pressed=\"true\"]").length, 2);
+});
+
+test("renderKit: every vocabulary pill takes its kind's default tone (one tone per state, PILL-TONE-1)", () => {
+  const root = renderKit();
+  let checked = 0;
+  for (const pill of root.querySelectorAll(".pill")) {
+    const kind = /\bk-([a-z]+)\b/.exec(pill.querySelector(".sic").className)[1];
+    const tone = pill.className.split(" ").slice(1).join(" ") || null;
+    assert.equal(tone, DEFAULT_PILL_TONE[kind], `kit pill "${pill.textContent}" (${kind})`);
+    checked += 1;
+  }
+  assert.equal(checked, 2 * 16);
+  assert.ok(root.textContent.includes("Update available"));
+  assert.ok(!root.textContent.includes("Update ready"), "the old update word is back on the kit page");
 });
 
 test("router: kit is a view (hidden route) and index.html has no nav button for it", () => {

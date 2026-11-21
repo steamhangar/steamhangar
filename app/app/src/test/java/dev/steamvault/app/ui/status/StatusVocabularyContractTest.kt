@@ -1,6 +1,8 @@
 package dev.steamvault.app.ui.status
 
+import dev.steamvault.app.ui.theme.VaultColors
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.boolean
 import kotlinx.serialization.json.jsonArray
@@ -16,9 +18,10 @@ import java.io.File
  * web status kind with its word, glyph, pill tone and motion; the web twin
  * (`web/tests/design-tokens-contract.test.js`) checks STATUS_LABEL,
  * KIND_GLYPH, DEFAULT_PILL_TONE and theme.css's animation rules against the
- * same file. Here [StatusKind], strings.xml, [glyphFor] and [shouldAnimate]
- * are checked against it. The pill tone has no Android counterpart yet
- * (rc21 Compose anatomy), so it is not checked here.
+ * same file. Here [StatusKind], strings.xml, [glyphFor], [shouldAnimate]
+ * and, since WP PILL-TONE-1 (one tone per state for disc and pill word),
+ * [toneFor] are checked against it; [backgroundFor] derives the disc from
+ * that tone, and the tone's colours are pinned against the web tokens below.
  *
  * Paths are relative to the module directory (`app/app`), the unit-test
  * working directory, like the other `*WebTwinTest` files.
@@ -83,6 +86,35 @@ class StatusVocabularyContractTest {
                 entry(kind)["animated"]!!.jsonPrimitive.boolean,
                 shouldAnimate(kind, animatorsEnabled = true),
             )
+        }
+    }
+
+    @Test
+    fun `toneFor equals the vocabulary tones (PILL-TONE-1)`() {
+        for (kind in StatusKind.entries) {
+            val json = entry(kind)["tone"]!!
+            val expected = if (json is JsonNull) null else json.jsonPrimitive.content
+            assertEquals("toneFor(${kind.name}) vs status-vocabulary.json", expected, toneFor(kind).wireName)
+        }
+    }
+
+    @Test
+    fun `the disc of every kind is its tone's colour, the web token of that tone (PILL-TONE-1)`() {
+        // Literal tone -> colour table, the twin of TONE_TOKEN in
+        // web/tests/design-tokens-contract.test.js (DesignTokensContractTest
+        // pins each VaultColors value to tokens.json).
+        val disc = mapOf(
+            "ok" to VaultColors.StatusOk,
+            "run" to VaultColors.StatusRun,
+            "stale" to VaultColors.StatusStale,
+            "danger" to VaultColors.StatusDanger,
+            "none" to VaultColors.StatusNone,
+            null to VaultColors.Dim2,
+        )
+        for (kind in StatusKind.entries) {
+            val json = entry(kind)["tone"]!!
+            val tone = if (json is JsonNull) null else json.jsonPrimitive.content
+            assertEquals("backgroundFor(${kind.name}) vs tone $tone", disc.getValue(tone), backgroundFor(kind))
         }
     }
 }
