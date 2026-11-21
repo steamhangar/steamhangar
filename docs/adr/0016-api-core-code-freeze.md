@@ -689,3 +689,51 @@ renders; the static includes move to `core/docker/golden/` and the image
 copies them to `/opt/vault/golden/`. The pins this ADR's addenda cite as
 "drift step 2c/2d/2e/2f" live on under the same numbers in
 `core/tests/test-template-invariants.sh` (ADR-0001 addendum 2026-11-21).
+
+## Addendum 2026-11-21 — freeze exception: client priority over the runner (WP CAP-503-FIX-1)
+
+Operator decision 2026-11-01 (CAP-503-FIX-1 Weg A, rc23 scope,
+`docs/handover/post-0.1.0-roadmap.md`): a Steam client and the prefill
+runner share the global MISS cap (16); measured the same day, the runner
+retried rejected chunks at ~37,000 503s per minute and the PC got 39 Mbit/s
+instead of ~150. The API pauses the runner while a client loads and resumes
+it after an idle gap, without losing the job's progress, and shows why.
+This is a new behaviour, not an audit finding, so it needs its own
+exception. Package CAP-503-FIX-1a (api only; the Downloads UI is
+CAP-503-FIX-1b).
+
+- api/ (scope list):
+  - `vault_api/client_priority.py` (new): the controller thread. Ticks every
+    5 s only while a job is queued/running or client-paused; reads the live
+    ring's "now" window for non-runner MISS bytes (>= 512 KiB/s = a client
+    loads); holds for 120 s after the last sighting (`IDLE_GAP_SECONDS`,
+    constant, no env var). Fail-safe: event log off or runner address
+    unknown = no hold.
+  - `vault_api/jobs.py`: `PAUSE_REASON_MANUAL`/`PAUSE_REASON_CLIENT`,
+    `effective_pause_reason`, `pause_reason` in the job reads; manual pause
+    records `manual` (and turns a `client` pause into a manual one instead
+    of the old `409`); resume, cancel and `finish_job` clear it; new
+    controller helpers `has_client_priority_work`, `running_prefill_ids`,
+    `client_paused_ids`, `request_client_pause`, `withdraw_client_pause`,
+    `resume_client_paused` (all conditional, `BEGIN IMMEDIATE`).
+    `claim_next_job`, `recover_stale_jobs`, `park_paused` and
+    `ACTIVE_STATUSES` are unchanged.
+  - `vault_api/db.py`: schema v34, `jobs.pause_reason` (nullable TEXT, NULL
+    reads as manual); the per-column job step now runs on every existing
+    database.
+  - `vault_api/live_tier.py`: `runner_mark_addrs` (addresses that sent a
+    runner marker line inside the ring), so a new runner address is known
+    before the next sweep applies its marker. Traffic figures unchanged.
+  - `vault_api/worker.py`: optional `hold` gate; while it answers `True` no
+    queued job is claimed (a failing gate opens).
+  - `vault_api/main.py`: creates and starts/stops the controller, wires the
+    gate.
+  - `vault_api/routers/jobs.py`: `pause_reason` on `JobSummary`/`JobDetail`;
+    new read-only `GET /v1/client-priority`.
+- Not frozen, listed for completeness: `api/tests/test_cap_503_fix_1a.py`,
+  api/README.md ("Client priority over the prefill runner", endpoint
+  table). core/ and the runner process are untouched; the pause is the
+  existing WP 3.12 path (the cache is the progress store).
+
+Every other frozen-path change still needs its own user decision and note
+here.

@@ -687,10 +687,11 @@ route, see "Auth").
 | POST   | `/v1/prefill/cached`               | Phase 4c, WP 4c-api. **No request body.** Selects every app that currently has cache content and queues a prefill for each through the exact same path `POST /v1/prefill` uses (same dedupe, same response shape). Steam tool apps are never selected (WP API-FIX-4). `202` with a list of `{appid, job_id, status, deduplicated}`, one entry per selected app, `[]` if nothing is cached. See "Check & update all cached games" below |
 | POST   | `/v1/prefill/verify`               | WP CACHE-COMPLETE-1b. "Verify" / "Complete now". Body `{"appids": [int, ...]}` as for `POST /v1/prefill` (same `422`s, tool apps refused). Sets `needs_force = 1` for each app, then queues it through the same enqueue (same dedupe, same response). Apps whose last prefill ended `not_owned` (within 7 days) are skipped and listed in the additive `X-Skipped-Not-Owned` response header (comma-separated appids; WP NOT-OWNED-2). `202`. See "Verify and complete" below |
 | POST   | `/v1/prefill/incomplete`           | WP CACHE-COMPLETE-1b. The server-side "complete all" selection (the web and app "Verify all" send their listed ids to `/v1/prefill/verify` instead). **No request body** (ignored, like `/v1/prefill/cached`). Selects the games `GET /v1/games?incomplete=true` lists that miss at least one chunk file (`cache_missing_chunks > 0`) and handles each like `POST /v1/prefill/verify` (including the `X-Skipped-Not-Owned` skip). `202`, `[]` when nothing is incomplete. See "Verify and complete" below |
-| GET    | `/v1/jobs`                         | Recent jobs, newest first. `?limit=` 1–200, default 20 (`422` outside that range). WP D15b history filter: `?range=24h|7d|30d|all` or `?since=<UTC YYYY-MM-DDTHH:MM:SSZ>` keeps finished jobs whose finish (else start, else creation) is within it; queued/running/paused jobs are always kept; both parameters together or a malformed `since` is `422`. Without either, unchanged. Omits `log_excerpt` on purpose — this is the polling list. Includes `updated`, `up_to_date`, `summary_parse_ok` (schema v4, WP 3.3 — see "Job outcome honesty" below; `null` until the job finishes or if the summary couldn't be parsed), `gc_execute` (schema v7, WP 3.8 — `null` for a prefill job, `false`/`true` for a GC job's mode), plus `paused_at` and `stop_request` (schema v8, WP 3.12 — see "Job control" below) |
+| GET    | `/v1/jobs`                         | Recent jobs, newest first. `?limit=` 1–200, default 20 (`422` outside that range). WP D15b history filter: `?range=24h|7d|30d|all` or `?since=<UTC YYYY-MM-DDTHH:MM:SSZ>` keeps finished jobs whose finish (else start, else creation) is within it; queued/running/paused jobs are always kept; both parameters together or a malformed `since` is `422`. Without either, unchanged. Omits `log_excerpt` on purpose — this is the polling list. Includes `updated`, `up_to_date`, `summary_parse_ok` (schema v4, WP 3.3 — see "Job outcome honesty" below; `null` until the job finishes or if the summary couldn't be parsed), `gc_execute` (schema v7, WP 3.8 — `null` for a prefill job, `false`/`true` for a GC job's mode), plus `paused_at` and `stop_request` (schema v8, WP 3.12 — see "Job control" below), and `pause_reason` (schema v34, WP CAP-503-FIX-1a — `"manual"`/`"client"` while the job is paused or a pause is pending, else `null`; see "Client priority over the prefill runner" below) |
 | GET    | `/v1/jobs/{id}`                    | One job incl. `log_excerpt` plus the same `updated`/`up_to_date`/`summary_parse_ok`/`gc_execute` fields; `404` for an unknown id |
 | DELETE | `/v1/jobs/{id}`                    | **Cancel** a job (WP 3.12). `200` with `{job_id, status, outcome, detail}` — `outcome` is `"immediate"` (a queued/paused job, finalized here) or `"requested"` (a running job; the worker stops it, keep polling). `404` unknown id; `409` if the job already finished. See "Job control" below |
-| POST   | `/v1/jobs/{id}/pause`              | **Pause** a queued job (prefill or GC) or a running **prefill** job. Same response shape; `outcome` is `"immediate"` for a queued job (parked at `paused` in the request, WP WEB-FEAT-5; GC jobs since WP PAUSE-ALL-GC-1) and `"requested"` for a running one. `404` unknown id; `409` for a running GC job or a job that is already `paused` or finished |
+| POST   | `/v1/jobs/{id}/pause`              | **Pause** a queued job (prefill or GC) or a running **prefill** job. Same response shape; `outcome` is `"immediate"` for a queued job (parked at `paused` in the request, WP WEB-FEAT-5; GC jobs since WP PAUSE-ALL-GC-1) and `"requested"` for a running one. `404` unknown id; `409` for a running GC job or a job that is already `paused` or finished; a job paused with `pause_reason: "client"` is instead turned into a manual pause (`"immediate"`, WP CAP-503-FIX-1a) |
+| GET    | `/v1/client-priority`              | WP CAP-503-FIX-1a: whether the prefill runner is held for a device loading through the cache. `{enabled, holding, since, last_client_at, resume_at, idle_gap_seconds, clients: [{addr, name, miss_bytes_per_second}], paused_job_ids, runner_address_unknown}`. Read-only. See "Client priority over the prefill runner" below |
 | POST   | `/v1/jobs/{id}/resume`             | **Resume** a paused job — back to `queued`, keeping its original job id, so it runs *before* anything enqueued while it was paused. `outcome: "resumed"`. `404` unknown id; `409` if the job is not `paused` |
 | POST   | `/v1/jobs/{id}/move`               | **Reorder the queue** (WP D20) — body `{"position": n}`, n counts queued jobs only, `0` = runs next, past the end = last. Completes in the request (`outcome: "immediate"`, `queue_position` in the reply). `404` unknown id; `409` if the job is not `queued` (the running job cannot be moved); `422` for a negative position. Until a job is moved the queue is FIFO by job id (`jobs.order_key` NULL, schema v31); `GET /v1/jobs[/{id}]` carries `queue_position` (`null` unless queued) |
 | DELETE | `/v1/cache/{appid}`                | Delete this game's depot directories. `200` with `{appid, deleted_depots[], skipped_shared[], failed[], total_bytes_freed}`; `404` unknown appid or no mappings; `409` while a prefill **or GC** job for the app is queued/running/**paused** (WP 3.12); `422` for `appid < 1`; `500` if the cache-root guards refuse. **`?with_packages=true&members=<csv>`** (WP TOOL-APPS-2b) also deletes the app's content packages; `members` must be exactly the list the confirmation showed. See "Per-game deletion" and "Grouped delete" below |
@@ -2061,6 +2062,48 @@ construction older than everything enqueued while it was paused. Flipping the
 status back to `queued` therefore puts it at the **front**. (Creating a new job
 row on resume — the obvious alternative — would silently do the opposite; a
 test mutation-pins it.)
+
+### Client priority over the prefill runner (WP CAP-503-FIX-1a, schema v34)
+
+A Steam client and the prefill runner share vault-core's global MISS cap
+(16). Measured 2026-11-01: under contention the runner retried every
+rejected chunk at once (~37,000 503s per minute) and the PC got 39 Mbit/s
+instead of ~150. Operator decision (Weg A): **the PC goes first.**
+
+- **When.** A controller thread in vault-api (`vault_api/client_priority.py`)
+  looks every 5 s, but only while a job is queued or running or a job it
+  paused waits; an idle server does not read the log. It tails vault-core's
+  event log into the live ring (the one behind `/v1/throughput/live`) and adds
+  up the MISS bytes served to addresses that are not the runner in the last
+  15-20 s. At 512 KiB/s or more, a device is loading.
+- **What.** The running prefill job is paused exactly like a manual pause
+  (SteamPrefill is terminated, the job parks at `paused`, no progress is
+  lost: see "Pause = terminate" above), tagged `pause_reason: "client"`. While
+  the hold lasts the worker claims no queued job, so the next one does not
+  start just to be paused again.
+- **Until.** 120 s after the last time a device was seen loading (the idle
+  gap, a constant, no env var: about four times the live window's sampling
+  delay and long enough for the Steam client's short pauses between depots).
+  Then every job tagged `client` goes back to `queued` with its original id
+  (so it runs first again) and the queue moves.
+- **Manual pauses are never resumed automatically.** Only `client` rows are.
+  Pause on a `client`-paused job makes it a manual pause; a manual pause or
+  a cancel pending on a running job is never overwritten. Jobs paused before
+  v34 report `manual`. A manual Resume during a hold puts the job back in
+  the queue, where it waits for the hold to end.
+- **Where to see it.** `pause_reason` on `GET /v1/jobs[/{id}]`, and
+  `GET /v1/client-priority` (devices, since when, `resume_at`, paused job
+  ids).
+- **Restart.** The hold lives in memory. After a restart, jobs still tagged
+  `client` resume one idle gap later unless a device loads.
+
+Honest limits: it needs the event log (`VAULT_EVENT_LOG_PATH`); with it off
+nothing is held and leftover `client` pauses are resumed. The runner is
+recognised by its marker (runner windows, plus marker lines in the live
+ring); while a prefill runs and no marker is known, nothing is held
+(`runner_address_unknown: true`) so the runner cannot pause itself in a loop.
+A device behind the same address as the runner gets no priority. A job
+queued while nothing was queued can start and is paused on the next look.
 
 ### What a cancelled or paused prefill does NOT do
 

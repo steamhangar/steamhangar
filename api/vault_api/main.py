@@ -66,6 +66,7 @@ from vault_api.sizes import SizeCache
 from vault_api.steam_relay import RelayCache
 from vault_api.webhooks import WebhookNotifier, redact_url
 from vault_api.webui import install_security_headers, mount_web_ui
+from vault_api.client_priority import ClientPriority
 from vault_api.worker import PrefillWorker
 
 logger = logging.getLogger(__name__)
@@ -168,8 +169,17 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     webhook_notifier: WebhookNotifier = app.state.webhook_notifier
     webhook_notifier.start()
 
+    # WP CAP-503-FIX-1a: client priority over the prefill runner. Started
+    # before the worker (whose claim gate it is); its first tick waits one
+    # interval. Inert while the event log is off (vault_api/client_priority.py).
+    client_priority: ClientPriority = app.state.client_priority
+    client_priority.start()
+
     worker = PrefillWorker(
-        settings, size_cache=app.state.size_cache, webhook_notifier=webhook_notifier
+        settings,
+        size_cache=app.state.size_cache,
+        webhook_notifier=webhook_notifier,
+        hold=lambda: app.state.client_priority.holding(),
     )
     app.state.worker = worker
     worker.start()
@@ -272,6 +282,7 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
         cover_fetcher.stop()
         cover_refresher.stop()
         scheduler.stop()  # also stops the shared update-check runner
+        client_priority.stop()
         worker.stop()
         # WP 3.13: stopped LAST — a job or sweep finalized microseconds before
         # shutdown may have just enqueued an event, and this gives the
@@ -452,6 +463,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # WP GRAPH-LIVE: the in-memory live traffic tier. No thread: it tails the
     # event log inside GET /v1/throughput/live, only while somebody polls.
     app.state.live_tier = live_tier.LiveTier()
+    # WP CAP-503-FIX-1a: created here (not in the lifespan) so
+    # GET /v1/client-priority answers without one; it reads whatever
+    # app.state.live_tier is at tick time (tests swap it, CLOCK-SEAM-1).
+    app.state.client_priority = ClientPriority(settings, lambda: app.state.live_tier)
     # WP 3.5: created here rather than in the lifespan (same reasoning as
     # size_cache above) for two reasons: GET /v1/schedule needs it to answer
     # even when the scheduler is disabled or the lifespan never ran (a plain

@@ -114,6 +114,10 @@ CURRENT_SECONDS = 15
 #: depots of that cell count as "not linked to one game".
 MAX_DEPOTS_PER_ADDR_CELL = 16
 
+#: Runner marker addresses kept (WP CAP-503-FIX-1a, ``runner_mark_addrs``);
+#: the oldest is dropped beyond this, so a flood of marker lines stays bounded.
+MAX_MARK_ADDRS = 16
+
 #: Per-address counters, in this order.
 _REQ, _BYTES, _HIT, _MISS = range(4)
 
@@ -273,6 +277,9 @@ class LiveTier:
         #: The time of the first parsed line of the current tail (any line,
         #: also one older than the ring), for ``_data_from``.
         self._first_seen: float | None = None
+        #: WP CAP-503-FIX-1a: address -> newest runner marker line (epoch s)
+        #: inside the ring, at most ``MAX_MARK_ADDRS`` (``runner_mark_addrs``).
+        self._marks: dict[str, float] = {}
 
     # -- watcher ----------------------------------------------------------
 
@@ -458,6 +465,13 @@ class LiveTier:
         if self._first_seen is None:
             self._first_seen = seen_epoch
         if line.cache_status == event_sweep.STATUS_RUNNER_MARK:
+            # Never traffic. Its address is noted for the client-priority
+            # controller (WP CAP-503-FIX-1a): the runner is known from its
+            # first marker on, not only after the next sweep applied it.
+            if seen_epoch >= epoch - self._ring_seconds:
+                if line.addr not in self._marks and len(self._marks) >= MAX_MARK_ADDRS:
+                    del self._marks[min(self._marks, key=self._marks.__getitem__)]
+                self._marks[line.addr] = max(self._marks.get(line.addr, 0.0), seen_epoch)
             return None
         if seen_epoch < epoch - self._ring_seconds:
             return None  # older than the ring: persisted already
@@ -487,6 +501,7 @@ class LiveTier:
     def _clear_cells(self) -> None:
         self._cells.clear()
         self._depots.clear()
+        self._marks.clear()
 
     def _prune(self, epoch: float) -> None:
         horizon = _floor(epoch - self._ring_seconds, CELL_SECONDS)
@@ -496,6 +511,8 @@ class LiveTier:
         depot_horizon = _floor(epoch - CURRENT_SECONDS - CELL_SECONDS, CELL_SECONDS)
         for key in [k for k in self._depots if k < depot_horizon]:
             del self._depots[key]
+        for addr in [a for a, seen in self._marks.items() if seen < epoch - self._ring_seconds]:
+            del self._marks[addr]
 
     # -- reading ----------------------------------------------------------
 
@@ -713,6 +730,22 @@ class LiveTier:
             overflow_miss_bytes=overflow[_MISS],
             seconds=seconds,
         )
+
+    def runner_mark_addrs(self, now: datetime) -> frozenset[str]:
+        """Addresses that sent a runner marker line within the ring
+        (WP CAP-503-FIX-1a).
+
+        The persisted runner windows (``runner_identity.windows``) learn a new
+        runner address only when the next sweep applies its marker; this is
+        the same marker, seen as soon as the tailer reads it, so the
+        client-priority controller does not take the runner's own MISS
+        traffic for a client's. Not token-checked: a LAN host that sends the
+        marker path can only make its OWN traffic count as the runner's here,
+        which takes priority away from itself and from nobody else.
+        """
+        horizon = _epoch(now) - self._ring_seconds
+        with self._lock:
+            return frozenset(a for a, seen in self._marks.items() if seen >= horizon)
 
     def covered_from(self) -> str | None:
         with self._lock:

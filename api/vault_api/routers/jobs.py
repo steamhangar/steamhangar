@@ -29,8 +29,9 @@ from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from pydantic import BaseModel, ConfigDict, Field
 
-from vault_api import cache_completeness, deletion, tool_apps
+from vault_api import cache_completeness, client_names, deletion, tool_apps
 from vault_api import jobs as jobs_queue
+from vault_api.client_priority import ClientPriority
 from vault_api.auth import require_api_key
 from vault_api.deps import DbOpener, db_opener, get_cache_root, get_size_cache, request_now
 from vault_api.sizes import SizeCache
@@ -92,6 +93,14 @@ class JobSummary(BaseModel):
     #: a job that still says ``running`` for no visible reason. Always ``null``
     #: once the job reaches a terminal status or is parked.
     stop_request: str | None = None
+    #: Why the job is paused, or why the pending pause (``stop_request:
+    #: "pause"``) was asked for (schema v34, WP CAP-503-FIX-1a):
+    #: ``"manual"`` = an operator paused it, waits for a resume;
+    #: ``"client"`` = paused automatically while a device loads through the
+    #: cache, resumed by itself after the idle gap (``GET /v1/client-priority``
+    #: says which devices and until when). ``null`` when the job is neither
+    #: paused nor pausing. A job paused before v34 reports ``"manual"``.
+    pause_reason: Literal["manual", "client"] | None = None
     #: Place in the queue for a ``queued`` job (WP D20): ``0`` = runs next.
     #: ``null`` for every other status. Set by ``GET /v1/jobs`` and
     #: ``GET /v1/jobs/{id}``; the list itself stays newest-first.
@@ -743,3 +752,88 @@ def move_job(
         positions = jobs_queue.queue_positions(conn)
     out = _control_response(job_id, result)
     return MoveOut(**out.model_dump(), queue_position=positions.get(job_id))
+
+
+# --------------------------------------------------------------------------
+# Client priority (WP CAP-503-FIX-1a)
+# --------------------------------------------------------------------------
+
+
+class ClientLoadOut(BaseModel):
+    """One device loading from the internet through the cache."""
+
+    addr: str
+    #: The name set for this address on the Clients page, if any. The
+    #: Downloads page's ``loading_sources`` rows (``/v1/throughput/live``)
+    #: carry the full device row for the same window.
+    name: str | None = None
+    #: Its MISS bytes per second in the live "now" window.
+    miss_bytes_per_second: float
+
+
+class ClientPriorityOut(BaseModel):
+    """Client priority over the prefill runner (``vault_api/client_priority.py``)."""
+
+    #: The event log is configured (``VAULT_EVENT_LOG_PATH``); without it no
+    #: device can be seen and the runner is never held.
+    enabled: bool
+    #: The runner is held right now: the running prefill job is paused (or
+    #: being paused) with ``pause_reason: "client"`` and queued jobs wait.
+    holding: bool
+    #: When the current hold started (``null`` unless holding).
+    since: str | None
+    #: The last moment a device was seen loading.
+    last_client_at: str | None
+    #: When the hold ends if no device loads again (``null`` unless holding).
+    resume_at: str | None
+    #: The idle gap: how long no device may have loaded before the runner
+    #: carries on.
+    idle_gap_seconds: int
+    #: The devices of the last sighting, highest rate first; kept while
+    #: holding so a UI can say whom the runner waits for.
+    clients: list[ClientLoadOut]
+    #: Jobs paused with ``pause_reason: "client"`` (resumed automatically).
+    paused_job_ids: list[int]
+    #: The last check could not tell the runner's address from a device's
+    #: (no runner marker seen yet), so it did not hold the runner.
+    runner_address_unknown: bool
+
+
+@router.get("/v1/client-priority", response_model=ClientPriorityOut)
+def get_client_priority(
+    request: Request,
+    open_db: DbOpener = Depends(db_opener),
+) -> ClientPriorityOut:
+    """Whether the prefill runner is held for a loading device, and for whom
+    (WP CAP-503-FIX-1a, operator decision 2026-11-01 "client priority").
+
+    Read-only: the decision is taken by the controller's own tick, never by
+    this request. The job rows say the same per job (``pause_reason``).
+    """
+    controller: ClientPriority = request.app.state.client_priority
+    state = controller.state()
+    with open_db() as conn:
+        paused = jobs_queue.client_paused_ids(conn)
+        names = client_names.ip_names(conn) if state.clients else {}
+
+    def iso(moment: datetime | None) -> str | None:
+        return None if moment is None else jobs_queue.to_utc_iso(moment)
+
+    return ClientPriorityOut(
+        enabled=state.enabled,
+        holding=state.holding,
+        since=iso(state.since),
+        last_client_at=iso(state.last_client_at),
+        resume_at=iso(state.resume_at),
+        idle_gap_seconds=state.idle_gap_seconds,
+        clients=[
+            ClientLoadOut(
+                addr=c.addr,
+                name=client_names.resolve_address(names, c.addr).name,
+                miss_bytes_per_second=c.miss_bytes_per_second,
+            )
+            for c in state.clients
+        ],
+        paused_job_ids=paused,
+        runner_address_unknown=state.runner_address_unknown,
+    )
