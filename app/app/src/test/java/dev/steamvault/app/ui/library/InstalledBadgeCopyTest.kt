@@ -48,21 +48,43 @@ class InstalledBadgeCopyTest {
         text.replace(Regex("/\\*.*?\\*/", RegexOption.DOT_MATCHES_ALL), "")
             .replace(Regex("//.*"), "")
 
+    /** The source of [name]'s body in InstalledBadgeText.kt (comments
+     * stripped), from `fun NAME(` up to [nextDeclaration], the declaration
+     * that follows it -- tight, so a pin on one function cannot pass on a
+     * neighbour's text. */
+    private fun functionBody(name: String, nextDeclaration: String): String {
+        val text = stripComments(read("src/main/java/dev/steamvault/app/ui/library/InstalledBadgeText.kt"))
+        val start = text.indexOf("fun $name(")
+        check(start >= 0) { "expected to find $name in InstalledBadgeText.kt" }
+        val end = text.indexOf(nextDeclaration, start)
+        check(end > start) { "expected '$nextDeclaration' to follow $name in InstalledBadgeText.kt" }
+        return text.substring(start, end)
+    }
+
+    private val noSignalToNull = Regex("""InstalledBadge\.NoSignal\s*->\s*null""")
+
     @Test
     fun `MUTATION PIN -- installedBadgeText maps InstalledBadge NoSignal to the literal null, not a string`() {
-        val text = stripComments(read("src/main/java/dev/steamvault/app/ui/library/InstalledBadgeText.kt"))
-        val start = text.indexOf("fun installedBadgeText(")
-        check(start >= 0) { "expected to find installedBadgeText in InstalledBadgeText.kt" }
-        val end = text.indexOf("private fun installedLabel(", start)
-        check(end > start) { "expected installedLabel to follow installedBadgeText in InstalledBadgeText.kt" }
-        val body = text.substring(start, end)
+        val body = functionBody("installedBadgeText", "fun installedBadgeSpokenText(")
 
         assertTrue(
             "installedBadgeText's NoSignal branch must map to the literal 'null' -- a string here (even an " +
                 "innocuous one) is exactly the B2 regression: 'installed_on' == [] means NO FRESH SIGNAL, " +
                 "which covers both never-installed and agent-gone-quiet indistinguishably, so this branch " +
                 "must render NOTHING (found body:\n$body)",
-            Regex("""InstalledBadge\.NoSignal\s*->\s*null""").containsMatchIn(body),
+            noSignalToNull.containsMatchIn(body),
+        )
+    }
+
+    @Test
+    fun `MUTATION PIN -- installedDetailLineText maps InstalledBadge NoSignal to the literal null, not a string`() {
+        val body = functionBody("installedDetailLineText", "private fun installedLabel(")
+
+        assertTrue(
+            "installedDetailLineText's NoSignal branch must map to the literal 'null' -- the detail sheet's " +
+                "installed-on line must render NOTHING for 'installed_on' == [] (no fresh signal), same rule " +
+                "as installedBadgeText (found body:\n$body)",
+            noSignalToNull.containsMatchIn(body),
         )
     }
 
