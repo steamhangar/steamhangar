@@ -46,7 +46,8 @@ app/
         │   │       └── gallery/               # debug gallery screen
         │   └── res/                           # strings (English), launcher icon, XML theme
         └── test/java/dev/steamvault/app/ui/status/
-            └── StatusIconLogicTest.kt         # JVM unit tests, no device needed
+            ├── StatusIconLogicTest.kt         # JVM unit tests, no device needed
+            └── StatusIconArrowGeometry.kt     # test-only arrow geometry helpers
 ```
 
 ## Toolchain setup
