@@ -2331,6 +2331,18 @@ APP-DL-CARD-1, APP-EXPERT-SWITCH-1, CAP-503-FIX-1b (pause reason in the
 Downloads UI, web + app); one goldens round, RC23-RELEASE-NOTES-2, tag. The rc23 release notes get a section for them before the tag.
 ANDROID-TWIN-DETAIL-1 and CORE-LIVE-PARITY-1 stay rc24 candidates.
 
+**Status 2026-11-22 (v0.1.0-rc23 tagged):** release commit 1496d83
+(component versions, all three rebuilt), main CI 44963920810 green,
+`dev.sh verify full` 659/0, tag `v0.1.0-rc23` set by the orchestrator
+(RC23-AUTONOMOUS), Publish 44964396585 green, pre-release published, image
+digests checked anonymously against ghcr. Rollout Antrag A-20261122-01
+filed (schema v34 = rollback only with the update.sh dump; read_only
+services vs. the prod override to be checked by the Doku session).
+Next after the rollout: the Antrag's checks (devbox, read-only diag);
+CI-NIGHTLY-1 (first nightly with the IPv6 fix, 2026-11-22); then the
+post-tag list below (design check, ANDROID-TWIN-DETAIL-1, CORE-LIVE-PARITY-1,
+PROXY-VERSION-CHECK-1, the rc24 nits).
+
 **Status 2026-11-22 (rc23 wave 2 complete, RC23-HOLD satisfied):**
 APP-DL-STATS-1 + 1b, APP-EXPERT-SWITCH-1, CAP-503-FIX-1b, APP-DL-CARD-1 and
 RC23-RELEASE-NOTES-2 merged in `wp/rc23-wave2` after reviews PASS (each with
